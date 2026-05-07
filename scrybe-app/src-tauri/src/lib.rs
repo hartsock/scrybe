@@ -123,20 +123,32 @@ fn read_file(path: String) -> Result<String, String> {
     std::fs::read_to_string(&path).map_err(|e| e.to_string())
 }
 
-/// Write `content` to `path`, creating `<path>.bak` on the first save of each
+/// Write `content` to `path`, creating `<path>~` on the first save of each
 /// session so the original on-disk version is always recoverable.
 ///
-/// The `.bak` is written only once per path: if it already exists it is left
-/// alone, preserving the true "opened from disk" snapshot across multiple
-/// autosave cycles.
+/// The `~` backup is written only once per path: if it already exists it is
+/// left alone, preserving the true "opened from disk" snapshot across multiple
+/// autosave cycles. The backup is removed when the tab is closed via
+/// `remove_backup`.
 #[tauri::command]
 fn save_file(path: String, content: String) -> Result<(), String> {
     let p = std::path::Path::new(&path);
-    let bak = std::path::PathBuf::from(format!("{}.bak", path));
+    let bak = std::path::PathBuf::from(format!("{}~", path));
     if p.exists() && !bak.exists() {
         std::fs::copy(p, &bak).map_err(|e| format!("backup failed: {e}"))?;
     }
     std::fs::write(p, content).map_err(|e| format!("write failed: {e}"))
+}
+
+/// Remove the `<path>~` backup file when a tab is closed.
+/// Silent no-op if the backup doesn't exist.
+#[tauri::command]
+fn remove_backup(path: String) -> Result<(), String> {
+    let bak = std::path::PathBuf::from(format!("{}~", path));
+    if bak.exists() {
+        std::fs::remove_file(&bak).map_err(|e| format!("remove backup failed: {e}"))?;
+    }
+    Ok(())
 }
 
 /// Return the built-in agent registry (static list; persistence is P4.5+).
@@ -583,6 +595,7 @@ pub fn run() {
             path_type,
             read_file,
             save_file,
+            remove_backup,
             get_builtin_agents,
             set_agent_enabled,
             list_plugins,

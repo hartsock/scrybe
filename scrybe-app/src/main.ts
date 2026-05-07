@@ -241,6 +241,8 @@ function newTab(content = WELCOME): void {
 }
 
 function closeTab(id: string): void {
+  const tab = state.tabs.find(t => t.id === id);
+  if (tab?.path) invoke("remove_backup", { path: tab.path }).catch(() => {});
   state.closeTab(id);
   const active = state.activeTab();
   const content = active?.content ?? "";
