@@ -1,0 +1,99 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+/* P4.8 — VCS sidebar panel styles */
+
+.vcs-panel { padding: 6px; font-size: 12px; color: #ccc; }
+
+.vcs-remote {
+  font-size: 10px;
+  color: #666;
+  padding: 2px 0 6px;
+  word-break: break-all;
+}
+
+.vcs-section { margin-bottom: 8px; }
+
+.vcs-section-title {
+  color: #888;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 3px;
+}
+
+.vcs-entry { display: flex; gap: 6px; padding: 1px 0; }
+
+.vcs-status { color: #e8c07e; font-weight: bold; min-width: 12px; }
+
+.vcs-path {
+  color: #ccc;
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.vcs-clean { color: #4ec94e; font-size: 11px; }
+
+.vcs-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 6px 0;
+}
+
+.vcs-btn {
+  background: #3c3c3c;
+  border: 1px solid #555;
+  color: #ccc;
+  padding: 3px 8px;
+  border-radius: 3px;
+  cursor: pointer;
+  font-size: 11px;
+}
+
+.vcs-btn:hover { background: #4c4c4c; }
+
+.vcs-btn-primary {
+  background: #007acc;
+  border-color: #007acc;
+  color: #fff;
+}
+
+.vcs-btn-primary:hover { background: #005fa3; }
+
+.vcs-input {
+  background: #1e1e1e;
+  border: 1px solid #555;
+  color: #ccc;
+  padding: 3px 6px;
+  border-radius: 3px;
+  font-size: 11px;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.vcs-commit {
+  display: flex;
+  gap: 6px;
+  padding: 2px 0;
+  align-items: baseline;
+}
+
+.vcs-sha { color: #58a6ff; font-size: 11px; }
+
+.vcs-msg {
+  color: #aaa;
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.vcs-hint,
+.vcs-error {
+  color: #666;
+  font-size: 11px;
+  padding: 8px 6px;
+}
+
+.vcs-error { color: #f85149; }

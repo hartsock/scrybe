@@ -1,0 +1,12 @@
+target/
+node_modules/
+dist/
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+.idea/
+.vscode/
+*.iml
+# Tauri generated files
+src-tauri/gen/

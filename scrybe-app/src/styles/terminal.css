@@ -1,0 +1,92 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+/* P4.11 — terminal panel styles */
+
+/* Outer panel */
+#terminal-panel {
+  height: 240px;
+  min-height: 80px;
+  background: #1e1e1e;
+  border-top: 1px solid #3c3c3c;
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  position: relative;
+}
+
+/* Collapsed state: only the toolbar strip is visible */
+#terminal-panel.collapsed {
+  height: 28px;
+}
+
+/* Drag-to-resize handle (top edge of the panel) */
+#terminal-resize-handle {
+  height: 4px;
+  background: transparent;
+  cursor: ns-resize;
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 1;
+}
+
+#terminal-resize-handle:hover {
+  background: #007acc;
+}
+
+/* Toolbar strip */
+#terminal-toolbar {
+  height: 28px;
+  background: #2d2d2d;
+  display: flex;
+  align-items: center;
+  padding: 0 8px;
+  font-size: 12px;
+  color: #888;
+  gap: 8px;
+  flex-shrink: 0;
+  user-select: none;
+}
+
+#terminal-toolbar span {
+  font-family: system-ui, sans-serif;
+  letter-spacing: 0.02em;
+}
+
+#terminal-toggle {
+  margin-left: auto;
+  background: transparent;
+  border: none;
+  color: #888;
+  cursor: pointer;
+  padding: 2px 6px;
+  font-size: 11px;
+  border-radius: 3px;
+  line-height: 1;
+}
+
+#terminal-toggle:hover {
+  background: #3c3c3c;
+  color: #ccc;
+}
+
+/* xterm.js host */
+#terminal-body {
+  flex: 1;
+  overflow: hidden;
+  padding: 4px;
+}
+
+/* Hide the body when collapsed */
+#terminal-panel.collapsed #terminal-body {
+  display: none;
+}
+
+/* Ensure xterm fills the available space */
+#terminal-body .xterm {
+  height: 100%;
+}
+
+#terminal-body .xterm-viewport {
+  overflow-y: auto;
+}

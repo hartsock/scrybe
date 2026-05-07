@@ -1,0 +1,61 @@
+name: CI
+
+# Runs on self-hosted ARC runners for fast feedback on lint and tests.
+# Release builds (multi-platform installers) run on GitHub-hosted runners
+# via release.yml — those need Apple Silicon which isn't in the local farm.
+
+on:
+  push:
+    branches: ["main", "feat/**", "fix/**", "release/**"]
+  pull_request:
+    branches: ["main"]
+
+env:
+  RUST_BACKTRACE: 1
+
+jobs:
+  lint-rust:
+    name: Rust lint
+    runs-on: [self-hosted, linux]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@v2
+      - name: fmt check
+        run: cargo fmt -- --check
+      - name: clippy
+        run: cargo clippy --all-targets -- -D warnings
+
+  test-rust:
+    name: Rust tests
+    runs-on: [self-hosted, linux]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Install system deps (Tauri on Linux)
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq \
+            libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev \
+            librsvg2-dev patchelf libssl-dev pkg-config
+      - name: test (excluding scrybe-app)
+        run: cargo test --workspace --exclude scrybe-app
+
+  lint-ts:
+    name: TypeScript lint
+    runs-on: [self-hosted, linux]
+    defaults:
+      run:
+        working-directory: scrybe-app
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: scrybe-app/package-lock.json
+      - run: npm ci
+      - run: npm run build

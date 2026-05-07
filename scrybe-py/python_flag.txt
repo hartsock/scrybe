@@ -1,0 +1,3 @@
+# scrybe-py Python bindings
+# Build with: maturin develop --features python,extension-module
+# Or: maturin build --release --features python,extension-module

@@ -1,0 +1,29 @@
+[package]
+name = "scrybe-py"
+version = "0.5.20260507"
+edition = "2021"
+description = "Scrybe PyO3 bindings — scrybe._rust extension module"
+license = "Apache-2.0"
+repository = "https://github.com/hartsock/scrybe"
+
+[lib]
+name = "scrybe"
+crate-type = ["cdylib", "rlib"]
+
+[features]
+default = []
+python = ["pyo3"]
+extension-module = ["pyo3/extension-module"]
+
+[dependencies]
+scrybe-core.workspace = true
+scrybe-render.workspace = true
+anyhow.workspace = true
+thiserror.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+pyo3 = { version = "0.28", features = ["auto-initialize"], optional = true }
+
+[lints]
+workspace = true
