@@ -16,7 +16,7 @@ env:
 jobs:
   lint-rust:
     name: Rust lint
-    runs-on: [self-hosted, linux]
+    runs-on: scrybe-k3s
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -30,7 +30,7 @@ jobs:
 
   test-rust:
     name: Rust tests
-    runs-on: [self-hosted, linux]
+    runs-on: scrybe-k3s
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -46,7 +46,7 @@ jobs:
 
   lint-ts:
     name: TypeScript lint
-    runs-on: [self-hosted, linux]
+    runs-on: scrybe-k3s
     defaults:
       run:
         working-directory: scrybe-app
