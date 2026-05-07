@@ -197,6 +197,7 @@ const view = createEditor(editorEl, WELCOME, async (content) => {
       console.log("Autosave:", current.path);
       try {
         await invoke("save_file", { path: current.path, content: current.content });
+        invoke("note_autosave", { path: current.path }).catch(() => {});
         state.markClean(saveId);
         redrawTabs();
       } catch (err) {
@@ -242,7 +243,10 @@ function newTab(content = WELCOME): void {
 
 function closeTab(id: string): void {
   const tab = state.tabs.find(t => t.id === id);
-  if (tab?.path) invoke("remove_backup", { path: tab.path }).catch(() => {});
+  if (tab?.path) {
+    invoke("remove_backup", { path: tab.path }).catch(() => {});
+    invoke("unwatch_file", { path: tab.path }).catch(() => {});
+  }
   state.closeTab(id);
   const active = state.activeTab();
   const content = active?.content ?? "";
@@ -286,6 +290,7 @@ async function openFileByPath(path: string): Promise<void> {
 
     const content: string = await invoke("read_file", { path });
     state.addTab(path, content);
+    invoke("watch_file", { path }).catch(() => {});
     swapDocument(view, content);
     preview.render(ext === "mmd" ? "```mermaid\n" + content + "\n```" : content);
     redrawTabs();
@@ -338,3 +343,74 @@ setInterval(async () => {
   const path = await invoke<string | null>("poll_close_tab").catch(() => null);
   if (path !== null) closeTabByPath(path);
 }, 500);
+
+// ─── Reload: MCP-driven (poll) + OS file watcher (event) ─────────────────────
+
+async function reloadTabFromDisk(path: string): Promise<void> {
+  const tab = state.tabs.find(t => t.path === path);
+  if (!tab) return;
+  const content: string = await invoke("read_file", { path }).catch(() => "");
+  if (!content) return;
+  if (tab.isDirty) {
+    // Dirty buffer — show conflict bar instead of silently clobbering
+    showConflict(path, content);
+  } else {
+    // Clean buffer — auto-reload and toast
+    state.updateContent(tab.id, content);
+    state.markClean(tab.id);
+    if (state.activeTabId === tab.id) swapDocument(view, content);
+    preview.render(content);
+    redrawTabs();
+    showToast(`Reloaded ${path.split("/").pop()} (changed externally)`, "info");
+  }
+}
+
+// Conflict bar — shown when an external edit arrives on a dirty buffer
+let conflictPath: string | null = null;
+let conflictDiskContent: string = "";
+
+function showConflict(path: string, diskContent: string): void {
+  conflictPath = path;
+  conflictDiskContent = diskContent;
+  const bar = document.getElementById("conflict-bar")!;
+  const name = path.split("/").pop() ?? path;
+  bar.innerHTML = `
+    <span class="conflict-msg">⚠ <strong>${name}</strong> changed on disk — your buffer has unsaved edits.</span>
+    <button id="conflict-keep">Keep mine</button>
+    <button id="conflict-take">Take theirs</button>
+  `;
+  bar.style.display = "flex";
+  document.getElementById("conflict-keep")!.onclick = () => dismissConflict();
+  document.getElementById("conflict-take")!.onclick = () => applyConflictDisk();
+}
+
+function dismissConflict(): void {
+  conflictPath = null;
+  conflictDiskContent = "";
+  document.getElementById("conflict-bar")!.style.display = "none";
+}
+
+function applyConflictDisk(): void {
+  const path = conflictPath;
+  const content = conflictDiskContent;
+  dismissConflict();
+  if (!path) return;
+  const tab = state.tabs.find(t => t.path === path);
+  if (!tab) return;
+  state.updateContent(tab.id, content);
+  state.markClean(tab.id);
+  if (state.activeTabId === tab.id) swapDocument(view, content);
+  preview.render(content);
+  redrawTabs();
+}
+
+// MCP reload poll
+setInterval(async () => {
+  const path = await invoke<string | null>("poll_reload_tab").catch(() => null);
+  if (path !== null) await reloadTabFromDisk(path);
+}, 500);
+
+// OS file watcher events
+listen<string>("scrybe://file-changed", async event => {
+  await reloadTabFromDisk(event.payload);
+}).catch(console.error);

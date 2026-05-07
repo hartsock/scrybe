@@ -33,11 +33,16 @@
       /* #preview styles are in src/styles/preview.css */
       .cm-editor { flex: 1; overflow: hidden; }
       .cm-scroller { height: 100%; overflow: auto; }
+      /* Conflict bar — shown when an external edit arrives on a dirty buffer */
+      #conflict-bar { background: #6b3a00; color: #ffd; font-size: 13px; padding: 0 12px; height: 34px; align-items: center; gap: 10px; flex-shrink: 0; border-bottom: 1px solid #a05000; }
+      #conflict-bar button { padding: 2px 10px; font-size: 12px; cursor: pointer; border-radius: 3px; border: 1px solid #a05000; background: #3d2000; color: #ffd; }
+      #conflict-bar button:hover { background: #5a3000; }
     </style>
   </head>
   <body>
     <div id="app">
       <div id="toolbar">Scrybe</div>
+      <div id="conflict-bar" style="display:none"></div>
       <div id="content">
         <div id="sidebar-col">
           <div id="sidebar-header">Explorer</div>
