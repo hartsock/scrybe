@@ -1,0 +1,20 @@
+[build-system]
+requires = ["maturin>=1.4,<2.0"]
+build-backend = "maturin"
+
+[project]
+name = "scrybe-mermaid"
+version = "0.1.20260507"
+description = "Scrybe Mermaid — standalone PNG iTXt codec (Rust-backed)"
+license = {text = "AGPL-3.0-or-later"}
+requires-python = ">=3.9"
+dependencies = []
+
+[project.urls]
+Homepage = "https://github.com/hartsock/scrybe"
+
+[tool.maturin]
+module-name = "scrybe_mermaid._rust"
+python-source = "python"
+features = ["python", "extension-module"]
+manifest-path = "Cargo.toml"

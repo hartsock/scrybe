@@ -1,0 +1,22 @@
+[package]
+name = "scrybe-panels"
+version = "0.1.20260507"
+edition = "2021"
+description = "Scrybe panels — bake-off orchestrator and SQLite calibration log"
+license = "AGPL-3.0-or-later"
+repository = "https://github.com/hartsock/scrybe"
+
+[dependencies]
+scrybe-core.workspace = true
+scrybe-mcp-client.workspace = true
+anyhow.workspace = true
+thiserror.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+rusqlite.workspace = true
+uuid.workspace = true
+chrono.workspace = true
+
+[lints]
+workspace = true

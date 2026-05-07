@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Scrybe</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16/dist/katex.min.css">
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16/dist/katex.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16/dist/contrib/auto-render.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+    <script>
+      document.addEventListener("DOMContentLoaded", () => {
+        if (typeof mermaid !== "undefined") mermaid.initialize({ startOnLoad: false });
+      });
+    </script>
+    <style>
+      * { box-sizing: border-box; margin: 0; padding: 0; }
+      html, body, #app { height: 100vh; overflow: hidden; display: flex; flex-direction: column; }
+      #toolbar { height: 36px; background: #2d2d2d; display: flex; align-items: center; padding: 0 12px; color: #ccc; font-size: 13px; flex-shrink: 0; }
+      #content { flex: 1; display: flex; overflow: hidden; min-height: 0; }
+      /* Sidebar column */
+      #sidebar-col { display: flex; flex-direction: column; width: 220px; border-right: 1px solid #333; flex-shrink: 0; background: #252526; }
+      #sidebar-header { height: 32px; background: #2d2d2d; display: flex; align-items: center; padding: 0 12px; color: #888; font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; flex-shrink: 0; border-bottom: 1px solid #333; }
+      #sidebar { flex: 1; overflow-y: auto; }
+      /* Editor column */
+      #editor-col { flex: 1; display: flex; flex-direction: column; overflow: hidden; min-width: 0; }
+      #editor-and-preview { flex: 1; display: flex; overflow: hidden; min-height: 0; }
+      #editor { flex: 1; overflow: hidden; border-right: 1px solid #333; display: flex; flex-direction: column; }
+      /* Per-tab view modes */
+      #editor-and-preview.mode-edit #preview { display: none; }
+      #editor-and-preview.mode-edit #editor { border-right: none; }
+      #editor-and-preview.mode-preview #editor { display: none; }
+      /* #preview styles are in src/styles/preview.css */
+      .cm-editor { flex: 1; overflow: hidden; }
+      .cm-scroller { height: 100%; overflow: auto; }
+    </style>
+  </head>
+  <body>
+    <div id="app">
+      <div id="toolbar">Scrybe</div>
+      <div id="content">
+        <div id="sidebar-col">
+          <div id="sidebar-header">Explorer</div>
+          <div id="sidebar"></div>
+        </div>
+        <div id="editor-col">
+          <div id="tab-bar"></div>
+          <div id="editor-and-preview">
+            <div id="editor"></div>
+            <div id="preview"></div>
+          </div>
+        </div>
+      </div>
+      <!-- terminal panel (P4.11) — disabled; re-enable when MCP session control is wired -->
+      <!-- <div id="terminal-panel">
+        <div id="terminal-resize-handle"></div>
+        <div id="terminal-toolbar">
+          <span>Terminal</span>
+          <button id="terminal-toggle" style="margin-left:auto;background:transparent;border:none;color:#888;cursor:pointer;">&#x25BC;</button>
+        </div>
+        <div id="terminal-body"></div>
+      </div> -->
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

@@ -1,0 +1,19 @@
+[package]
+name = "scrybe-render"
+version = "0.1.20260507"
+edition = "2021"
+description = "Scrybe render — Markdown-to-HTML pipeline, syntect, KaTeX/Mermaid"
+license = "AGPL-3.0-or-later"
+repository = "https://github.com/hartsock/scrybe"
+
+[dependencies]
+scrybe-core.workspace = true
+anyhow.workspace = true
+thiserror.workspace = true
+serde.workspace = true
+tracing.workspace = true
+pulldown-cmark.workspace = true
+syntect.workspace = true
+
+[lints]
+workspace = true

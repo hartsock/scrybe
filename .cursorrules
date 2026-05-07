@@ -1,0 +1,55 @@
+# Scrybe — Cursor IDE Rules
+
+## Architecture: Python on the outside, Rust on the inside
+
+- All core logic lives in Rust crates (`scrybe-core`, `scrybe-render`, etc.)
+- Python is the *distribution wrapper* only — maturin `bindings = "bin"` packages Rust binaries as Python wheels
+- scrybe-app is Tauri 2 (Rust + TypeScript/CodeMirror 6) — no React, no heavy frameworks
+- Never add Python runtime logic to a crate that is `bindings = "bin"`
+
+## Code style
+
+### Rust
+- `cargo fmt` always; never commit unformatted code
+- `cargo clippy -- -D warnings`; zero warnings is the policy
+- No `unwrap()` in library code; use `?` or explicit error handling
+- Prefer `thiserror` for error types, `anyhow` at call sites
+- Doc-comment all public items (`///`)
+
+### TypeScript (scrybe-app)
+- Strict mode enabled; no `any` without a comment
+- CSS co-located in `src/styles/<feature>.css`
+- No external UI frameworks — vanilla TS + CSS
+
+### Python (scrybe-py, tooling)
+- `black` formatting, `ruff` lint — zero warnings
+- `mypy` type annotations on all public functions
+- `pytest` — all tests pass before committing
+
+## Testing
+
+- Rust: `cargo test --all` — every public API has a test
+- TypeScript: Tauri IPC commands tested via Rust unit tests
+- Mock external resources (network, filesystem, subprocess) in all tests
+- Never hit real services in unit tests
+
+## Git
+
+- Branch from `main`; never commit directly to `main`
+- Commit messages: `type(scope): summary` (feat/fix/refactor/test/docs/ci)
+- Include `Co-Authored-By:` agent line on all agent commits
+- Pre-push hook runs full check suite; never `--no-verify`
+
+## Build system
+
+- `just check` = full lint + test suite
+- `just install` = build Tauri app + Python wheels, install to ~/Applications + ~/venv/bin
+- Tauri builds: always `npm run tauri build` (not plain `cargo build`) so frontend is embedded
+- Install: always `rm -rf ~/Applications/Scrybe.app` then `cp -R ... ~/Applications/`
+
+## License
+
+AGPL-3.0-or-later. Every new source file must include the SPDX header:
+```
+// SPDX-License-Identifier: AGPL-3.0-or-later
+```

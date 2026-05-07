@@ -1,0 +1,89 @@
+[workspace]
+resolver = "2"
+members = [
+    "scrybe-core",
+    "scrybe-render",
+    "scrybe-mcp-client",
+    "scrybe-mcp-server",
+    "scrybe-mermaid",
+    "scrybe-panels",
+    "scrybe-vcs",
+    "scrybe-swarm",
+    "scrybe-py",
+    "scrybe-cli",
+    "scrybe-app/src-tauri",
+]
+
+# Workspace-level dependency pins keep all crates in lock-step.
+[workspace.dependencies]
+# Core utilities
+anyhow = "1.0"
+thiserror = "2.0"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+uuid = { version = "1", features = ["v4", "serde"] }
+hex = "0.4"
+chrono = { version = "0.4", features = ["serde"] }
+toml = "1.0"
+
+# Crypto / content addressing
+blake3 = "1.8"
+sha2 = "0.10"
+ciborium = "0.2"   # deterministic CBOR for content-addressed hashing
+
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+
+# Web / networking
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "blocking"] }
+
+# Markdown / rendering
+pulldown-cmark = "0.12"
+syntect = "5.2"
+
+# Database
+rusqlite = { version = "0.34", features = ["bundled"] }
+
+# Git
+git2 = { version = "0.20", default-features = false, features = ["vendored-openssl"] }
+
+# NATS (swarm chat + activity feed)
+async-nats = "0.38"
+
+# CLI
+clap = { version = "4", features = ["derive", "env"] }
+which = "7"
+
+# PNG / image codec (scrybe-mermaid iTXt)
+png = "0.17"
+base64 = "0.22"
+
+# PyO3
+pyo3 = { version = "0.28", features = ["auto-initialize"] }
+
+# Tauri 2
+tauri = { version = "2", features = ["protocol-asset"] }
+tauri-build = { version = "2", features = [] }
+
+# Internal crates
+scrybe-core       = { path = "scrybe-core" }
+scrybe-render     = { path = "scrybe-render" }
+scrybe-mcp-client = { path = "scrybe-mcp-client" }
+scrybe-mcp-server = { path = "scrybe-mcp-server" }
+scrybe-mermaid    = { path = "scrybe-mermaid" }
+scrybe-panels     = { path = "scrybe-panels" }
+scrybe-vcs        = { path = "scrybe-vcs" }
+scrybe-swarm      = { path = "scrybe-swarm" }
+scrybe-py         = { path = "scrybe-py" }
+
+[workspace.lints.clippy]
+explicit_iter_loop     = "warn"
+flat_map_option        = "warn"
+implicit_clone         = "warn"
+needless_for_each      = "warn"
+semicolon_if_nothing_returned = "warn"
+uninlined_format_args  = "warn"
+useless_conversion     = "warn"
+use_self               = "warn"

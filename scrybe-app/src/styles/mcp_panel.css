@@ -1,0 +1,13 @@
+.mcp-panel { padding: 8px; font-size: 12px; color: #ccc; }
+.mcp-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+.mcp-indicator { font-size: 12px; }
+.mcp-on { color: #4ec94e; }
+.mcp-off { color: #666; }
+.mcp-btn { background: #007acc; border: none; color: #fff; padding: 3px 10px; border-radius: 3px; cursor: pointer; font-size: 11px; }
+.mcp-btn:hover { background: #005fa3; }
+.mcp-info { background: #1e1e1e; border-radius: 4px; padding: 8px; margin-top: 4px; }
+.mcp-section-title { color: #888; font-size: 11px; margin-bottom: 4px; display: block; }
+.mcp-cmd { display: block; background: #0d1117; color: #58a6ff; padding: 4px 6px; border-radius: 3px; font-size: 11px; word-break: break-all; margin-bottom: 6px; }
+.mcp-tools { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+.mcp-tool { background: #2d2d2d; color: #aaa; padding: 1px 5px; border-radius: 2px; font-size: 10px; }
+.mcp-hint { color: #666; font-size: 11px; line-height: 1.5; padding: 4px 0; }

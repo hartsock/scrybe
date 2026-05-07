@@ -1,0 +1,27 @@
+[package]
+name = "scrybe-mcp-server"
+version = "0.1.20260507"
+edition = "2021"
+description = "Scrybe MCP server — inbound MCP tools: open/read/section/edit/diff/find/embed/lint"
+license = "AGPL-3.0-or-later"
+repository = "https://github.com/hartsock/scrybe"
+
+[[bin]]
+name = "scrybe-mcp-server"
+path = "src/main.rs"
+
+[dependencies]
+scrybe-core.workspace = true
+scrybe-render.workspace = true
+scrybe-mermaid.workspace = true
+anyhow.workspace = true
+thiserror.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+tokio.workspace = true
+clap.workspace = true
+
+[lints]
+workspace = true
