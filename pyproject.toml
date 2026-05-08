@@ -7,7 +7,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "scrybe"
-version = "0.5.20260507"
+version = "0.1.0a1"
 description = "MCP-native cross-platform Markdown editor"
 readme = "README.md"
 license = { text = "Apache-2.0" }

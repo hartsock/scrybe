@@ -162,29 +162,47 @@ jobs:
           name: meta-scrybe-ai
           path: scrybe-meta/dist/*
 
-  # ── Publish to PyPI (trusted publishing — OIDC) ───────────────────────────
+  # ── Publish to PyPI (trusted publishing — OIDC, per-package) ──────────────
+  #
+  # One job per PyPI project so a missing-publisher 403 on one doesn't abort
+  # the others. `continue-on-error: true` on each lets the workflow as a
+  # whole succeed even when, say, `scrybe-mcp-server` hasn't had its
+  # trusted publisher set up yet — the projects with publishers configured
+  # still publish, and the ones without just turn red without blocking.
+  #
+  # This is what makes the iterative-activation bootstrap pattern work
+  # (register pending publisher for project X → push release branch →
+  # project X publishes via OIDC → register next pending publisher → repeat).
 
   publish-pypi:
-    name: Publish to PyPI
+    name: Publish ${{ matrix.package.name }}
     needs: [build-wheels, build-meta]
     runs-on: ubuntu-latest
     environment: pypi
     permissions:
       id-token: write    # OIDC trusted publishing — no API token needed
+    continue-on-error: true
+    strategy:
+      fail-fast: false
+      matrix:
+        package:
+          - { name: scrybe.ai,         pattern: meta-scrybe-ai }
+          - { name: scrybe-py,         pattern: wheels-scrybe-py-* }
+          - { name: scrybe-cli,        pattern: wheels-scrybe-cli-* }
+          - { name: scrybe-mcp-server, pattern: wheels-scrybe-mcp-server-* }
+          - { name: scrybe-mermaid,    pattern: wheels-scrybe-mermaid-* }
 
     steps:
       - uses: actions/download-artifact@v4
         with:
-          pattern: wheels-*
+          pattern: ${{ matrix.package.pattern }}
           merge-multiple: true
           path: dist/
 
-      - uses: actions/download-artifact@v4
-        with:
-          name: meta-scrybe-ai
-          path: dist/
+      - name: Show artifacts to publish
+        run: ls -la dist/
 
-      - name: Publish
+      - name: Publish ${{ matrix.package.name }}
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           # Idempotent: if a release/** branch push and a v* tag push both

@@ -1,6 +1,6 @@
 [package]
 name = "scrybe-mcp-server"
-version = "0.5.20260507"
+version = "0.1.0-a1"
 edition = "2021"
 description = "Scrybe MCP server — inbound MCP tools: open/read/section/edit/diff/find/embed/lint"
 license = "Apache-2.0"
