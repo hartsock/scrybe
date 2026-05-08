@@ -13,8 +13,19 @@ use std::collections::HashMap;
 
 /// All tool names exposed by scrybe-mcp-server.
 pub const TOOL_NAMES: &[&str] = &[
-    "open", "read", "section", "edit", "find", "render", "embed", "extract", "lint", "logs", "quit",
-    "close_tab", "reload",
+    "open",
+    "read",
+    "section",
+    "edit",
+    "find",
+    "render",
+    "embed",
+    "extract",
+    "lint",
+    "logs",
+    "quit",
+    "close_tab",
+    "reload",
 ];
 
 /// Path shared between the Tauri app's `log_append` command and this tool.
@@ -200,7 +211,7 @@ impl ToolRegistry {
             "logs" => self.tool_logs(args),
             "quit" => self.tool_quit(),
             "close_tab" => self.tool_close_tab(args),
-            "reload"    => self.tool_reload(args),
+            "reload" => self.tool_reload(args),
             other => json!({"error": format!("unknown tool: {other}")}),
         }
     }
@@ -490,7 +501,9 @@ impl ToolRegistry {
                 // pkill exits 1 when no process matched (already closed) — treat as ok
                 json!({"ok": true})
             }
-            Ok(out) => json!({"ok": false, "error": String::from_utf8_lossy(&out.stderr).trim().to_string()}),
+            Ok(out) => {
+                json!({"ok": false, "error": String::from_utf8_lossy(&out.stderr).trim().to_string()})
+            }
             Err(e) => json!({"error": e.to_string()}),
         }
     }
@@ -522,7 +535,9 @@ impl ToolRegistry {
         };
 
         // Dirty check: in-memory content differs from what's on disk.
-        let is_dirty = self.workspace.get(&doc_id)
+        let is_dirty = self
+            .workspace
+            .get(&doc_id)
             .map(|d| d.source != new_source)
             .unwrap_or(false);
 
@@ -565,7 +580,11 @@ impl ToolRegistry {
 /// Locate the `scrybe-app` binary: sibling of current exe first, then PATH.
 fn which_scrybe_app() -> Result<String, String> {
     if let Ok(exe) = std::env::current_exe() {
-        let name = if cfg!(windows) { "scrybe-app.exe" } else { "scrybe-app" };
+        let name = if cfg!(windows) {
+            "scrybe-app.exe"
+        } else {
+            "scrybe-app"
+        };
         let sibling = exe.with_file_name(name);
         if sibling.exists() {
             return Ok(sibling.to_string_lossy().into_owned());
