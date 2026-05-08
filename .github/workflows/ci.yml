@@ -12,6 +12,12 @@ on:
 
 env:
   RUST_BACKTRACE: 1
+  # The scrybe-k3s runner image bakes CARGO_HOME=/usr/local/cargo (root-owned)
+  # which the runner user cannot write to, so cargo fails with "Permission
+  # denied (os error 13)" on the first index/cache write. Override to a
+  # tmpfs-backed path the runner user owns. Until this is fixed in the
+  # runner image, every cargo-touching job must inherit this env.
+  CARGO_HOME: /tmp/.cargo
 
 jobs:
   lint-rust:
