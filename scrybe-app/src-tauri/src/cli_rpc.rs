@@ -4,15 +4,21 @@
 //! and accepts JSON-RPC 2.0 requests. Each request is dispatched onto a
 //! Tauri event broadcast to the frontend, which already owns tab state.
 //!
-//! Phase 1 methods: `open`, `save`, `close`, `quit`. Each emits a typed
-//! event to the frontend and acks the caller. The frontend's event handler
-//! does the real work (open / refresh / save / close / quit).
+//! Phase 1 methods (fire-and-forget): `open`, `save`, `close`, `quit`.
+//! Each emits a typed event to the frontend and acks the caller.
 //!
-//! For request/response semantics richer than fire-and-forget (needed in
-//! Phase 2 for `lint`, `render`, etc.), the frontend will reply via a
-//! correlation event `scrybe://cli-rpc-reply` keyed by request id; the
-//! dispatch loop here will block on that reply with a timeout. Phase 1
-//! does not need this.
+//! Phase 2 methods (request-with-reply): `read`, `find`, `section`, `edit`.
+//! These need data BACK from the frontend (buffer content, search hits,
+//! etc.). Pattern:
+//!   1. Server registers a oneshot channel keyed by request id in
+//!      `PENDING_REPLIES`.
+//!   2. Server emits a typed event whose payload is `{id, data}`.
+//!   3. Frontend handler does the work, calls the `cli_rpc_reply` Tauri
+//!      command with `{id, result}` or `{id, error}`.
+//!   4. The Tauri command resolves the channel; the dispatcher thread
+//!      packages the reply into a `Response` and writes it to the wire.
+//!   5. If the frontend doesn't reply within `REPLY_TIMEOUT`, the channel
+//!      is dropped and the caller gets `ERR_REPLY_TIMEOUT`.
 //!
 //! ## Stale-socket recovery
 //!
@@ -22,16 +28,44 @@
 //! the file is unlinked and we rebind. Standard pattern.
 
 use scrybe_rpc::{
-    default_socket_path, AckResult, CloseParams, JsonRpcVersion, OpenParams, OpenResult,
-    QuitParams, Request, Response, SaveParams, ERR_INTERNAL, ERR_INVALID_PARAMS,
-    ERR_METHOD_NOT_FOUND,
+    default_socket_path, AckResult, CloseParams, EditParams, EventEnvelope, FindParams,
+    JsonRpcVersion, OpenParams, OpenResult, QuitParams, ReadParams, Reply, Request, Response,
+    SaveParams, SectionParams, ERR_INTERNAL, ERR_INVALID_PARAMS, ERR_METHOD_NOT_FOUND,
+    ERR_REPLY_TIMEOUT,
 };
+use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Write};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::mpsc::Sender;
+use std::sync::{Arc, Mutex};
 use std::thread;
+use std::time::Duration;
 use tauri::{AppHandle, Emitter};
+
+/// How long the dispatcher waits for a frontend reply before giving up.
+/// 5s is generous — the slowest Phase 2 op (find across many tabs) is
+/// still well under a second even on big workspaces.
+const REPLY_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// Pending replies, keyed by JSON-RPC request id. The dispatcher inserts a
+/// channel before emitting; the `cli_rpc_reply` Tauri command sends the
+/// frontend's response into the channel; the dispatcher receives and
+/// packages it into a `Response`. If the frontend never replies, the
+/// timeout drops the channel and the request errors out.
+static PENDING_REPLIES: Mutex<Option<HashMap<u64, Sender<Reply>>>> = Mutex::new(None);
+
+/// The frontend posts replies via this Tauri command, registered in
+/// `lib.rs`'s `invoke_handler`. Lookups by id; sends to the dispatcher.
+#[tauri::command]
+pub fn cli_rpc_reply(id: u64, reply: Reply) {
+    if let Some(map) = PENDING_REPLIES.lock().unwrap().as_mut() {
+        if let Some(tx) = map.remove(&id) {
+            // Channel may already be dropped (timeout). That's fine.
+            let _ = tx.send(reply);
+        }
+    }
+}
 
 #[cfg(unix)]
 use std::os::unix::net::{UnixListener, UnixStream};
@@ -73,6 +107,12 @@ pub fn spawn(app: AppHandle) -> Result<PathBuf, SpawnError> {
             source: e,
         })?;
     }
+
+    // Initialize the pending-replies map. Called here (not at static init)
+    // because we want a clean state on app start; an old map might still
+    // hold senders from a previous run if `spawn` is called twice in the
+    // same process (it shouldn't, but be defensive).
+    *PENDING_REPLIES.lock().unwrap() = Some(HashMap::new());
 
     if path.exists() {
         match UnixStream::connect(&path) {
@@ -176,10 +216,16 @@ fn handle_connection(stream: UnixStream, app: AppHandle) {
 
 fn dispatch(app: &AppHandle, req: &Request) -> Response {
     match req.method.as_str() {
+        // Phase 1 — fire-and-forget GUI mutations.
         "open" => handle_open(app, req),
         "save" => handle_save(app, req),
         "close" => handle_close(app, req),
         "quit" => handle_quit(app, req),
+        // Phase 2 — request-with-reply read-side commands.
+        "read" => handle_read(app, req),
+        "find" => handle_find(app, req),
+        "section" => handle_section(app, req),
+        "edit" => handle_edit(app, req),
         other => Response::err(
             req.id,
             ERR_METHOD_NOT_FOUND,
@@ -273,6 +319,142 @@ fn handle_quit(app: &AppHandle, req: &Request) -> Response {
     Response::ok(
         req.id,
         serde_json::to_value(AckResult { applied: true }).unwrap(),
+    )
+}
+
+// ── Phase 2 — request-with-reply handlers ────────────────────────────────────
+
+fn dispatch_with_reply<P: serde::Serialize>(
+    app: &AppHandle,
+    req: &Request,
+    event_name: &str,
+    payload: P,
+) -> Response {
+    use std::sync::mpsc;
+
+    let (tx, rx) = mpsc::channel::<Reply>();
+
+    // Register before emitting so the frontend can't beat us to the punch.
+    {
+        let mut guard = PENDING_REPLIES.lock().unwrap();
+        match guard.as_mut() {
+            Some(map) => {
+                map.insert(req.id, tx);
+            }
+            None => {
+                return Response::err(
+                    req.id,
+                    ERR_INTERNAL,
+                    "reply registry not initialized".to_string(),
+                );
+            }
+        }
+    }
+
+    let envelope = EventEnvelope {
+        id: req.id,
+        data: payload,
+    };
+
+    if let Err(e) = app.emit(event_name, envelope) {
+        // Clean up the orphaned channel so it doesn't leak.
+        if let Some(map) = PENDING_REPLIES.lock().unwrap().as_mut() {
+            map.remove(&req.id);
+        }
+        return Response::err(req.id, ERR_INTERNAL, format!("emit failed: {e}"));
+    }
+
+    match rx.recv_timeout(REPLY_TIMEOUT) {
+        Ok(reply) => match (reply.result, reply.error) {
+            (Some(r), None) => Response::ok(req.id, r),
+            (None, Some(e)) => Response::err(req.id, e.code, e.message),
+            // Defensive: malformed reply (both or neither).
+            _ => Response::err(
+                req.id,
+                ERR_INTERNAL,
+                "frontend sent malformed reply (both result and error)".to_string(),
+            ),
+        },
+        Err(_) => {
+            if let Some(map) = PENDING_REPLIES.lock().unwrap().as_mut() {
+                map.remove(&req.id);
+            }
+            Response::err(
+                req.id,
+                ERR_REPLY_TIMEOUT,
+                format!(
+                    "frontend reply timeout after {} s — GUI may be busy or modal-blocked",
+                    REPLY_TIMEOUT.as_secs()
+                ),
+            )
+        }
+    }
+}
+
+fn handle_read(app: &AppHandle, req: &Request) -> Response {
+    let params: ReadParams = match parse_params(req) {
+        Ok(p) => p,
+        Err(r) => return r,
+    };
+    let path = match canonical(&params.path) {
+        Ok(p) => p,
+        Err(r) => return Response::err(req.id, ERR_INVALID_PARAMS, r),
+    };
+    dispatch_with_reply(
+        app,
+        req,
+        "scrybe://cli-read",
+        serde_json::json!({ "path": path }),
+    )
+}
+
+fn handle_find(app: &AppHandle, req: &Request) -> Response {
+    let params: FindParams = match parse_params(req) {
+        Ok(p) => p,
+        Err(r) => return r,
+    };
+    // Don't canonicalize paths here — find may target paths that aren't
+    // open (and thus may not exist on disk). The frontend handles each
+    // path independently and falls back to disk if the file isn't open.
+    dispatch_with_reply(app, req, "scrybe://cli-find", &params)
+}
+
+fn handle_section(app: &AppHandle, req: &Request) -> Response {
+    let params: SectionParams = match parse_params(req) {
+        Ok(p) => p,
+        Err(r) => return r,
+    };
+    let path = match canonical(&params.path) {
+        Ok(p) => p,
+        Err(r) => return Response::err(req.id, ERR_INVALID_PARAMS, r),
+    };
+    dispatch_with_reply(
+        app,
+        req,
+        "scrybe://cli-section",
+        serde_json::json!({"path": path, "heading": params.heading}),
+    )
+}
+
+fn handle_edit(app: &AppHandle, req: &Request) -> Response {
+    let params: EditParams = match parse_params(req) {
+        Ok(p) => p,
+        Err(r) => return r,
+    };
+    let path = match canonical(&params.path) {
+        Ok(p) => p,
+        Err(r) => return Response::err(req.id, ERR_INVALID_PARAMS, r),
+    };
+    dispatch_with_reply(
+        app,
+        req,
+        "scrybe://cli-edit",
+        serde_json::json!({
+            "path": path,
+            "start_line": params.start_line,
+            "end_line": params.end_line,
+            "content": params.content,
+        }),
     )
 }
 

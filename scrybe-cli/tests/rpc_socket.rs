@@ -188,6 +188,150 @@ fn jsonrpc_request_preserves_envelope() {
     cleanup(&sock);
 }
 
+// ── Phase 2 — request-with-reply read-side commands ──────────────────────
+
+#[test]
+fn read_returns_buffer_content() {
+    let sock = unique_socket_path("read");
+    let _received = mock_server(&sock, |req| {
+        // Mimic the frontend handler shape: result has path, content, is_dirty.
+        Response::ok(
+            req.id,
+            serde_json::json!({
+                "path": req.params["path"],
+                "content": "# Hello\nfrom an in-memory buffer.\n",
+                "is_dirty": true,
+            }),
+        )
+    });
+
+    let resp = rpc_client::send_to(&sock, "read", serde_json::json!({"path": "/tmp/foo.md"}))
+        .unwrap();
+    let r = resp.result.unwrap();
+    assert_eq!(r["content"], "# Hello\nfrom an in-memory buffer.\n");
+    assert_eq!(r["is_dirty"], true);
+    cleanup(&sock);
+}
+
+#[test]
+fn read_propagates_tab_not_open_error() {
+    use scrybe_rpc::ERR_TAB_NOT_OPEN;
+    let sock = unique_socket_path("read-noopen");
+    let _received = mock_server(&sock, |req| {
+        Response::err(req.id, ERR_TAB_NOT_OPEN, "not open: /tmp/x.md")
+    });
+    let resp = rpc_client::send_to(&sock, "read", serde_json::json!({"path": "/tmp/x.md"}))
+        .unwrap();
+    let e = resp.error.unwrap();
+    assert_eq!(e.code, ERR_TAB_NOT_OPEN);
+    assert!(e.message.contains("not open"));
+    cleanup(&sock);
+}
+
+#[test]
+fn find_returns_hits_array() {
+    let sock = unique_socket_path("find");
+    let _received = mock_server(&sock, |req| {
+        // Echo back two sample hits so we exercise the array shape.
+        Response::ok(
+            req.id,
+            serde_json::json!({
+                "hits": [
+                    {"path": "/tmp/a.md", "line": 10, "column": 5, "text": "TODO: x"},
+                    {"path": "/tmp/b.md", "line": 42, "column": 1, "text": "TODO list"}
+                ]
+            }),
+        )
+    });
+    let resp = rpc_client::send_to(
+        &sock,
+        "find",
+        serde_json::json!({
+            "pattern": "TODO",
+            "paths": [],
+            "literal": false,
+            "case_sensitive": false,
+        }),
+    )
+    .unwrap();
+    let hits = resp.result.unwrap()["hits"].as_array().cloned().unwrap();
+    assert_eq!(hits.len(), 2);
+    assert_eq!(hits[0]["line"], 10);
+    assert_eq!(hits[1]["text"], "TODO list");
+    cleanup(&sock);
+}
+
+#[test]
+fn section_returns_heading_level_content() {
+    let sock = unique_socket_path("section");
+    let _received = mock_server(&sock, |req| {
+        Response::ok(
+            req.id,
+            serde_json::json!({
+                "heading": "Install",
+                "level": 2,
+                "content": "## Install\n\n```bash\npip install scrybe.ai\n```\n",
+            }),
+        )
+    });
+    let resp = rpc_client::send_to(
+        &sock,
+        "section",
+        serde_json::json!({"path": "/tmp/foo.md", "heading": "install"}),
+    )
+    .unwrap();
+    let r = resp.result.unwrap();
+    assert_eq!(r["heading"], "Install");
+    assert_eq!(r["level"], 2);
+    assert!(r["content"].as_str().unwrap().contains("pip install"));
+    cleanup(&sock);
+}
+
+#[test]
+fn section_propagates_not_found() {
+    use scrybe_rpc::ERR_SECTION_NOT_FOUND;
+    let sock = unique_socket_path("section-notfound");
+    let _received = mock_server(&sock, |req| {
+        Response::err(
+            req.id,
+            ERR_SECTION_NOT_FOUND,
+            "no heading matching 'Hodor' in /tmp/foo.md",
+        )
+    });
+    let resp = rpc_client::send_to(
+        &sock,
+        "section",
+        serde_json::json!({"path": "/tmp/foo.md", "heading": "Hodor"}),
+    )
+    .unwrap();
+    let e = resp.error.unwrap();
+    assert_eq!(e.code, ERR_SECTION_NOT_FOUND);
+    cleanup(&sock);
+}
+
+#[test]
+fn edit_returns_applied_and_size_after() {
+    let sock = unique_socket_path("edit");
+    let _received = mock_server(&sock, |req| {
+        Response::ok(req.id, serde_json::json!({"applied": true, "size_after": 1234}))
+    });
+    let resp = rpc_client::send_to(
+        &sock,
+        "edit",
+        serde_json::json!({
+            "path": "/tmp/foo.md",
+            "start_line": 1,
+            "end_line": 3,
+            "content": "# New heading\n",
+        }),
+    )
+    .unwrap();
+    let r = resp.result.unwrap();
+    assert_eq!(r["applied"], true);
+    assert_eq!(r["size_after"], 1234);
+    cleanup(&sock);
+}
+
 #[test]
 fn concurrent_clients_do_not_corrupt_responses() {
     // Two clients hammering the same server in parallel must each get

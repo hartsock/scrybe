@@ -28,35 +28,55 @@ USAGE
     scrybe <PATH>                  shortcut for: scrybe open <PATH>
 
 SUBCOMMANDS
+  GUI control (require running Scrybe app):
     open       Open or refresh a tab. If the file is already open, reloads
                from disk (force-refresh — no duplicate tabs).
     save       Save an open tab's buffer to disk. Silent no-op if not open.
     close      Close a tab. Silent no-op if not open.
     quit       Quit the running Scrybe app. --force skips dirty-buffer prompt.
+
+  Buffer-aware (require running Scrybe app + file open in a tab):
+    read       Print the in-memory contents of an open buffer (sees
+               unsaved edits — use `cat` for disk content).
+    find       Search across open tabs for a regex (or --literal string).
+    section    Extract a section by heading (case-insensitive substring).
+    edit       Apply a structured edit to lines start..=end of an open buffer.
+
+  Standalone (no GUI required):
     render     Render Markdown to HTML.
     lint       Lint a Markdown file and report statistics.
     mermaid    Embed/extract/verify Mermaid source in PNG iTXt metadata.
+    embed      Top-level shortcut for `mermaid embed`.
+    extract    Top-level shortcut for `mermaid extract`.
+
+  Meta:
     version    Print version and active feature flags.
 
 CONNECTION MODEL
-    When the Scrybe GUI is running, GUI subcommands talk to it over a
-    Unix socket (~/.scrybe/sock; override with $SCRYBE_SOCK).
+    When the Scrybe GUI is running, GUI/buffer-aware subcommands talk to
+    it over a Unix socket (~/.scrybe/sock; override with $SCRYBE_SOCK).
 
     When it isn't:
       - `open`  launches the GUI with the given path (macOS: `open -a Scrybe`;
                 Linux: $SCRYBE_APP_BIN or scrybe-app on PATH).
       - `save`, `close`, `quit`  silent no-op (nothing open, nothing to do).
-      - `render`, `lint`, `mermaid`  run inline — no GUI required.
+      - `read`, `find`, `section`, `edit`  error: no Scrybe running.
+      - `render`, `lint`, `mermaid`, `embed`, `extract`  run inline — no GUI required.
 
 EXAMPLES
     scrybe foo.md                  # open or refresh foo.md in the GUI
     scrybe save foo.md             # save foo.md if it's open
+    scrybe read foo.md             # print the in-memory buffer (incl. unsaved edits)
+    scrybe find 'TODO' foo.md      # grep TODO in open foo.md (or disk if not open)
+    scrybe find -c 'fn main' --literal      # case-sensitive literal search across open tabs
+    scrybe section foo.md --heading 'Install'
+    scrybe edit foo.md --start-line 10 --end-line 12 --content '## Updated heading\n'
     scrybe close foo.md            # close the foo.md tab
     scrybe quit                    # quit (prompts on dirty buffers)
     scrybe quit --force            # quit unconditionally
     scrybe render foo.md | tee foo.html
     scrybe lint foo.md --json
-    scrybe mermaid extract diagram.png > diagram.mmd
+    scrybe extract diagram.png > diagram.mmd
 
 ENVIRONMENT
     SCRYBE_SOCK     Override the default socket path (~/.scrybe/sock)
@@ -174,6 +194,98 @@ enum Command {
         force: bool,
     },
 
+    /// Read the contents of an open buffer (returns in-memory state, not disk).
+    ///
+    /// Errors if the file isn't open in the GUI or no GUI is running.
+    /// For disk content use `cat` instead.
+    Read {
+        #[arg(value_name = "PATH")]
+        path: std::path::PathBuf,
+        /// Output as JSON (`{path, content, is_dirty}`) instead of plain text.
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// Search across open tabs for a regex pattern (or a literal string with --literal).
+    ///
+    /// With no PATHS, searches every open tab. With explicit PATHS, searches
+    /// each one — using the in-memory buffer if open, falling back to disk
+    /// otherwise.
+    Find {
+        /// Regex pattern (or literal string with --literal).
+        #[arg(value_name = "PATTERN")]
+        pattern: String,
+        /// Optional list of paths to scope the search to.
+        #[arg(value_name = "PATHS")]
+        paths: Vec<std::path::PathBuf>,
+        /// Treat PATTERN as a literal string instead of a regex.
+        #[arg(long)]
+        literal: bool,
+        /// Match case-sensitively (default: case-insensitive).
+        #[arg(long = "case-sensitive", short = 'c')]
+        case_sensitive: bool,
+        /// Output JSON instead of grep-style `path:line:column: text`.
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// Extract a section of a Markdown file by its heading text.
+    ///
+    /// Heading match is case-insensitive substring. Returns the section
+    /// content from the heading down to (but not including) the next
+    /// heading of the same or shallower level.
+    Section {
+        #[arg(value_name = "PATH")]
+        path: std::path::PathBuf,
+        /// Heading text to find (case-insensitive substring match).
+        #[arg(long, value_name = "HEADING")]
+        heading: String,
+        /// Output as JSON (`{heading, level, content}`) instead of plain text.
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// Apply a structured edit to an open buffer.
+    ///
+    /// Replaces lines `start..=end` (1-indexed, inclusive) with the given
+    /// content. Errors if the file isn't open in the GUI.
+    Edit {
+        #[arg(value_name = "PATH")]
+        path: std::path::PathBuf,
+        /// First line of the range to replace (1-indexed).
+        #[arg(long, value_name = "LINE")]
+        start_line: u32,
+        /// Last line of the range to replace, inclusive (1-indexed).
+        #[arg(long, value_name = "LINE")]
+        end_line: u32,
+        /// New content for the range. Use `-` to read from stdin.
+        #[arg(long, value_name = "TEXT")]
+        content: String,
+        /// Output as JSON (`{applied, size_after}`) instead of "ok".
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// Embed Mermaid source into a PNG as an iTXt metadata chunk.
+    ///
+    /// Top-level shortcut for `scrybe mermaid embed`. Same args.
+    Embed {
+        #[arg(value_name = "PNG")]
+        png: std::path::PathBuf,
+        #[arg(value_name = "SOURCE")]
+        source: String,
+        #[arg(short, long)]
+        out: Option<std::path::PathBuf>,
+    },
+
+    /// Extract Mermaid source from a PNG iTXt metadata chunk.
+    ///
+    /// Top-level shortcut for `scrybe mermaid extract`. Same args.
+    Extract {
+        #[arg(value_name = "PNG")]
+        png: std::path::PathBuf,
+    },
+
     /// Print version and active feature flags.
     Version,
 }
@@ -207,7 +319,8 @@ enum MermaidCmd {
 
 /// Known subcommand names. Anything else in argv[1] is treated as a path to open.
 const SUBCOMMANDS: &[&str] = &[
-    "render", "lint", "mermaid", "open", "save", "close", "quit", "version", "help",
+    "render", "lint", "mermaid", "open", "save", "close", "quit", "read", "find", "section",
+    "edit", "embed", "extract", "version", "help",
 ];
 
 fn main() -> anyhow::Result<()> {
@@ -445,12 +558,187 @@ fn main() -> anyhow::Result<()> {
             }
         }
 
+        Command::Read { path, json } => handle_read(&path, json)?,
+        Command::Find {
+            pattern,
+            paths,
+            literal,
+            case_sensitive,
+            json,
+        } => handle_find(&pattern, &paths, literal, case_sensitive, json)?,
+        Command::Section {
+            path,
+            heading,
+            json,
+        } => handle_section(&path, &heading, json)?,
+        Command::Edit {
+            path,
+            start_line,
+            end_line,
+            content,
+            json,
+        } => handle_edit(&path, start_line, end_line, &content, json)?,
+        Command::Embed { png, source, out } => {
+            // Top-level alias for `mermaid embed` — same code path.
+            let bytes = std::fs::read(&png)?;
+            let embedded = scrybe_mermaid::embed(&bytes, &source)?;
+            let dest = out.unwrap_or_else(|| png.with_extension("embedded.png"));
+            std::fs::write(&dest, &embedded)?;
+            println!("Embedded into {}", dest.display());
+        }
+        Command::Extract { png } => {
+            // Top-level alias for `mermaid extract` — same code path.
+            let bytes = std::fs::read(&png)?;
+            let payload = scrybe_mermaid::extract(&bytes)?;
+            println!("{}", payload.source);
+        }
+
         Command::Version => {
             println!("scrybe {}", version_string());
             println!("Features: {}", active_features());
         }
     }
     Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Phase 2 read-side handlers
+// ---------------------------------------------------------------------------
+
+fn require_running_gui<F: FnOnce(serde_json::Value) -> anyhow::Result<()>>(
+    method: &str,
+    params: serde_json::Value,
+    on_ok: F,
+) -> anyhow::Result<()> {
+    match rpc_client::send(method, params) {
+        Ok(resp) => match (resp.result, resp.error) {
+            (Some(r), None) => on_ok(r),
+            (None, Some(e)) => anyhow::bail!("scrybe {method}: {} ({})", e.message, e.code),
+            _ => anyhow::bail!("scrybe {method}: malformed response"),
+        },
+        Err(e) if e.contains("no Scrybe running") => {
+            anyhow::bail!(
+                "scrybe {method}: no Scrybe running — start the app first, or open the file with `scrybe <path>`"
+            )
+        }
+        Err(e) => anyhow::bail!("scrybe {method}: {e}"),
+    }
+}
+
+fn handle_read(path: &std::path::Path, json: bool) -> anyhow::Result<()> {
+    let canon = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+    require_running_gui(
+        "read",
+        serde_json::json!({"path": canon.to_string_lossy()}),
+        |result| {
+            if json {
+                println!("{}", serde_json::to_string_pretty(&result)?);
+            } else {
+                let content = result["content"].as_str().unwrap_or("");
+                print!("{content}");
+            }
+            Ok(())
+        },
+    )
+}
+
+fn handle_find(
+    pattern: &str,
+    paths: &[std::path::PathBuf],
+    literal: bool,
+    case_sensitive: bool,
+    json: bool,
+) -> anyhow::Result<()> {
+    let path_strs: Vec<String> = paths
+        .iter()
+        .map(|p| {
+            p.canonicalize()
+                .unwrap_or_else(|_| p.clone())
+                .to_string_lossy()
+                .into_owned()
+        })
+        .collect();
+    require_running_gui(
+        "find",
+        serde_json::json!({
+            "pattern": pattern,
+            "paths": path_strs,
+            "literal": literal,
+            "case_sensitive": case_sensitive,
+        }),
+        |result| {
+            if json {
+                println!("{}", serde_json::to_string_pretty(&result)?);
+            } else {
+                let hits = result["hits"].as_array().cloned().unwrap_or_default();
+                for hit in hits {
+                    let path = hit["path"].as_str().unwrap_or("?");
+                    let line = hit["line"].as_u64().unwrap_or(0);
+                    let column = hit["column"].as_u64().unwrap_or(0);
+                    let text = hit["text"].as_str().unwrap_or("");
+                    println!("{path}:{line}:{column}: {text}");
+                }
+            }
+            Ok(())
+        },
+    )
+}
+
+fn handle_section(path: &std::path::Path, heading: &str, json: bool) -> anyhow::Result<()> {
+    let canon = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+    require_running_gui(
+        "section",
+        serde_json::json!({"path": canon.to_string_lossy(), "heading": heading}),
+        |result| {
+            if json {
+                println!("{}", serde_json::to_string_pretty(&result)?);
+            } else {
+                let content = result["content"].as_str().unwrap_or("");
+                print!("{content}");
+            }
+            Ok(())
+        },
+    )
+}
+
+fn handle_edit(
+    path: &std::path::Path,
+    start_line: u32,
+    end_line: u32,
+    content: &str,
+    json: bool,
+) -> anyhow::Result<()> {
+    if start_line == 0 || end_line == 0 || end_line < start_line {
+        anyhow::bail!("scrybe edit: start_line and end_line must be ≥ 1 and start ≤ end");
+    }
+    let canon = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+    // `--content -` reads from stdin (so multi-line content can be piped in).
+    let resolved_content = if content == "-" {
+        use std::io::Read;
+        let mut s = String::new();
+        std::io::stdin().read_to_string(&mut s)?;
+        s
+    } else {
+        content.to_string()
+    };
+    require_running_gui(
+        "edit",
+        serde_json::json!({
+            "path": canon.to_string_lossy(),
+            "start_line": start_line,
+            "end_line": end_line,
+            "content": resolved_content,
+        }),
+        |result| {
+            if json {
+                println!("{}", serde_json::to_string_pretty(&result)?);
+            } else {
+                let applied = result["applied"].as_bool().unwrap_or(false);
+                println!("{}", if applied { "ok" } else { "no-op" });
+            }
+            Ok(())
+        },
+    )
 }
 
 // ---------------------------------------------------------------------------
