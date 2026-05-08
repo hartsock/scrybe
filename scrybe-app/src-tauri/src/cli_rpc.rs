@@ -324,7 +324,7 @@ fn handle_quit(app: &AppHandle, req: &Request) -> Response {
 
 // ── Phase 2 — request-with-reply handlers ────────────────────────────────────
 
-fn dispatch_with_reply<P: serde::Serialize>(
+fn dispatch_with_reply<P: serde::Serialize + Clone>(
     app: &AppHandle,
     req: &Request,
     event_name: &str,
