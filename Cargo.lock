@@ -3534,6 +3534,7 @@ dependencies = [
  "scrybe-mcp-client",
  "scrybe-mcp-server",
  "scrybe-render",
+ "scrybe-rpc",
  "scrybe-vcs",
  "serde",
  "serde_json",
@@ -3558,6 +3559,7 @@ dependencies = [
  "scrybe-mcp-server",
  "scrybe-mermaid",
  "scrybe-render",
+ "scrybe-rpc",
  "serde",
  "serde_json",
  "sha2",
@@ -3655,6 +3657,15 @@ dependencies = [
  "syntect",
  "thiserror 2.0.18",
  "tracing",
+]
+
+[[package]]
+name = "scrybe-rpc"
+version = "0.5.20260507"
+dependencies = [
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
 ]
 
 [[package]]

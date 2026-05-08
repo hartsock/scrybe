@@ -158,18 +158,67 @@ mcpPanel.refresh();
 // Append VCS panel below MCP panel in the sidebar
 sidebarEl.appendChild(vcsContainer);
 
-buildToolbar(toolbarEl,
-  (theme) => {
+/// Save the active tab to disk now (manual / Ctrl+S / toolbar 💾).
+/// Bypasses the autosave debounce timer; takes effect immediately.
+async function saveActiveTabNow(): Promise<void> {
+  const tab = state.activeTab();
+  if (!tab?.path) {
+    showToast("No file to save", "info");
+    return;
+  }
+  try {
+    await invoke("save_file", { path: tab.path, content: tab.content });
+    invoke("note_autosave", { path: tab.path }).catch(() => {});
+    state.markClean(tab.id);
+    redrawTabs();
+    showToast(`Saved ${tab.path.split("/").pop()}`, "info");
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    showToast(`Save failed: ${msg}`);
+  }
+}
+
+/// Force-reload the active tab from disk (manual / Ctrl+R / toolbar 🔄).
+/// If the buffer has unsaved changes, routes through the existing
+/// conflict-bar (Keep mine / Take theirs) instead of clobbering them.
+async function reloadActiveTabNow(): Promise<void> {
+  const tab = state.activeTab();
+  if (!tab?.path) {
+    showToast("No file to reload", "info");
+    return;
+  }
+  await reloadTabFromDisk(tab.path);
+}
+
+buildToolbar(toolbarEl, {
+  onThemeChange: (theme) => {
     preview.setTheme(theme);
     const tab = state.activeTab();
     if (tab) preview.render(tab.content);
   },
-  () => {
+  onTogglePreview: () => {
     previewEl.style.display = previewEl.style.display === "none" ? "" : "none";
   },
-  openFileByPath,
-  (path) => sidebar.loadDirectory(path),
-);
+  onOpenFile: openFileByPath,
+  onOpenFolder: (path) => sidebar.loadDirectory(path),
+  onSave: () => { void saveActiveTabNow(); },
+  onReload: () => { void reloadActiveTabNow(); },
+});
+
+// Keyboard shortcuts for save + reload (mirrors the toolbar buttons).
+window.addEventListener("keydown", (e) => {
+  const mod = e.metaKey || e.ctrlKey;
+  if (!mod) return;
+  if (e.key === "s" || e.key === "S") {
+    e.preventDefault();
+    void saveActiveTabNow();
+  } else if (e.key === "r" || e.key === "R") {
+    // Block the default reload (which would refresh the whole webview)
+    // and instead reload the active tab's disk content.
+    e.preventDefault();
+    void reloadActiveTabNow();
+  }
+});
 
 let saveTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -413,4 +462,65 @@ setInterval(async () => {
 // OS file watcher events
 listen<string>("scrybe://file-changed", async event => {
   await reloadTabFromDisk(event.payload);
+}).catch(console.error);
+
+// ─── CLI ↔ GUI RPC events (Phase 1) ──────────────────────────────────────────
+//
+// Emitted by the Rust socket server in `src-tauri/src/cli_rpc.rs`. Each event
+// payload carries a canonicalized path the Rust side already resolved.
+
+// `scrybe foo.md` (or `scrybe open foo.md`) — open or refresh.
+// "One tab, one file": if the path is already open, refresh from disk
+// instead of duplicating. Reuses the same code path as the file watcher
+// for consistency.
+listen<string>("scrybe://cli-open", async event => {
+  const path = event.payload;
+  const existing = state.tabs.find(t => t.path === path);
+  if (existing) {
+    state.activeTabId = existing.id;
+    await reloadTabFromDisk(path);
+    redrawTabs();
+  } else {
+    openFileByPath(path);
+  }
+}).catch(console.error);
+
+// `scrybe save foo.md` — save if open, else silent no-op.
+listen<string>("scrybe://cli-save", async event => {
+  const tab = state.tabs.find(t => t.path === event.payload);
+  if (!tab) return; // not open: no-op per design
+  try {
+    await invoke("save_file", { path: tab.path, content: tab.content });
+    invoke("note_autosave", { path: tab.path }).catch(() => {});
+    state.markClean(tab.id);
+    redrawTabs();
+  } catch (err) {
+    console.error("scrybe://cli-save failed:", err);
+  }
+}).catch(console.error);
+
+// `scrybe close foo.md` — close if open, else silent no-op.
+listen<string>("scrybe://cli-close", event => {
+  const tab = state.tabs.find(t => t.path === event.payload);
+  if (tab) closeTab(tab.id);
+}).catch(console.error);
+
+// `scrybe quit [--force]` — quit the app; `force=true` skips dirty prompts.
+listen<boolean>("scrybe://cli-quit", async event => {
+  const force = event.payload === true;
+  if (!force) {
+    const dirty = state.tabs.filter(t => t.isDirty);
+    if (dirty.length > 0) {
+      const names = dirty.map(t => t.path?.split("/").pop() ?? "(untitled)").join(", ");
+      const proceed = window.confirm(
+        `Unsaved changes in: ${names}. Quit anyway? (use \`scrybe quit --force\` to skip this prompt)`,
+      );
+      if (!proceed) return;
+    }
+  }
+  // Tauri 2: closing the main window quits the app. The exit() plugin is the
+  // strongest hammer but pulls in the process plugin; a window close keeps
+  // dependency surface small and matches the standard menu Quit path.
+  const win = (await import("@tauri-apps/api/window")).getCurrentWindow();
+  await win.close();
 }).catch(console.error);

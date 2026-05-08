@@ -7,6 +7,7 @@
 //! can be unit-tested without spawning a process.
 
 pub mod lint;
+pub mod rpc_client;
 pub mod wrap;
 
 // Re-export the primary public API for convenience.

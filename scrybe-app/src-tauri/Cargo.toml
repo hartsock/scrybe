@@ -19,6 +19,7 @@ scrybe-render.workspace = true
 scrybe-mcp-client.workspace = true
 scrybe-mcp-server.workspace = true
 scrybe-vcs.workspace = true
+scrybe-rpc.workspace = true
 anyhow.workspace = true
 serde.workspace = true
 serde_json.workspace = true
