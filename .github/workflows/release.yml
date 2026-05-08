@@ -2,8 +2,15 @@ name: Release
 
 on:
   push:
+    # Tag pushes (e.g. v0.1.0) — full release: Tauri installers + PyPI wheels.
+    # Branch pushes to release/** — PyPI wheels + metapackage only; Tauri
+    # installer upload is gated on a tag ref (see build-app job below).
+    # Both contexts must be allowed by the `pypi` GitHub Actions environment's
+    # deployment-branches rule for OIDC trusted publishing to fire.
     tags:
       - "v*"
+    branches:
+      - "release/**"
 
 permissions:
   contents: write
@@ -16,6 +23,10 @@ jobs:
 
   build-app:
     name: Desktop app (${{ matrix.label }})
+    # Tag-only — `tauri-action` creates a GitHub Release named after
+    # github.ref_name, which only makes sense for a tag (e.g. v0.1.0).
+    # Branch pushes to `release/**` skip this job and ship PyPI wheels only.
+    if: startsWith(github.ref, 'refs/tags/')
     # Release builds always use GitHub-hosted runners:
     # - macOS arm64 requires Apple Silicon (M-series) runners on GitHub
     # - Windows/Linux builds are unavailable on the local ARC farm
@@ -83,7 +94,9 @@ jobs:
 
             **Python (all platforms):**
             ```bash
-            pip install scrybe-cli scrybe-mcp-server
+            pip install scrybe.ai          # full toolkit (library + CLI + MCP server + mermaid)
+            # or pick individual pieces:
+            pip install scrybe-cli scrybe-mcp-server scrybe-py scrybe-mermaid
             ```
 
             ### What's new
@@ -92,7 +105,7 @@ jobs:
           prerelease: false
           args: ${{ matrix.args }}
 
-  # ── Python wheels (maturin) ───────────────────────────────────────────────
+  # ── Python wheels (maturin — Rust-backed crates) ─────────────────────────
 
   build-wheels:
     name: Python wheels (${{ matrix.crate }} / ${{ matrix.os }})
@@ -100,7 +113,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
-        crate: [scrybe-cli, scrybe-mcp-server]
+        crate: [scrybe-py, scrybe-cli, scrybe-mcp-server, scrybe-mermaid]
 
     runs-on: ${{ matrix.os }}
     steps:
@@ -126,15 +139,38 @@ jobs:
           name: wheels-${{ matrix.crate }}-${{ matrix.os }}
           path: ${{ matrix.crate }}/dist/*.whl
 
-  # ── Publish to PyPI ───────────────────────────────────────────────────────
+  # ── Pure-Python metapackage (scrybe.ai) ───────────────────────────────────
+
+  build-meta:
+    name: Metapackage (scrybe.ai)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install build tooling
+        run: python -m pip install --upgrade build
+
+      - name: Build sdist + wheel
+        working-directory: scrybe-meta
+        run: python -m build --outdir dist
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: meta-scrybe-ai
+          path: scrybe-meta/dist/*
+
+  # ── Publish to PyPI (trusted publishing — OIDC) ───────────────────────────
 
   publish-pypi:
     name: Publish to PyPI
-    needs: build-wheels
+    needs: [build-wheels, build-meta]
     runs-on: ubuntu-latest
     environment: pypi
     permissions:
-      id-token: write    # OIDC trusted publishing
+      id-token: write    # OIDC trusted publishing — no API token needed
 
     steps:
       - uses: actions/download-artifact@v4
@@ -143,5 +179,15 @@ jobs:
           merge-multiple: true
           path: dist/
 
+      - uses: actions/download-artifact@v4
+        with:
+          name: meta-scrybe-ai
+          path: dist/
+
       - name: Publish
         uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          # Idempotent: if a release/** branch push and a v* tag push both
+          # build the same version, the second upload no-ops instead of
+          # erroring. Lets the user freely release from either trigger.
+          skip-existing: true

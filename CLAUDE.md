@@ -147,7 +147,8 @@ producing:
 - **macOS**: `Scrybe_<version>_aarch64.dmg` + `Scrybe_<version>_x86_64.dmg`
 - **Windows**: `Scrybe_<version>_x86_64-setup.exe`
 - **Linux**: `scrybe_<version>_amd64.AppImage` + `scrybe_<version>_amd64.deb`
-- **Python wheels**: `scrybe-cli`, `scrybe-mcp-server` for all platforms
+- **Python wheels** (PyPI, all platforms via maturin): `scrybe-py`, `scrybe-cli`, `scrybe-mcp-server`, `scrybe-mermaid`
+- **Python metapackage** (PyPI, pure Python): `scrybe.ai` — pulls in the four leaf packages
 
 ## MCP Integration
 
