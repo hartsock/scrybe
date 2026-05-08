@@ -4,7 +4,7 @@ build-backend = "maturin"
 
 [project]
 name = "scrybe-cli"
-version = "0.5.20260507"
+version = "0.1.0a1"
 description = "Scrybe CLI — headless Markdown render/lint/mermaid tool (binary wheel)"
 license = {text = "Apache-2.0"}
 requires-python = ">=3.9"

@@ -1,6 +1,6 @@
 [package]
 name = "scrybe-mermaid"
-version = "0.5.20260507"
+version = "0.1.0-a1"
 edition = "2021"
 description = "Scrybe mermaid — standalone PNG iTXt codec, embeds Mermaid source in PNG metadata"
 license = "Apache-2.0"
