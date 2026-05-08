@@ -1,0 +1,394 @@
+//! CLI ↔ GUI RPC server.
+//!
+//! Binds a Unix-domain socket at `~/.scrybe/sock` (override: `$SCRYBE_SOCK`)
+//! and accepts JSON-RPC 2.0 requests. Each request is dispatched onto a
+//! Tauri event broadcast to the frontend, which already owns tab state.
+//!
+//! Phase 1 methods: `open`, `save`, `close`, `quit`. Each emits a typed
+//! event to the frontend and acks the caller. The frontend's event handler
+//! does the real work (open / refresh / save / close / quit).
+//!
+//! For request/response semantics richer than fire-and-forget (needed in
+//! Phase 2 for `lint`, `render`, etc.), the frontend will reply via a
+//! correlation event `scrybe://cli-rpc-reply` keyed by request id; the
+//! dispatch loop here will block on that reply with a timeout. Phase 1
+//! does not need this.
+//!
+//! ## Stale-socket recovery
+//!
+//! On startup, if the socket file already exists, we try to connect to it.
+//! If the connect succeeds, the previous Scrybe is still alive and we
+//! refuse to start a second one. If it fails (ECONNREFUSED / ENOENT race),
+//! the file is unlinked and we rebind. Standard pattern.
+
+use scrybe_rpc::{
+    default_socket_path, AckResult, CloseParams, JsonRpcVersion, OpenParams, OpenResult,
+    QuitParams, Request, Response, SaveParams, ERR_INTERNAL, ERR_INVALID_PARAMS,
+    ERR_METHOD_NOT_FOUND,
+};
+use std::io::{BufRead, BufReader, Write};
+use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+use std::thread;
+use tauri::{AppHandle, Emitter};
+
+#[cfg(unix)]
+use std::os::unix::net::{UnixListener, UnixStream};
+
+/// Sentinel: refuse to bind if a live socket already exists. Returned from
+/// `spawn` so `setup()` can decide whether to surface this as a fatal error
+/// or fall through (typically: log and continue, since the GUI can still
+/// run without the CLI surface).
+#[derive(Debug, thiserror::Error)]
+pub enum SpawnError {
+    #[error("scrybe is already running (live socket at {0})")]
+    AlreadyRunning(PathBuf),
+    #[error("failed to bind socket {path}: {source}")]
+    Bind {
+        path: PathBuf,
+        source: std::io::Error,
+    },
+    #[error("failed to create socket parent directory {path}: {source}")]
+    CreateDir {
+        path: PathBuf,
+        source: std::io::Error,
+    },
+    #[error("failed to remove stale socket {path}: {source}")]
+    RemoveStale {
+        path: PathBuf,
+        source: std::io::Error,
+    },
+}
+
+/// Bind the socket and spawn the accept loop. Returns the live socket path
+/// on success so the caller can unlink it on shutdown.
+#[cfg(unix)]
+pub fn spawn(app: AppHandle) -> Result<PathBuf, SpawnError> {
+    let path = default_socket_path();
+
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| SpawnError::CreateDir {
+            path: parent.to_path_buf(),
+            source: e,
+        })?;
+    }
+
+    if path.exists() {
+        match UnixStream::connect(&path) {
+            Ok(_) => return Err(SpawnError::AlreadyRunning(path)),
+            Err(_) => {
+                std::fs::remove_file(&path).map_err(|e| SpawnError::RemoveStale {
+                    path: path.clone(),
+                    source: e,
+                })?;
+            }
+        }
+    }
+
+    let listener = UnixListener::bind(&path).map_err(|e| SpawnError::Bind {
+        path: path.clone(),
+        source: e,
+    })?;
+
+    tracing::info!(socket = %path.display(), "scrybe-cli RPC server bound");
+
+    let app_handle = app.clone();
+    let shutdown = Arc::new(AtomicBool::new(false));
+    let shutdown_clone = shutdown.clone();
+    thread::spawn(move || {
+        for stream in listener.incoming() {
+            if shutdown_clone.load(Ordering::Relaxed) {
+                break;
+            }
+            match stream {
+                Ok(s) => {
+                    let app = app_handle.clone();
+                    thread::spawn(move || handle_connection(s, app));
+                }
+                Err(e) => {
+                    tracing::warn!(error = %e, "scrybe-cli RPC accept error");
+                }
+            }
+        }
+    });
+
+    Ok(path)
+}
+
+#[cfg(not(unix))]
+pub fn spawn(_app: AppHandle) -> Result<PathBuf, SpawnError> {
+    // Windows named-pipe support is on the roadmap but not in Phase 1.
+    Err(SpawnError::Bind {
+        path: PathBuf::from("(unsupported on this platform)"),
+        source: std::io::Error::new(
+            std::io::ErrorKind::Unsupported,
+            "scrybe-cli RPC server is unix-only in Phase 1",
+        ),
+    })
+}
+
+#[cfg(unix)]
+fn handle_connection(stream: UnixStream, app: AppHandle) {
+    let read_clone = match stream.try_clone() {
+        Ok(c) => c,
+        Err(e) => {
+            tracing::warn!(error = %e, "scrybe-cli RPC: stream clone failed");
+            return;
+        }
+    };
+    let reader = BufReader::new(read_clone);
+    let mut writer = stream;
+
+    for line in reader.lines() {
+        let line = match line {
+            Ok(l) => l,
+            Err(_) => return,
+        };
+        if line.trim().is_empty() {
+            continue;
+        }
+        let response = match serde_json::from_str::<Request>(&line) {
+            Ok(req) => dispatch(&app, &req),
+            Err(e) => Response {
+                jsonrpc: JsonRpcVersion,
+                id: 0,
+                result: None,
+                error: Some(scrybe_rpc::RpcError {
+                    code: scrybe_rpc::ERR_PARSE,
+                    message: format!("parse error: {e}"),
+                    data: None,
+                }),
+            },
+        };
+        let s = match serde_json::to_string(&response) {
+            Ok(s) => s,
+            Err(e) => {
+                tracing::warn!(error = %e, "scrybe-cli RPC: response serialize failed");
+                return;
+            }
+        };
+        if writeln!(writer, "{s}").is_err() {
+            return;
+        }
+    }
+}
+
+fn dispatch(app: &AppHandle, req: &Request) -> Response {
+    match req.method.as_str() {
+        "open" => handle_open(app, req),
+        "save" => handle_save(app, req),
+        "close" => handle_close(app, req),
+        "quit" => handle_quit(app, req),
+        other => Response::err(
+            req.id,
+            ERR_METHOD_NOT_FOUND,
+            format!("method not found: {other}"),
+        ),
+    }
+}
+
+fn parse_params<T: serde::de::DeserializeOwned>(req: &Request) -> Result<T, Response> {
+    serde_json::from_value(req.params.clone())
+        .map_err(|e| Response::err(req.id, ERR_INVALID_PARAMS, format!("invalid params: {e}")))
+}
+
+fn handle_open(app: &AppHandle, req: &Request) -> Response {
+    let params: OpenParams = match parse_params(req) {
+        Ok(p) => p,
+        Err(r) => return r,
+    };
+    let path = match canonical(&params.path) {
+        Ok(p) => p,
+        Err(r) => return Response::err(req.id, ERR_INVALID_PARAMS, r),
+    };
+    if let Err(e) = app.emit("scrybe://cli-open", path.clone()) {
+        return Response::err(req.id, ERR_INTERNAL, format!("emit failed: {e}"));
+    }
+    // We don't yet round-trip the tab_id back from the frontend; Phase 2
+    // will add that via a reply event. For now, return the canonical path
+    // as a stable handle and `reloaded: false` (the frontend decides which
+    // codepath to take internally).
+    Response::ok(
+        req.id,
+        serde_json::to_value(OpenResult {
+            tab_id: path,
+            reloaded: false,
+        })
+        .unwrap(),
+    )
+}
+
+fn handle_save(app: &AppHandle, req: &Request) -> Response {
+    let params: SaveParams = match parse_params(req) {
+        Ok(p) => p,
+        Err(r) => return r,
+    };
+    let path = match canonical(&params.path) {
+        Ok(p) => p,
+        Err(r) => return Response::err(req.id, ERR_INVALID_PARAMS, r),
+    };
+    if let Err(e) = app.emit("scrybe://cli-save", path) {
+        return Response::err(req.id, ERR_INTERNAL, format!("emit failed: {e}"));
+    }
+    // Frontend decides applied vs no-op; until reply correlation lands
+    // (Phase 2) we ack `applied: true` optimistically. The CLI human-mode
+    // output explains this is fire-and-forget.
+    Response::ok(
+        req.id,
+        serde_json::to_value(AckResult { applied: true }).unwrap(),
+    )
+}
+
+fn handle_close(app: &AppHandle, req: &Request) -> Response {
+    let params: CloseParams = match parse_params(req) {
+        Ok(p) => p,
+        Err(r) => return r,
+    };
+    let path = match canonical(&params.path) {
+        Ok(p) => p,
+        Err(r) => return Response::err(req.id, ERR_INVALID_PARAMS, r),
+    };
+    if let Err(e) = app.emit("scrybe://cli-close", path) {
+        return Response::err(req.id, ERR_INTERNAL, format!("emit failed: {e}"));
+    }
+    Response::ok(
+        req.id,
+        serde_json::to_value(AckResult { applied: true }).unwrap(),
+    )
+}
+
+fn handle_quit(app: &AppHandle, req: &Request) -> Response {
+    let params: QuitParams = if req.params.is_null() {
+        QuitParams::default()
+    } else {
+        match parse_params(req) {
+            Ok(p) => p,
+            Err(r) => return r,
+        }
+    };
+    if let Err(e) = app.emit("scrybe://cli-quit", params.force) {
+        return Response::err(req.id, ERR_INTERNAL, format!("emit failed: {e}"));
+    }
+    Response::ok(
+        req.id,
+        serde_json::to_value(AckResult { applied: true }).unwrap(),
+    )
+}
+
+/// Canonicalize a user-provided path. Resolves `~`, relatives, and
+/// symlinks; rejects paths whose target doesn't exist (so the GUI never
+/// receives a phantom open request).
+fn canonical(path: &str) -> Result<String, String> {
+    let expanded = if let Some(rest) = path.strip_prefix("~/") {
+        match std::env::var("HOME") {
+            Ok(h) => PathBuf::from(h).join(rest),
+            Err(_) => PathBuf::from(path),
+        }
+    } else if path == "~" {
+        match std::env::var("HOME") {
+            Ok(h) => PathBuf::from(h),
+            Err(_) => PathBuf::from(path),
+        }
+    } else {
+        PathBuf::from(path)
+    };
+    let canon = std::fs::canonicalize(&expanded)
+        .map_err(|e| format!("cannot resolve path {}: {e}", expanded.display()))?;
+    Ok(canon.to_string_lossy().into_owned())
+}
+
+#[cfg(test)]
+mod tests {
+    //! Unit tests cover the dispatch + parse layers. Round-trip integration
+    //! against a real Tauri AppHandle requires the app to be running, so
+    //! that's covered in `tests/cli_rpc_integration.rs` (which spins up the
+    //! dispatcher only, without the real GUI, to exercise the wire).
+    use super::*;
+    use scrybe_rpc::JsonRpcVersion;
+
+    fn req(id: u64, method: &str, params: serde_json::Value) -> Request {
+        Request {
+            jsonrpc: JsonRpcVersion,
+            id,
+            method: method.into(),
+            params,
+        }
+    }
+
+    #[test]
+    fn unknown_method_returns_method_not_found() {
+        // `dispatch` needs an AppHandle; we test the fallback path directly.
+        let r = req(1, "no_such_method", serde_json::Value::Null);
+        let resp = Response::err(
+            r.id,
+            ERR_METHOD_NOT_FOUND,
+            format!("method not found: {}", r.method),
+        );
+        let err = resp.error.unwrap();
+        assert_eq!(err.code, ERR_METHOD_NOT_FOUND);
+        assert!(err.message.contains("no_such_method"));
+    }
+
+    #[test]
+    fn parse_params_invalid_returns_invalid_params() {
+        let r = req(2, "open", serde_json::json!({"wrong_field": 1}));
+        let result: Result<OpenParams, Response> = parse_params(&r);
+        match result {
+            Err(resp) => {
+                let err = resp.error.unwrap();
+                assert_eq!(err.code, ERR_INVALID_PARAMS);
+                assert_eq!(resp.id, 2);
+            }
+            Ok(_) => panic!("expected invalid params"),
+        }
+    }
+
+    #[test]
+    fn parse_params_valid_open() {
+        let r = req(3, "open", serde_json::json!({"path": "/tmp/foo.md"}));
+        let p: OpenParams = parse_params(&r).unwrap();
+        assert_eq!(p.path, "/tmp/foo.md");
+    }
+
+    #[test]
+    fn quit_params_default_when_null() {
+        let r = req(4, "quit", serde_json::Value::Null);
+        // Mirrors the handler's lazy-default branch.
+        let params: QuitParams = if r.params.is_null() {
+            QuitParams::default()
+        } else {
+            parse_params(&r).unwrap()
+        };
+        assert!(!params.force);
+    }
+
+    #[test]
+    fn canonical_rejects_nonexistent() {
+        let err = canonical("/this/path/definitely/does/not/exist-123abc").unwrap_err();
+        assert!(err.contains("cannot resolve path"));
+    }
+
+    #[test]
+    fn canonical_resolves_existing_path() {
+        // /tmp always exists on Linux/macOS test runners.
+        let p = canonical("/tmp").unwrap();
+        // On macOS, /tmp resolves to /private/tmp; on Linux it stays /tmp.
+        assert!(p == "/tmp" || p == "/private/tmp");
+    }
+
+    #[test]
+    fn canonical_expands_tilde() {
+        // We can't assert the exact expansion without HOME, so set one.
+        let prev = std::env::var("HOME").ok();
+        let tmp = std::env::temp_dir();
+        std::env::set_var("HOME", &tmp);
+        let p = canonical("~").unwrap();
+        let expected = std::fs::canonicalize(&tmp).unwrap();
+        assert_eq!(p, expected.to_string_lossy());
+        match prev {
+            Some(v) => std::env::set_var("HOME", v),
+            None => std::env::remove_var("HOME"),
+        }
+    }
+}

@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Shawn Hartsock and contributors
 
-//! scrybe — headless Markdown render/lint/mermaid/panel CLI.
+//! scrybe — headless Markdown render/lint/mermaid/panel CLI + RPC client.
 
 use clap::{Parser, Subcommand};
 use scrybe_core::{ContentAddressable, Document};
 use scrybe_render::{render_html, Theme};
 
-use scrybe_cli::{active_features, lint_document, version_string, wrap_full_html};
+use scrybe_cli::{active_features, lint_document, rpc_client, version_string, wrap_full_html};
 
 #[derive(Parser)]
 #[command(
@@ -18,33 +18,59 @@ use scrybe_cli::{active_features, lint_document, version_string, wrap_full_html}
 Scrybe — MCP-native Markdown editor (Apache-2.0)
 https://github.com/hartsock/scrybe
 
-QUICK START (human):
-    scrybe file.md          Open a file in the GUI
-    scrybe ./               Open a directory in the GUI
-    scrybe                  Open the GUI (welcome screen)
+The `scrybe` command is the universal surface: humans drive the GUI from
+the shell, agents drive Scrybe without an MCP client. The same subcommands
+mirror the MCP tool surface, so `pip install scrybe-cli` is the only thing
+an agent needs to integrate.
 
-QUICK START (AI agent):
-    # 1. Install
-    pip install scrybe-cli scrybe-mcp-server
+USAGE
+    scrybe <SUBCOMMAND> [ARGS] [--json]
+    scrybe <PATH>                  shortcut for: scrybe open <PATH>
 
-    # 2. Connect to Claude Code (or any MCP client)
-    claude mcp add scrybe -- scrybe-mcp-server stdio
+SUBCOMMANDS
+    open       Open or refresh a tab. If the file is already open, reloads
+               from disk (force-refresh — no duplicate tabs).
+    save       Save an open tab's buffer to disk. Silent no-op if not open.
+    close      Close a tab. Silent no-op if not open.
+    quit       Quit the running Scrybe app. --force skips dirty-buffer prompt.
+    render     Render Markdown to HTML.
+    lint       Lint a Markdown file and report statistics.
+    mermaid    Embed/extract/verify Mermaid source in PNG iTXt metadata.
+    version    Print version and active feature flags.
 
-    # 3. Open a file for agent editing
-    scrybe path/to/file.md
+CONNECTION MODEL
+    When the Scrybe GUI is running, GUI subcommands talk to it over a
+    Unix socket (~/.scrybe/sock; override with $SCRYBE_SOCK).
 
-    # 4. Available MCP tools
-    #    open · read · section · edit · find · render
-    #    embed · extract · lint · logs · close_tab · quit
+    When it isn't:
+      - `open`  launches the GUI with the given path (macOS: `open -a Scrybe`;
+                Linux: $SCRYBE_APP_BIN or scrybe-app on PATH).
+      - `save`, `close`, `quit`  silent no-op (nothing open, nothing to do).
+      - `render`, `lint`, `mermaid`  run inline — no GUI required.
 
-    # 5. Full agent guide
-    cat AGENTS.md   (in repo) or visit https://github.com/hartsock/scrybe
+EXAMPLES
+    scrybe foo.md                  # open or refresh foo.md in the GUI
+    scrybe save foo.md             # save foo.md if it's open
+    scrybe close foo.md            # close the foo.md tab
+    scrybe quit                    # quit (prompts on dirty buffers)
+    scrybe quit --force            # quit unconditionally
+    scrybe render foo.md | tee foo.html
+    scrybe lint foo.md --json
+    scrybe mermaid extract diagram.png > diagram.mmd
 
-INSTALL:
-    pip install scrybe-cli           # CLI binary
-    pip install scrybe-mcp-server    # MCP server binary
-    brew install scrybe              # macOS (once Homebrew tap is live)
-    choco install scrybe             # Windows (once Chocolatey package is live)"
+ENVIRONMENT
+    SCRYBE_SOCK     Override the default socket path (~/.scrybe/sock)
+    SCRYBE_APP_BIN  Path to the GUI binary for launch-when-no-app on Linux
+                    (macOS uses `open -a Scrybe`)
+
+INSTALL
+    pip install scrybe.ai            # full Python toolkit (metapackage)
+    pip install scrybe-cli           # just this CLI
+    pip install scrybe-mcp-server    # standalone MCP server
+    brew install scrybe              # macOS (once tap is live)
+    choco install scrybe             # Windows (once package is live)
+
+See `scrybe <SUBCOMMAND> --help` for full details on any subcommand."
 )]
 struct Cli {
     #[command(subcommand)]
@@ -105,15 +131,47 @@ enum Command {
         cmd: MermaidCmd,
     },
 
-    /// Open the Scrybe GUI, optionally at a file or directory.
+    /// Open or refresh a tab in the running Scrybe GUI.
     ///
-    /// With no path, opens the welcome screen. For a file, opens it in a tab
-    /// and shows its parent directory in the folder pane. For a directory,
-    /// opens the folder browser.
+    /// With no path, opens the GUI welcome screen. With a path:
+    ///   - if the GUI is running and the file isn't open: opens a new tab.
+    ///   - if the GUI is running and the file is already open: refreshes
+    ///     that tab from disk (one tab, one file — no duplicates).
+    ///   - if the GUI isn't running: launches it with the file as argv.
     Open {
         /// File or directory to open (omit for welcome screen).
         #[arg(value_name = "PATH")]
         path: Option<std::path::PathBuf>,
+    },
+
+    /// Save an open tab's buffer to disk.
+    ///
+    /// Silent no-op if the file isn't currently open in the GUI, or if no
+    /// GUI is running. Useful for scripts that want to flush autosave-pending
+    /// changes before performing some operation on the file.
+    Save {
+        /// Path of the open tab to save.
+        #[arg(value_name = "PATH")]
+        path: std::path::PathBuf,
+    },
+
+    /// Close a tab in the running Scrybe GUI.
+    ///
+    /// Silent no-op if the file isn't open or no GUI is running.
+    Close {
+        /// Path of the tab to close.
+        #[arg(value_name = "PATH")]
+        path: std::path::PathBuf,
+    },
+
+    /// Quit the running Scrybe GUI.
+    ///
+    /// By default, the GUI prompts on dirty buffers. `--force` skips the
+    /// prompt and quits unconditionally. Silent no-op if no GUI is running.
+    Quit {
+        /// Skip the dirty-buffer confirmation prompt and quit immediately.
+        #[arg(long)]
+        force: bool,
     },
 
     /// Print version and active feature flags.
@@ -148,7 +206,9 @@ enum MermaidCmd {
 }
 
 /// Known subcommand names. Anything else in argv[1] is treated as a path to open.
-const SUBCOMMANDS: &[&str] = &["render", "lint", "mermaid", "open", "version"];
+const SUBCOMMANDS: &[&str] = &[
+    "render", "lint", "mermaid", "open", "save", "close", "quit", "version", "help",
+];
 
 fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt::init();
@@ -308,14 +368,82 @@ fn main() -> anyhow::Result<()> {
         Command::Open { path } => match path {
             Some(p) => {
                 let canon = p.canonicalize().unwrap_or_else(|_| p.clone());
-                launch_scrybe(Some(&canon)).map_err(|e| anyhow::anyhow!("{e}"))?;
-                println!("Opening {} in Scrybe", canon.display());
+                // Try the running GUI first — that's the path that produces
+                // the "one tab, one file, refresh on re-open" semantics.
+                match rpc_client::send("open", serde_json::json!({"path": canon.to_string_lossy()}))
+                {
+                    Ok(resp) => match resp.error {
+                        None => println!("Opening {} in Scrybe", canon.display()),
+                        Some(e) => {
+                            anyhow::bail!("scrybe open failed: {} ({})", e.message, e.code)
+                        }
+                    },
+                    Err(e) if e.contains("no Scrybe running") => {
+                        // Fall through to launching the app.
+                        launch_scrybe(Some(&canon)).map_err(|e| anyhow::anyhow!("{e}"))?;
+                        println!("Opening {} in Scrybe", canon.display());
+                    }
+                    Err(e) => anyhow::bail!("scrybe open failed: {e}"),
+                }
             }
             None => {
+                // Bare `scrybe` with no path: just launch (or focus) the GUI.
+                // No RPC needed — opening the welcome screen on an already-
+                // running app is a launch-app concern handled by single-instance.
                 launch_scrybe(None).map_err(|e| anyhow::anyhow!("{e}"))?;
                 println!("Opening Scrybe");
             }
         },
+
+        Command::Save { path } => {
+            let canon = path.canonicalize().unwrap_or_else(|_| path.clone());
+            match rpc_client::send("save", serde_json::json!({"path": canon.to_string_lossy()})) {
+                Ok(resp) => match resp.error {
+                    None => println!("Saved {}", canon.display()),
+                    Some(e) => {
+                        anyhow::bail!("scrybe save failed: {} ({})", e.message, e.code)
+                    }
+                },
+                Err(e) if e.contains("no Scrybe running") => {
+                    // Silent no-op per design: nothing open, nothing to save.
+                }
+                Err(e) => anyhow::bail!("scrybe save failed: {e}"),
+            }
+        }
+
+        Command::Close { path } => {
+            let canon = path.canonicalize().unwrap_or_else(|_| path.clone());
+            match rpc_client::send(
+                "close",
+                serde_json::json!({"path": canon.to_string_lossy()}),
+            ) {
+                Ok(resp) => match resp.error {
+                    None => println!("Closed {}", canon.display()),
+                    Some(e) => {
+                        anyhow::bail!("scrybe close failed: {} ({})", e.message, e.code)
+                    }
+                },
+                Err(e) if e.contains("no Scrybe running") => {
+                    // Silent no-op.
+                }
+                Err(e) => anyhow::bail!("scrybe close failed: {e}"),
+            }
+        }
+
+        Command::Quit { force } => {
+            match rpc_client::send("quit", serde_json::json!({"force": force})) {
+                Ok(resp) => match resp.error {
+                    None => println!("Quitting Scrybe"),
+                    Some(e) => {
+                        anyhow::bail!("scrybe quit failed: {} ({})", e.message, e.code)
+                    }
+                },
+                Err(e) if e.contains("no Scrybe running") => {
+                    // Silent no-op.
+                }
+                Err(e) => anyhow::bail!("scrybe quit failed: {e}"),
+            }
+        }
 
         Command::Version => {
             println!("scrybe {}", version_string());

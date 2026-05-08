@@ -30,6 +30,8 @@
 //!
 //! Full editor integration (P4.2–P4.11) builds on this IPC bridge.
 
+mod cli_rpc;
+
 use std::collections::{HashMap, HashSet};
 use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -763,6 +765,21 @@ pub fn run() {
                     }
                 }
             });
+
+            // CLI ↔ GUI RPC server (Phase 1 — open/save/close/quit).
+            // A failure to bind is logged but not fatal: the GUI can still
+            // run without the CLI surface. The most common failure is
+            // "another Scrybe is already running and owns the socket",
+            // which is the right outcome anyway (single-instance plugin
+            // also catches this from a different angle).
+            match cli_rpc::spawn(app.handle().clone()) {
+                Ok(path) => {
+                    tracing::info!(socket = %path.display(), "scrybe-cli RPC ready");
+                }
+                Err(e) => {
+                    tracing::warn!(error = %e, "scrybe-cli RPC unavailable");
+                }
+            }
 
             Ok(())
         })
