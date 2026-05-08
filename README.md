@@ -12,8 +12,20 @@ as MCP peers. Scrybe is itself an MCP server, drivable by external agents.
 ## Install
 
 ```bash
-pip install scrybe-cli scrybe-mcp-server   # CLI + MCP server
+pip install scrybe.ai          # full Python toolkit (library + CLI + MCP server + mermaid)
 ```
+
+Or pick individual components:
+
+```bash
+pip install scrybe-py          # PyO3 library — exposes `import scrybe`
+pip install scrybe-cli         # `scrybe` command-line tool
+pip install scrybe-mcp-server  # standalone MCP server binary
+pip install scrybe-mermaid     # PNG iTXt codec for embedded Mermaid sources
+```
+
+The **desktop app** (Tauri 2 — macOS / Windows / Linux) ships via
+[GitHub Releases](https://github.com/hartsock/scrybe/releases), not PyPI.
 
 macOS (coming soon): `brew install scrybe` — see [issue #1](https://github.com/hartsock/scrybe/issues/1)  
 Windows (coming soon): `choco install scrybe` — see [issue #2](https://github.com/hartsock/scrybe/issues/2)
