@@ -52,8 +52,7 @@ impl McpServer {
                 Err(e) => {
                     let _ = writeln!(
                         stdout,
-                        "{{\"jsonrpc\":\"2.0\",\"id\":null,\"error\":{{\"code\":-32700,\"message\":\"{}\"}}}}",
-                        e
+                        "{{\"jsonrpc\":\"2.0\",\"id\":null,\"error\":{{\"code\":-32700,\"message\":\"{e}\"}}}}"
                     );
                     let _ = stdout.flush();
                     continue;

@@ -49,7 +49,11 @@ struct WatchState {
 
 impl WatchState {
     fn new() -> Self {
-        Self { watcher: None, watched: HashSet::new(), last_save: HashMap::new() }
+        Self {
+            watcher: None,
+            watched: HashSet::new(),
+            last_save: HashMap::new(),
+        }
     }
 }
 
@@ -122,7 +126,9 @@ fn list_directory(path: String) -> Vec<serde_json::Value> {
 #[tauri::command]
 fn poll_close_tab() -> Option<String> {
     let p = std::path::Path::new("/tmp/scrybe-close-tab.txt");
-    if !p.exists() { return None; }
+    if !p.exists() {
+        return None;
+    }
     let content = std::fs::read_to_string(p).ok()?;
     let _ = std::fs::remove_file(p);
     Some(content.trim().to_string())
@@ -134,7 +140,13 @@ fn poll_close_tab() -> Option<String> {
 fn path_type(path: String) -> &'static str {
     let trimmed = path.trim_end_matches('/');
     let p = std::path::Path::new(trimmed);
-    if p.is_dir() { "dir" } else if p.is_file() { "file" } else { "missing" }
+    if p.is_dir() {
+        "dir"
+    } else if p.is_file() {
+        "file"
+    } else {
+        "missing"
+    }
 }
 
 /// Read the full text content of a file.
@@ -153,7 +165,7 @@ fn read_file(path: String) -> Result<String, String> {
 #[tauri::command]
 fn save_file(path: String, content: String) -> Result<(), String> {
     let p = std::path::Path::new(&path);
-    let bak = std::path::PathBuf::from(format!("{}~", path));
+    let bak = std::path::PathBuf::from(format!("{path}~"));
     if p.exists() && !bak.exists() {
         std::fs::copy(p, &bak).map_err(|e| format!("backup failed: {e}"))?;
     }
@@ -164,7 +176,7 @@ fn save_file(path: String, content: String) -> Result<(), String> {
 /// Silent no-op if the backup doesn't exist.
 #[tauri::command]
 fn remove_backup(path: String) -> Result<(), String> {
-    let bak = std::path::PathBuf::from(format!("{}~", path));
+    let bak = std::path::PathBuf::from(format!("{path}~"));
     if bak.exists() {
         std::fs::remove_file(&bak).map_err(|e| format!("remove backup failed: {e}"))?;
     }
@@ -281,7 +293,9 @@ fn get_initial_directory() -> Option<String> {
         } else {
             path.parent()?.to_path_buf()
         };
-        dir.canonicalize().ok().map(|p| p.to_string_lossy().into_owned())
+        dir.canonicalize()
+            .ok()
+            .map(|p| p.to_string_lossy().into_owned())
     } else {
         None
     }
@@ -297,7 +311,9 @@ fn get_initial_file() -> Option<String> {
     let arg = std::env::args().nth(1)?;
     let path = std::path::Path::new(&arg);
     if path.exists() && path.is_file() {
-        path.canonicalize().ok().map(|p| p.to_string_lossy().into_owned())
+        path.canonicalize()
+            .ok()
+            .map(|p| p.to_string_lossy().into_owned())
     } else {
         None
     }
@@ -316,7 +332,8 @@ fn log_append(level: String, message: String) -> Result<(), String> {
         .unwrap_or_default()
         .as_secs();
     let mut f = std::fs::OpenOptions::new()
-        .create(true).append(true)
+        .create(true)
+        .append(true)
         .open(log_path)
         .map_err(|e| e.to_string())?;
     writeln!(f, "{ts} [{level}] {message}").map_err(|e| e.to_string())
@@ -385,7 +402,7 @@ fn run_plugin(path: String, source: String) -> Result<String, String> {
         .map_err(|e| format!("failed to spawn plugin {path}: {e}"))?;
 
     if let Some(mut stdin) = child.stdin.take() {
-        let _ = writeln!(stdin, "{}", source);
+        let _ = writeln!(stdin, "{source}");
     }
 
     let output = child
@@ -596,7 +613,9 @@ fn vcs_remotes() -> Result<Vec<serde_json::Value>, String> {
 #[tauri::command]
 fn poll_reload_tab() -> Option<String> {
     let p = std::path::Path::new("/tmp/scrybe-reload-tab.txt");
-    if !p.exists() { return None; }
+    if !p.exists() {
+        return None;
+    }
     let content = std::fs::read_to_string(p).ok()?;
     let _ = std::fs::remove_file(p);
     Some(content.trim().to_string())
@@ -614,7 +633,8 @@ fn watch_file(path: String) -> Result<(), String> {
                 w.watch(
                     std::path::Path::new(&path),
                     notify::RecursiveMode::NonRecursive,
-                ).map_err(|e| e.to_string())?;
+                )
+                .map_err(|e| e.to_string())?;
             }
         }
     }
@@ -716,20 +736,28 @@ pub fn run() {
             std::thread::spawn(move || {
                 for result in rx {
                     let Ok(event) = result else { continue };
-                    if !matches!(event.kind, EventKind::Modify(_)) { continue }
+                    if !matches!(event.kind, EventKind::Modify(_)) {
+                        continue;
+                    }
                     for path in &event.paths {
                         let path_str = path.display().to_string();
                         // Check and remove self-write record without overlapping borrows.
                         let self_write = {
                             let mut guard = WATCH.lock().unwrap();
-                            guard.as_mut().and_then(|s| s.last_save.get(&path_str))
+                            guard
+                                .as_mut()
+                                .and_then(|s| s.last_save.get(&path_str))
                                 .map(|t| t.elapsed().as_millis() < 2000)
                                 .unwrap_or(false)
                         };
-                        if self_write { continue; }
+                        if self_write {
+                            continue;
+                        }
                         {
                             let mut guard = WATCH.lock().unwrap();
-                            if let Some(s) = guard.as_mut() { s.last_save.remove(&path_str); }
+                            if let Some(s) = guard.as_mut() {
+                                s.last_save.remove(&path_str);
+                            }
                         }
                         let _ = handle.emit("scrybe://file-changed", &path_str);
                     }

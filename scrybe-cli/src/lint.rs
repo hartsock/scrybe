@@ -45,13 +45,13 @@ impl LintReport {
 
 /// Analyses a [`Document`] and returns a [`LintReport`].
 pub fn lint_document(doc: &Document) -> LintReport {
-    let mut report = LintReport::default();
-
-    // Word count — rough whitespace split on the raw source.
-    report.word_count = doc.source.split_whitespace().count();
-
-    // Math detection — look for `$` in source.
-    report.has_math = doc.source.contains('$');
+    let mut report = LintReport {
+        // Word count — rough whitespace split on the raw source.
+        word_count: doc.source.split_whitespace().count(),
+        // Math detection — look for `$` in source.
+        has_math: doc.source.contains('$'),
+        ..Default::default()
+    };
 
     // Walk the AST for structural counts.
     let ast = Ast::parse(&doc.source);

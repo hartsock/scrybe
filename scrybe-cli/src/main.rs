@@ -305,19 +305,17 @@ fn main() -> anyhow::Result<()> {
             }
         },
 
-        Command::Open { path } => {
-            match path {
-                Some(p) => {
-                    let canon = p.canonicalize().unwrap_or_else(|_| p.clone());
-                    launch_scrybe(Some(&canon)).map_err(|e| anyhow::anyhow!("{e}"))?;
-                    println!("Opening {} in Scrybe", canon.display());
-                }
-                None => {
-                    launch_scrybe(None).map_err(|e| anyhow::anyhow!("{e}"))?;
-                    println!("Opening Scrybe");
-                }
+        Command::Open { path } => match path {
+            Some(p) => {
+                let canon = p.canonicalize().unwrap_or_else(|_| p.clone());
+                launch_scrybe(Some(&canon)).map_err(|e| anyhow::anyhow!("{e}"))?;
+                println!("Opening {} in Scrybe", canon.display());
             }
-        }
+            None => {
+                launch_scrybe(None).map_err(|e| anyhow::anyhow!("{e}"))?;
+                println!("Opening Scrybe");
+            }
+        },
 
         Command::Version => {
             println!("scrybe {}", version_string());
@@ -365,23 +363,30 @@ fn launch_scrybe(path: Option<&std::path::Path>) -> Result<(), String> {
             if let Some(p) = path {
                 cmd.arg("--args").arg(p);
             }
-            cmd.spawn().map_err(|e| format!("failed to open Scrybe.app: {e}"))?;
+            cmd.spawn()
+                .map_err(|e| format!("failed to open Scrybe.app: {e}"))?;
             return Ok(());
         }
     }
     // Non-macOS or no bundle found: launch the raw binary.
     let bin = which_scrybe_bin()?;
     let mut cmd = std::process::Command::new(&bin);
-    if let Some(p) = path { cmd.arg(p); }
-    cmd.spawn().map_err(|e| format!("failed to launch scrybe-app: {e}"))?;
+    if let Some(p) = path {
+        cmd.arg(p);
+    }
+    cmd.spawn()
+        .map_err(|e| format!("failed to launch scrybe-app: {e}"))?;
     Ok(())
 }
 
 /// Find `Scrybe.app` in standard macOS locations.
 #[cfg(target_os = "macos")]
 fn find_scrybe_app_bundle() -> Option<String> {
-    let home_apps = std::env::var("HOME").ok()
-        .map(|h| std::path::PathBuf::from(h).join("Applications").join("Scrybe.app"));
+    let home_apps = std::env::var("HOME").ok().map(|h| {
+        std::path::PathBuf::from(h)
+            .join("Applications")
+            .join("Scrybe.app")
+    });
     let candidates: &[Option<std::path::PathBuf>] = &[
         home_apps,
         Some(std::path::PathBuf::from("/Applications/Scrybe.app")),
@@ -410,7 +415,11 @@ fn inject_open_if_path(mut args: Vec<String>) -> Vec<String> {
 /// Locate the raw `scrybe-app` binary: sibling of current exe first, then PATH.
 fn which_scrybe_bin() -> Result<String, String> {
     if let Ok(exe) = std::env::current_exe() {
-        let name = if cfg!(windows) { "scrybe-app.exe" } else { "scrybe-app" };
+        let name = if cfg!(windows) {
+            "scrybe-app.exe"
+        } else {
+            "scrybe-app"
+        };
         let sibling = exe.with_file_name(name);
         if sibling.exists() {
             return Ok(sibling.to_string_lossy().into_owned());
@@ -426,5 +435,8 @@ fn which_scrybe_bin() -> Result<String, String> {
             return Ok(p);
         }
     }
-    Err("scrybe-app not found. Install Scrybe.app to ~/Applications or build with: just app".to_string())
+    Err(
+        "scrybe-app not found. Install Scrybe.app to ~/Applications or build with: just app"
+            .to_string(),
+    )
 }

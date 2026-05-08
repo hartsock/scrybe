@@ -349,7 +349,7 @@ setInterval(async () => {
 async function reloadTabFromDisk(path: string): Promise<void> {
   const tab = state.tabs.find(t => t.path === path);
   if (!tab) return;
-  const content: string = await invoke("read_file", { path }).catch(() => "");
+  const content = await invoke<string>("read_file", { path }).catch(() => "");
   if (!content) return;
   if (tab.isDirty) {
     // Dirty buffer — show conflict bar instead of silently clobbering

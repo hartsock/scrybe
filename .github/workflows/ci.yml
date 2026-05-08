@@ -12,6 +12,12 @@ on:
 
 env:
   RUST_BACKTRACE: 1
+  # The scrybe-k3s runner image bakes CARGO_HOME=/usr/local/cargo (root-owned)
+  # which the runner user cannot write to, so cargo fails with "Permission
+  # denied (os error 13)" on the first index/cache write. Override to a
+  # tmpfs-backed path the runner user owns. Until this is fixed in the
+  # runner image, every cargo-touching job must inherit this env.
+  CARGO_HOME: /tmp/.cargo
 
 jobs:
   lint-rust:
@@ -23,6 +29,15 @@ jobs:
         with:
           components: clippy, rustfmt
       - uses: Swatinem/rust-cache@v2
+      - name: Install system deps (Tauri on Linux)
+        # `cargo clippy --all-targets` includes scrybe-app/src-tauri, whose
+        # build deps (glib-sys, gtk-sys, libwebkit2gtk-sys) need pkg-config
+        # to find the matching system libraries. Mirrors the test-rust job.
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq \
+            libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev \
+            librsvg2-dev patchelf libssl-dev pkg-config
       - name: fmt check
         run: cargo fmt -- --check
       - name: clippy
