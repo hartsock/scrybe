@@ -719,6 +719,7 @@ pub fn run() {
             log_append,
             get_initial_directory,
             get_initial_file,
+            cli_rpc::cli_rpc_reply,
         ])
         .setup(|app| {
             use notify::EventKind;

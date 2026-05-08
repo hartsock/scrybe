@@ -125,6 +125,135 @@ pub struct QuitParams {
     pub force: bool,
 }
 
+// ── Phase 2: read-side params + results ──────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ReadParams {
+    pub path: String,
+}
+
+/// Result of `read`. Returns the in-memory buffer content (which may differ
+/// from disk if there are unsaved edits) along with state metadata.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ReadResult {
+    pub path: String,
+    pub content: String,
+    pub is_dirty: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct FindParams {
+    pub pattern: String,
+    /// If empty, search across all open tabs. Otherwise, search the named
+    /// paths (which the GUI may or may not have open — disk fallback for
+    /// non-open paths).
+    #[serde(default)]
+    pub paths: Vec<String>,
+    /// Treat `pattern` as a literal string instead of a regex.
+    #[serde(default)]
+    pub literal: bool,
+    /// Match case-sensitively (default: insensitive).
+    #[serde(default)]
+    pub case_sensitive: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct FindHit {
+    pub path: String,
+    /// 1-indexed line number.
+    pub line: u32,
+    /// 1-indexed column where the match starts within the line.
+    pub column: u32,
+    /// The line text (so callers can render context without re-reading).
+    pub text: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct FindResult {
+    pub hits: Vec<FindHit>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct SectionParams {
+    pub path: String,
+    /// Heading text to find. Case-insensitive substring match.
+    pub heading: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct SectionResult {
+    pub heading: String,
+    pub level: u8,
+    pub content: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct EditParams {
+    pub path: String,
+    /// 1-indexed inclusive line range to replace. Use the same value for
+    /// `start_line` and `end_line` to edit a single line. Use
+    /// `start_line == end_line + 1` semantics to insert without replacing
+    /// (handled by the frontend's edit logic).
+    pub start_line: u32,
+    pub end_line: u32,
+    /// New content for the range. Trailing newline behavior follows the
+    /// frontend's existing edit logic.
+    pub content: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct EditResult {
+    pub applied: bool,
+    pub size_after: usize,
+}
+
+// ── Reply correlation (server → frontend → server) ───────────────────────────
+//
+// For commands that need data BACK from the frontend (read, find, section,
+// edit), the server emits an event carrying `{id, data}` where `id` is the
+// request id. The frontend handles the work and submits a `cli_rpc_reply`
+// Tauri command with the same id and a `Reply` payload.
+
+/// Wire format for events the server emits to the frontend that need a
+/// reply. The frontend pattern-matches on the embedded `data` shape.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct EventEnvelope<T> {
+    pub id: u64,
+    pub data: T,
+}
+
+/// Wire format for replies the frontend sends back via `cli_rpc_reply`.
+/// Either `result` or `error` is set, never both. Mirrors `Response`'s
+/// shape (deliberately — the dispatcher converts this into the outgoing
+/// JSON-RPC `Response` directly).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct Reply {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub result: Option<serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<RpcError>,
+}
+
+impl Reply {
+    pub fn ok(result: serde_json::Value) -> Self {
+        Self {
+            result: Some(result),
+            error: None,
+        }
+    }
+
+    pub fn err(code: i32, message: impl Into<String>) -> Self {
+        Self {
+            result: None,
+            error: Some(RpcError {
+                code,
+                message: message.into(),
+                data: None,
+            }),
+        }
+    }
+}
+
 // ── JSON-RPC error codes ────────────────────────────────────────────────────
 //
 // Standard codes (-32700 to -32603) follow the spec; -32000 to -32099 is the
@@ -143,6 +272,15 @@ pub const ERR_TAB_NOT_OPEN: i32 = -32001;
 
 /// `quit` was requested with `force=false` but the app has dirty buffers.
 pub const ERR_DIRTY_QUIT_REFUSED: i32 = -32002;
+
+/// The frontend didn't reply to a request-with-reply within the timeout.
+/// Most likely cause: the GUI was busy or the user dismissed a modal that
+/// blocked the event loop. Caller can retry.
+pub const ERR_REPLY_TIMEOUT: i32 = -32003;
+
+/// The requested heading wasn't found in the document.
+/// Used by `section`.
+pub const ERR_SECTION_NOT_FOUND: i32 = -32004;
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -255,6 +393,155 @@ mod tests {
         let r: OpenResult = serde_json::from_value(v).unwrap();
         assert_eq!(r.tab_id, "");
         assert!(r.reloaded);
+    }
+
+    // ── Phase 2 — read-side type coverage ────────────────────────────────
+
+    #[test]
+    fn read_params_roundtrip() {
+        let p = ReadParams {
+            path: "/tmp/foo.md".into(),
+        };
+        let s = serde_json::to_string(&p).unwrap();
+        assert!(s.contains("/tmp/foo.md"));
+        let back: ReadParams = serde_json::from_str(&s).unwrap();
+        assert_eq!(back, p);
+    }
+
+    #[test]
+    fn read_result_roundtrip() {
+        let r = ReadResult {
+            path: "/tmp/foo.md".into(),
+            content: "# H1\n".into(),
+            is_dirty: true,
+        };
+        let v = serde_json::to_value(&r).unwrap();
+        let back: ReadResult = serde_json::from_value(v).unwrap();
+        assert_eq!(back, r);
+    }
+
+    #[test]
+    fn find_params_defaults() {
+        let p: FindParams = serde_json::from_str(r#"{"pattern": "TODO"}"#).unwrap();
+        assert_eq!(p.pattern, "TODO");
+        assert!(p.paths.is_empty());
+        assert!(!p.literal);
+        assert!(!p.case_sensitive);
+    }
+
+    #[test]
+    fn find_hit_serializes() {
+        let h = FindHit {
+            path: "/x".into(),
+            line: 10,
+            column: 5,
+            text: "match here".into(),
+        };
+        let v = serde_json::to_value(&h).unwrap();
+        assert_eq!(v["line"], 10);
+        assert_eq!(v["column"], 5);
+        let back: FindHit = serde_json::from_value(v).unwrap();
+        assert_eq!(back, h);
+    }
+
+    #[test]
+    fn find_result_default_empty() {
+        // Empty hits is the legitimate "no matches" case.
+        let r = FindResult { hits: vec![] };
+        let s = serde_json::to_string(&r).unwrap();
+        assert_eq!(s, r#"{"hits":[]}"#);
+    }
+
+    #[test]
+    fn section_params_roundtrip() {
+        let p = SectionParams {
+            path: "/tmp/foo.md".into(),
+            heading: "Install".into(),
+        };
+        let v = serde_json::to_value(&p).unwrap();
+        let back: SectionParams = serde_json::from_value(v).unwrap();
+        assert_eq!(back, p);
+    }
+
+    #[test]
+    fn section_result_roundtrip() {
+        let r = SectionResult {
+            heading: "Install".into(),
+            level: 2,
+            content: "## Install\n\n…\n".into(),
+        };
+        let v = serde_json::to_value(&r).unwrap();
+        let back: SectionResult = serde_json::from_value(v).unwrap();
+        assert_eq!(back, r);
+    }
+
+    #[test]
+    fn edit_params_roundtrip() {
+        let p = EditParams {
+            path: "/tmp/foo.md".into(),
+            start_line: 1,
+            end_line: 5,
+            content: "new content".into(),
+        };
+        let v = serde_json::to_value(&p).unwrap();
+        let back: EditParams = serde_json::from_value(v).unwrap();
+        assert_eq!(back, p);
+    }
+
+    #[test]
+    fn edit_result_serializes() {
+        let r = EditResult {
+            applied: true,
+            size_after: 1024,
+        };
+        let v = serde_json::to_value(&r).unwrap();
+        assert_eq!(v, serde_json::json!({"applied": true, "size_after": 1024}));
+    }
+
+    #[test]
+    fn reply_ok_serializes_result_only() {
+        let r = Reply::ok(serde_json::json!({"x": 1}));
+        let s = serde_json::to_string(&r).unwrap();
+        assert!(s.contains(r#""result":{"x":1}"#));
+        assert!(!s.contains("\"error\""));
+    }
+
+    #[test]
+    fn reply_err_serializes_error_only() {
+        let r = Reply::err(ERR_TAB_NOT_OPEN, "not open");
+        let s = serde_json::to_string(&r).unwrap();
+        assert!(s.contains(r#""code":-32001"#));
+        assert!(!s.contains("\"result\""));
+    }
+
+    #[test]
+    fn event_envelope_carries_id_and_data() {
+        let env = EventEnvelope {
+            id: 7,
+            data: serde_json::json!({"path": "/tmp/x"}),
+        };
+        let v = serde_json::to_value(&env).unwrap();
+        assert_eq!(v["id"], 7);
+        assert_eq!(v["data"]["path"], "/tmp/x");
+    }
+
+    #[test]
+    fn error_codes_are_distinct() {
+        // Sanity check: app-defined codes don't collide with each other or
+        // with reserved standard codes (-32700 to -32603).
+        let codes = [
+            ERR_TAB_NOT_OPEN,
+            ERR_DIRTY_QUIT_REFUSED,
+            ERR_REPLY_TIMEOUT,
+            ERR_SECTION_NOT_FOUND,
+        ];
+        for &c in &codes {
+            assert!((-32099..=-32000).contains(&c), "code {c} outside app range");
+        }
+        let mut sorted = codes.to_vec();
+        sorted.sort_unstable();
+        sorted.dedup();
+        assert_eq!(sorted.len(), codes.len(), "codes collide");
     }
 
     #[test]

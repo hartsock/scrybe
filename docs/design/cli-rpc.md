@@ -1,6 +1,6 @@
 # `scrybe` CLI as the universal command surface
 
-**Status:** Phase 1 implemented (open / save / close / quit). Phase 2 to follow.
+**Status:** Phase 1 + Phase 2 implemented. The full MCP-mirroring CLI surface is in place.
 
 ## Goal
 
@@ -10,21 +10,36 @@ A single `scrybe` binary that mirrors every MCP tool. Humans drive the GUI from 
 
 JSON-RPC 2.0, newline-delimited, one line per request and one per response. Transport is a Unix-domain socket (Windows named pipe deferred to a follow-up). Default path is `~/.scrybe/sock`; override with `$SCRYBE_SOCK`.
 
-### Methods (Phase 1)
+### Methods
+
+**Phase 1 — fire-and-forget GUI mutations:**
 
 | Method | Params | Result |
 |---|---|---|
-| `open`  | `{path: String}` | `{tab_id: String, reloaded: bool}` |
-| `save`  | `{path: String}` | `{applied: bool}` |
-| `close` | `{path: String}` | `{applied: bool}` |
-| `quit`  | `{force: bool}` | `{applied: bool}` |
+| `open`  | `{path}` | `{tab_id, reloaded}` |
+| `save`  | `{path}` | `{applied}` (false = file not open; no-op) |
+| `close` | `{path}` | `{applied}` |
+| `quit`  | `{force}` | `{applied}` |
+
+**Phase 2 — request-with-reply read-side:**
+
+| Method | Params | Result |
+|---|---|---|
+| `read` | `{path}` | `{path, content, is_dirty}` |
+| `find` | `{pattern, paths, literal, case_sensitive}` | `{hits: [{path, line, column, text}]}` |
+| `section` | `{path, heading}` | `{heading, level, content}` |
+| `edit` | `{path, start_line, end_line, content}` | `{applied, size_after}` |
+
+`find` paths is optional (empty = search all open tabs). `section` heading match is case-insensitive substring; the section runs from the matched heading to the next heading of the same or shallower level.
 
 ### Error codes
 
 Standard JSON-RPC codes (`-32700` parse, `-32600` invalid request, `-32601` method not found, `-32602` invalid params, `-32603` internal). App-defined range starts at `-32000`:
 
-- `-32001` — tab not open (Phase 2 readers; Phase 1 collapses this to `applied: false` for `save`/`close`)
-- `-32002` — quit refused due to dirty buffers (`force=false` and unsaved tabs exist)
+- `-32001` `ERR_TAB_NOT_OPEN` — `read`/`section`/`edit` against a path that isn't open in the GUI; `save`/`close` collapse this to `applied: false` instead.
+- `-32002` `ERR_DIRTY_QUIT_REFUSED` — `quit` with `force=false` and unsaved tabs exist.
+- `-32003` `ERR_REPLY_TIMEOUT` — frontend didn't reply within 5s. Caller can retry.
+- `-32004` `ERR_SECTION_NOT_FOUND` — `section` heading didn't match any heading in the document.
 
 ## Structure
 
@@ -94,12 +109,20 @@ The Reload action reuses `reloadTabFromDisk(path)` — the same function the fil
 - 7 integration tests against a real socket; 10 unit tests on wire types; 5 unit tests on RPC client; 6 unit tests on the server-side dispatcher helpers
 - Closes the second half of #15 (force-reload-on-`open` semantics)
 
-### Phase 2 (follow-up)
+### Phase 2 (this update)
 
-- Read-side methods: `lint`, `render`, `read`, `find`, `section`, `edit`, `embed`, `extract`
-- `--json` flag plumbing on read-side commands
-- Inline fallbacks for `lint`/`render`/`embed`/`extract`/`find`/`section` when no GUI is running
-- Reply-correlation via `scrybe://cli-rpc-reply`
+- Read-side methods: `read`, `find`, `section`, `edit`
+- Reply correlation via `cli_rpc_reply` Tauri command + `PENDING_REPLIES` registry; 5s timeout
+- `--json` flag on every read-side command
+- `embed` / `extract` promoted to top-level subcommands (`mermaid embed/extract` still works as before)
+- 13 integration tests + 23 wire-type unit tests + 5 rpc_client unit tests + 6 server-side unit tests
+
+### Future / not yet in scope
+
+- Subprocess-based `assert_cmd` tests for `main.rs`'s clap dispatch (still 0% line coverage)
+- Buffer-aware `lint`/`render` (today they always run inline against disk; could route through the socket to lint the in-memory buffer when the GUI is running and the file is open)
+- `logs` command (MCP has it; not yet reflected in the CLI)
+- Windows named-pipe transport (currently `cfg(unix)` only)
 
 ## Test coverage
 
