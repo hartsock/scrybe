@@ -165,7 +165,7 @@ fn read_file(path: String) -> Result<String, String> {
 #[tauri::command]
 fn save_file(path: String, content: String) -> Result<(), String> {
     let p = std::path::Path::new(&path);
-    let bak = std::path::PathBuf::from(format!("{}~", path));
+    let bak = std::path::PathBuf::from(format!("{path}~"));
     if p.exists() && !bak.exists() {
         std::fs::copy(p, &bak).map_err(|e| format!("backup failed: {e}"))?;
     }
@@ -176,7 +176,7 @@ fn save_file(path: String, content: String) -> Result<(), String> {
 /// Silent no-op if the backup doesn't exist.
 #[tauri::command]
 fn remove_backup(path: String) -> Result<(), String> {
-    let bak = std::path::PathBuf::from(format!("{}~", path));
+    let bak = std::path::PathBuf::from(format!("{path}~"));
     if bak.exists() {
         std::fs::remove_file(&bak).map_err(|e| format!("remove backup failed: {e}"))?;
     }
@@ -402,7 +402,7 @@ fn run_plugin(path: String, source: String) -> Result<String, String> {
         .map_err(|e| format!("failed to spawn plugin {path}: {e}"))?;
 
     if let Some(mut stdin) = child.stdin.take() {
-        let _ = writeln!(stdin, "{}", source);
+        let _ = writeln!(stdin, "{source}");
     }
 
     let output = child
