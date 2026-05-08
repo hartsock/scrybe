@@ -30,6 +30,7 @@ tauri-plugin-shell = "2"
 tauri-plugin-dialog = "2"
 dirs = "5"
 which.workspace = true
+notify = "6"
 
 [lints]
 workspace = true

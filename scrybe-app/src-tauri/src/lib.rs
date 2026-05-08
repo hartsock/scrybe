@@ -30,10 +30,30 @@
 //!
 //! Full editor integration (P4.2–P4.11) builds on this IPC bridge.
 
+use std::collections::{HashMap, HashSet};
 use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
+use std::time::Instant;
 use tauri::{Emitter as _, Manager as _};
+
+// ─── File watcher state ───────────────────────────────────────────────────────
+
+struct WatchState {
+    watcher: Option<notify::RecommendedWatcher>,
+    /// Paths currently being watched.
+    watched: HashSet<String>,
+    /// Timestamp of the last autosave per path — used to filter self-writes.
+    last_save: HashMap<String, Instant>,
+}
+
+impl WatchState {
+    fn new() -> Self {
+        Self { watcher: None, watched: HashSet::new(), last_save: HashMap::new() }
+    }
+}
+
+static WATCH: Mutex<Option<WatchState>> = Mutex::new(None);
 
 /// Simple shell state — one shell process per app window for P4.11.
 /// A full async PTY with multiplexed I/O is deferred to a follow-up node.
@@ -123,20 +143,32 @@ fn read_file(path: String) -> Result<String, String> {
     std::fs::read_to_string(&path).map_err(|e| e.to_string())
 }
 
-/// Write `content` to `path`, creating `<path>.bak` on the first save of each
+/// Write `content` to `path`, creating `<path>~` on the first save of each
 /// session so the original on-disk version is always recoverable.
 ///
-/// The `.bak` is written only once per path: if it already exists it is left
-/// alone, preserving the true "opened from disk" snapshot across multiple
-/// autosave cycles.
+/// The `~` backup is written only once per path: if it already exists it is
+/// left alone, preserving the true "opened from disk" snapshot across multiple
+/// autosave cycles. The backup is removed when the tab is closed via
+/// `remove_backup`.
 #[tauri::command]
 fn save_file(path: String, content: String) -> Result<(), String> {
     let p = std::path::Path::new(&path);
-    let bak = std::path::PathBuf::from(format!("{}.bak", path));
+    let bak = std::path::PathBuf::from(format!("{}~", path));
     if p.exists() && !bak.exists() {
         std::fs::copy(p, &bak).map_err(|e| format!("backup failed: {e}"))?;
     }
     std::fs::write(p, content).map_err(|e| format!("write failed: {e}"))
+}
+
+/// Remove the `<path>~` backup file when a tab is closed.
+/// Silent no-op if the backup doesn't exist.
+#[tauri::command]
+fn remove_backup(path: String) -> Result<(), String> {
+    let bak = std::path::PathBuf::from(format!("{}~", path));
+    if bak.exists() {
+        std::fs::remove_file(&bak).map_err(|e| format!("remove backup failed: {e}"))?;
+    }
+    Ok(())
 }
 
 /// Return the built-in agent registry (static list; persistence is P4.5+).
@@ -559,6 +591,62 @@ fn vcs_remotes() -> Result<Vec<serde_json::Value>, String> {
         .collect())
 }
 
+/// Poll for an MCP-driven `reload` signal on the current file path.
+/// Returns the path to reload, or `null` if no signal is pending.
+#[tauri::command]
+fn poll_reload_tab() -> Option<String> {
+    let p = std::path::Path::new("/tmp/scrybe-reload-tab.txt");
+    if !p.exists() { return None; }
+    let content = std::fs::read_to_string(p).ok()?;
+    let _ = std::fs::remove_file(p);
+    Some(content.trim().to_string())
+}
+
+/// Register a file path with the OS file watcher.
+/// Call when a tab is opened. Safe to call multiple times for the same path.
+#[tauri::command]
+fn watch_file(path: String) -> Result<(), String> {
+    use notify::Watcher as _;
+    let mut guard = WATCH.lock().unwrap();
+    if let Some(state) = guard.as_mut() {
+        if state.watched.insert(path.clone()) {
+            if let Some(w) = state.watcher.as_mut() {
+                w.watch(
+                    std::path::Path::new(&path),
+                    notify::RecursiveMode::NonRecursive,
+                ).map_err(|e| e.to_string())?;
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Unregister a file path from the OS file watcher.
+/// Call when a tab is closed.
+#[tauri::command]
+fn unwatch_file(path: String) -> Result<(), String> {
+    use notify::Watcher as _;
+    let mut guard = WATCH.lock().unwrap();
+    if let Some(state) = guard.as_mut() {
+        if state.watched.remove(&path) {
+            if let Some(w) = state.watcher.as_mut() {
+                let _ = w.unwatch(std::path::Path::new(&path));
+            }
+        }
+        state.last_save.remove(&path);
+    }
+    Ok(())
+}
+
+/// Record that an autosave just wrote `path` to disk, so the file watcher
+/// can ignore the resulting modify event (self-write filtering).
+#[tauri::command]
+fn note_autosave(path: String) {
+    if let Some(state) = WATCH.lock().unwrap().as_mut() {
+        state.last_save.insert(path, Instant::now());
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -580,9 +668,14 @@ pub fn run() {
             get_version,
             list_directory,
             poll_close_tab,
+            poll_reload_tab,
+            watch_file,
+            unwatch_file,
+            note_autosave,
             path_type,
             read_file,
             save_file,
+            remove_backup,
             get_builtin_agents,
             set_agent_enabled,
             list_plugins,
@@ -605,7 +698,46 @@ pub fn run() {
             get_initial_directory,
             get_initial_file,
         ])
-        .setup(|_app| Ok(()))
+        .setup(|app| {
+            use notify::EventKind;
+
+            let handle = app.handle().clone();
+            let (tx, rx) = std::sync::mpsc::channel::<notify::Result<notify::Event>>();
+
+            let mut ws = WatchState::new();
+            ws.watcher = Some(
+                notify::recommended_watcher(tx)
+                    .map_err(|e| format!("file watcher init failed: {e}"))?,
+            );
+            *WATCH.lock().unwrap() = Some(ws);
+
+            // Background thread: forward external modify events to the frontend.
+            // Self-writes (autosave) are filtered out if they occurred < 2 s ago.
+            std::thread::spawn(move || {
+                for result in rx {
+                    let Ok(event) = result else { continue };
+                    if !matches!(event.kind, EventKind::Modify(_)) { continue }
+                    for path in &event.paths {
+                        let path_str = path.display().to_string();
+                        // Check and remove self-write record without overlapping borrows.
+                        let self_write = {
+                            let mut guard = WATCH.lock().unwrap();
+                            guard.as_mut().and_then(|s| s.last_save.get(&path_str))
+                                .map(|t| t.elapsed().as_millis() < 2000)
+                                .unwrap_or(false)
+                        };
+                        if self_write { continue; }
+                        {
+                            let mut guard = WATCH.lock().unwrap();
+                            if let Some(s) = guard.as_mut() { s.last_save.remove(&path_str); }
+                        }
+                        let _ = handle.emit("scrybe://file-changed", &path_str);
+                    }
+                }
+            });
+
+            Ok(())
+        })
         .run(tauri::generate_context!())
         .expect("error while running Scrybe");
 }

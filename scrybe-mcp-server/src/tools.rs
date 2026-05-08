@@ -14,7 +14,7 @@ use std::collections::HashMap;
 /// All tool names exposed by scrybe-mcp-server.
 pub const TOOL_NAMES: &[&str] = &[
     "open", "read", "section", "edit", "find", "render", "embed", "extract", "lint", "logs", "quit",
-    "close_tab",
+    "close_tab", "reload",
 ];
 
 /// Path shared between the Tauri app's `log_append` command and this tool.
@@ -161,6 +161,18 @@ impl ToolRegistry {
                 }
             },
             {
+                "name": "reload",
+                "description": "Re-read an open document from disk, replacing the in-memory buffer. Use after any external edit (vim, Claude Code Edit, git checkout) to keep Scrybe in sync and prevent autosave from clobbering external changes.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "id": {"type": "string", "description": "DocumentId(...) of the open document to reload"},
+                        "force": {"type": "boolean", "description": "If false (default) and buffer differs from disk, returns an error. Set true to discard in-memory changes."}
+                    },
+                    "required": ["id"]
+                }
+            },
+            {
                 "name": "logs",
                 "description": "Read recent console log entries from the running Scrybe app (errors, warnings, info). Returns up to `tail` lines (default 50).",
                 "inputSchema": {
@@ -188,6 +200,7 @@ impl ToolRegistry {
             "logs" => self.tool_logs(args),
             "quit" => self.tool_quit(),
             "close_tab" => self.tool_close_tab(args),
+            "reload"    => self.tool_reload(args),
             other => json!({"error": format!("unknown tool: {other}")}),
         }
     }
@@ -482,6 +495,56 @@ impl ToolRegistry {
         }
     }
 
+    fn tool_reload(&mut self, args: &Value) -> Value {
+        let id_str = match args["id"].as_str() {
+            Some(s) => s,
+            None => return json!({"error": "id required"}),
+        };
+        let force = args["force"].as_bool().unwrap_or(false);
+
+        let doc_id = match self.id_map.get(id_str) {
+            Some(id) => *id,
+            None => return json!({"error": format!("unknown id: {id_str}")}),
+        };
+
+        // Get the file path from the document.
+        let path = match self.workspace.get(&doc_id) {
+            Some(doc) => match doc.path.clone() {
+                Some(p) => p,
+                None => return json!({"error": "document has no file path"}),
+            },
+            None => return json!({"error": "document not found"}),
+        };
+
+        let new_source = match std::fs::read_to_string(&path) {
+            Ok(s) => s,
+            Err(e) => return json!({"error": format!("read failed: {e}")}),
+        };
+
+        // Dirty check: in-memory content differs from what's on disk.
+        let is_dirty = self.workspace.get(&doc_id)
+            .map(|d| d.source != new_source)
+            .unwrap_or(false);
+
+        if is_dirty && !force {
+            return json!({"error": "buffer dirty; pass force=true to discard"});
+        }
+
+        // Replace in-memory content.
+        if let Some(doc) = self.workspace.get_mut(&doc_id) {
+            doc.source = new_source.clone();
+        }
+
+        // Signal the GUI to refresh the tab.
+        let path_str = path.display().to_string();
+        if let Err(e) = std::fs::write("/tmp/scrybe-reload-tab.txt", &path_str) {
+            return json!({"ok": true, "path": path_str,
+                "warning": format!("GUI signal failed: {e}")});
+        }
+
+        json!({"ok": true, "path": path_str, "bytes": new_source.len()})
+    }
+
     fn tool_logs(&self, args: &Value) -> Value {
         let tail = args["tail"].as_u64().unwrap_or(50) as usize;
         match std::fs::read_to_string(LOG_FILE) {
@@ -579,7 +642,7 @@ mod tests {
         let reg = ToolRegistry::new();
         let tools = reg.list_tools_json();
         let arr = tools["tools"].as_array().unwrap();
-        assert_eq!(arr.len(), 11);
+        assert_eq!(arr.len(), 13);
     }
 
     #[test]
