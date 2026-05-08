@@ -205,8 +205,8 @@ fn read_returns_buffer_content() {
         )
     });
 
-    let resp = rpc_client::send_to(&sock, "read", serde_json::json!({"path": "/tmp/foo.md"}))
-        .unwrap();
+    let resp =
+        rpc_client::send_to(&sock, "read", serde_json::json!({"path": "/tmp/foo.md"})).unwrap();
     let r = resp.result.unwrap();
     assert_eq!(r["content"], "# Hello\nfrom an in-memory buffer.\n");
     assert_eq!(r["is_dirty"], true);
@@ -220,8 +220,8 @@ fn read_propagates_tab_not_open_error() {
     let _received = mock_server(&sock, |req| {
         Response::err(req.id, ERR_TAB_NOT_OPEN, "not open: /tmp/x.md")
     });
-    let resp = rpc_client::send_to(&sock, "read", serde_json::json!({"path": "/tmp/x.md"}))
-        .unwrap();
+    let resp =
+        rpc_client::send_to(&sock, "read", serde_json::json!({"path": "/tmp/x.md"})).unwrap();
     let e = resp.error.unwrap();
     assert_eq!(e.code, ERR_TAB_NOT_OPEN);
     assert!(e.message.contains("not open"));
@@ -313,7 +313,10 @@ fn section_propagates_not_found() {
 fn edit_returns_applied_and_size_after() {
     let sock = unique_socket_path("edit");
     let _received = mock_server(&sock, |req| {
-        Response::ok(req.id, serde_json::json!({"applied": true, "size_after": 1234}))
+        Response::ok(
+            req.id,
+            serde_json::json!({"applied": true, "size_after": 1234}),
+        )
     });
     let resp = rpc_client::send_to(
         &sock,
