@@ -29,7 +29,7 @@ impl ContentId {
 
     /// Verifies that *content* matches this CID.
     pub fn verify(&self, content: &[u8]) -> bool {
-        ContentId::of(content) == *self
+        Self::of(content) == *self
     }
 }
 

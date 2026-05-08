@@ -274,7 +274,7 @@ impl ToolRegistry {
             None => return json!({"error": "id required"}),
         };
         let level = match args["level"].as_u64() {
-            Some(l) if l >= 1 && l <= 6 => l as u8,
+            Some(l) if (1..=6).contains(&l) => l as u8,
             _ => return json!({"error": "level must be 1-6"}),
         };
         let index = match args["index"].as_u64() {
