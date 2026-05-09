@@ -1,10 +1,14 @@
 [package]
 name = "scrybe-render"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 description = "Scrybe render — Markdown-to-HTML pipeline, syntect, KaTeX/Mermaid"
 license = "Apache-2.0"
 repository = "https://github.com/hartsock/scrybe"
+homepage = "https://github.com/hartsock/scrybe"
+readme = "README.md"
+keywords = ["markdown", "html", "render", "syntect", "scrybe"]
+categories = ["text-processing"]
 
 [dependencies]
 scrybe-core.workspace = true

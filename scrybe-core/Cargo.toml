@@ -1,10 +1,14 @@
 [package]
 name = "scrybe-core"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 description = "Scrybe core — AST, Document, ContentAddressable, Plugin trait, Workspace"
 license = "Apache-2.0"
 repository = "https://github.com/hartsock/scrybe"
+homepage = "https://github.com/hartsock/scrybe"
+readme = "README.md"
+keywords = ["markdown", "ast", "document", "content-addressed", "scrybe"]
+categories = ["text-processing", "data-structures"]
 
 [dependencies]
 anyhow.workspace = true

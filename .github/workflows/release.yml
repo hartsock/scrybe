@@ -250,3 +250,84 @@ jobs:
           # build the same version, the second upload no-ops instead of
           # erroring. Lets the user freely release from either trigger.
           skip-existing: true
+
+  # ── Publish to crates.io (Rust library + binary crates) ───────────────────
+  #
+  # Tag-only — branch pushes to release/** build wheels but don't publish to
+  # crates.io. Once a crate version lands on crates.io it cannot be re-uploaded
+  # under the same version (only yanked), so accidental publication from a
+  # release-branch push would be expensive to undo.
+  #
+  # Runs on the self-hosted scrybe-k3s scale set. The runner pod has
+  # CARGO_REGISTRY_TOKEN injected from a Vault-backed k8s Secret
+  # (secret/release/crates-io/claude-ai → scrybe-crates-io-token via VSO);
+  # see my_home/manifests/arc/scrybe-vso/ + scrybe-runners-values.yml.
+  #
+  # Sequenced (not matrix-parallel) because crates with internal path-deps
+  # need their dependencies on crates.io before the publish call resolves.
+  # `cargo publish` blocks until the new version is live on the index, so
+  # serial chaining is safe. Topological order:
+  #
+  #     scrybe-mermaid  scrybe-core  scrybe-rpc      ← independent leaves
+  #                          ↓
+  #                    scrybe-render
+  #                          ↓
+  #                   scrybe-mcp-server
+  #                          ↓
+  #                     scrybe-cli
+  #
+  # `cargo publish` returns success on "version already exists" only when
+  # `--allow-dirty` is set AND we explicitly ignore the error — we DO NOT do
+  # that here. If a release fails partway through, RC iteration is the
+  # recovery path: bump to rc2, re-tag, the leaves that already published
+  # under rc1 won't matter because rc2 is a fresh version everywhere.
+
+  publish-crates:
+    name: Publish ${{ matrix.crate.name }} → crates.io
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: [build-wheels, build-sdists, build-meta]
+    runs-on: scrybe-k3s
+    strategy:
+      fail-fast: false   # let independent leaves keep going if one of them fails
+      max-parallel: 1    # but ALWAYS one at a time — internal deps need order
+      matrix:
+        # Order encoded as a list; matrix iterates in array order with
+        # max-parallel=1, so this IS the topological sequence.
+        crate:
+          - { name: scrybe-mermaid,    pkg: scrybe-mermaid }
+          - { name: scrybe-core,       pkg: scrybe-core }
+          - { name: scrybe-rpc,        pkg: scrybe-rpc }
+          - { name: scrybe-render,     pkg: scrybe-render }
+          - { name: scrybe-mcp-server, pkg: scrybe-mcp-server }
+          - { name: scrybe-cli,        pkg: scrybe-cli }
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: publish-${{ matrix.crate.name }}
+
+      - name: Confirm CARGO_REGISTRY_TOKEN is mounted
+        run: |
+          if [ -z "${CARGO_REGISTRY_TOKEN}" ]; then
+            echo "::error::CARGO_REGISTRY_TOKEN not in environment — check VSO sync at scrybe-crates-io-token"
+            exit 1
+          fi
+          echo "CARGO_REGISTRY_TOKEN: present (${#CARGO_REGISTRY_TOKEN} chars)"
+
+      - name: cargo publish ${{ matrix.crate.pkg }}
+        # --no-verify: skip the local "extract tarball + rebuild" step.
+        # `cargo publish`'s verify pass writes to the cargo cache at
+        # CARGO_HOME (= /usr/local/cargo on this runner image), which is
+        # mounted from a FlexClone subPath that the runner user doesn't
+        # own — every dep fetch fails with "Permission denied (os error
+        # 13)". The verify pass is also redundant: the Rust lint + tests
+        # in ci.yml + the build-wheels jobs above already exercise this
+        # exact code on the same commit. We keep --locked so Cargo.lock
+        # drift still fails the publish.
+        run: cargo publish -p ${{ matrix.crate.pkg }} --locked --no-verify
+        env:
+          CARGO_TERM_COLOR: always
