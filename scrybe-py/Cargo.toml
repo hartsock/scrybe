@@ -1,6 +1,6 @@
 [package]
 name = "scrybe-py"
-version = "0.1.0-a1"
+version = "0.1.0"
 edition = "2021"
 description = "Scrybe PyO3 bindings — scrybe._rust extension module"
 license = "Apache-2.0"
@@ -23,7 +23,16 @@ thiserror.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 tracing.workspace = true
-pyo3 = { version = "0.28", features = ["auto-initialize"], optional = true }
+# auto-initialize is for Rust binaries that *embed* Python; this crate is
+# an extension module that Python loads. The flag breaks manylinux's
+# static-linked Python builds. Only the `extension-module` feature is
+# wanted here, gated through the workspace `extension-module` feature.
+#
+# abi3-py39: build a stable-ABI wheel that loads on Python 3.9+. Without
+# this, maturin produces version-specific wheels (cp39, cp311, …) and
+# users on other Python versions can't install. Stable ABI = single wheel
+# per platform covers all versions ≥ 3.9.
+pyo3 = { version = "0.28", features = ["abi3-py39"], optional = true }
 
 [lints]
 workspace = true

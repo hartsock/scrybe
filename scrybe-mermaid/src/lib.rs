@@ -26,3 +26,86 @@ pub struct MermaidPayload {
     /// SHA-256 of the source bytes (for integrity verification).
     pub sha256: String,
 }
+
+// ── Python bindings ─────────────────────────────────────────────────────────
+//
+// Exposes `embed`, `extract`, and `MermaidPayload` to Python under the
+// `scrybe_mermaid._rust` module. Mirrors `scrybe-py`'s pyo3 v0.28 conventions.
+//
+// Python developers can:
+//
+//     >>> import scrybe_mermaid
+//     >>> with open("diagram.png", "rb") as f: png = f.read()
+//     >>> embedded = scrybe_mermaid.embed(png, "graph TD; A-->B")
+//     >>> payload = scrybe_mermaid.extract(embedded)
+//     >>> payload.source
+//     'graph TD; A-->B'
+//     >>> payload.sha256
+//     '83af36...'
+
+#[cfg(feature = "python")]
+mod python {
+    use pyo3::exceptions::PyValueError;
+    use pyo3::prelude::*;
+    use pyo3::types::PyBytes;
+
+    /// Embed Mermaid source as an iTXt metadata chunk in a PNG.
+    /// Returns the new PNG bytes; the original is unchanged.
+    #[pyfunction]
+    #[pyo3(name = "embed")]
+    fn py_embed<'py>(
+        py: Python<'py>,
+        png_bytes: &[u8],
+        source: &str,
+    ) -> PyResult<Bound<'py, PyBytes>> {
+        let out = crate::codec::embed(png_bytes, source)
+            .map_err(|e| PyValueError::new_err(e.to_string()))?;
+        Ok(PyBytes::new(py, &out))
+    }
+
+    /// Extract embedded Mermaid source from a PNG.
+    /// Raises `ValueError` if the PNG has no iTXt chunk with key `scrybe-mermaid`
+    /// or if the embedded sha256 doesn't match the source bytes.
+    #[pyfunction]
+    #[pyo3(name = "extract")]
+    fn py_extract(png_bytes: &[u8]) -> PyResult<PyMermaidPayload> {
+        crate::codec::extract(png_bytes)
+            .map(|p| PyMermaidPayload {
+                source: p.source,
+                sha256: p.sha256,
+            })
+            .map_err(|e| PyValueError::new_err(e.to_string()))
+    }
+
+    /// Result of `extract`. `source` is the Mermaid diagram text; `sha256`
+    /// is the hex digest of `source.encode('utf-8')` at embed time.
+    #[pyclass(name = "MermaidPayload", skip_from_py_object)]
+    #[derive(Clone)]
+    struct PyMermaidPayload {
+        #[pyo3(get)]
+        source: String,
+        #[pyo3(get)]
+        sha256: String,
+    }
+
+    #[pymethods]
+    impl PyMermaidPayload {
+        fn __repr__(&self) -> String {
+            format!(
+                "MermaidPayload(source={:?}, sha256={:?})",
+                self.source, self.sha256
+            )
+        }
+    }
+
+    #[pymodule]
+    pub fn _rust(m: &Bound<'_, PyModule>) -> PyResult<()> {
+        m.add_class::<PyMermaidPayload>()?;
+        m.add_function(wrap_pyfunction!(py_embed, m)?)?;
+        m.add_function(wrap_pyfunction!(py_extract, m)?)?;
+        Ok(())
+    }
+}
+
+#[cfg(feature = "python")]
+pub use python::_rust;

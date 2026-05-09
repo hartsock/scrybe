@@ -139,6 +139,37 @@ jobs:
           name: wheels-${{ matrix.crate }}-${{ matrix.os }}
           path: ${{ matrix.crate }}/dist/*.whl
 
+  # ── Source distributions (sdists) for each maturin crate ──────────────────
+  #
+  # Wheels cover the majority of installs, but sdists are the portable
+  # fallback for any platform/Python combination we don't ship a wheel
+  # for. Without an sdist on PyPI, users on uncovered Python versions
+  # get "No matching distribution found" with no recourse. One sdist
+  # per crate, built on Linux (sdist content is platform-independent).
+
+  build-sdists:
+    name: Sdist (${{ matrix.crate }})
+    strategy:
+      fail-fast: false
+      matrix:
+        crate: [scrybe-py, scrybe-cli, scrybe-mcp-server, scrybe-mermaid]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: PyO3/maturin-action@v1
+        with:
+          working-directory: ${{ matrix.crate }}
+          command: sdist
+          args: --out dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sdist-${{ matrix.crate }}
+          path: ${{ matrix.crate }}/dist/*.tar.gz
+
   # ── Pure-Python metapackage (scrybe.ai) ───────────────────────────────────
 
   build-meta:
@@ -176,7 +207,7 @@ jobs:
 
   publish-pypi:
     name: Publish ${{ matrix.package.name }}
-    needs: [build-wheels, build-meta]
+    needs: [build-wheels, build-sdists, build-meta]
     runs-on: ubuntu-latest
     environment: pypi
     permissions:
@@ -186,21 +217,28 @@ jobs:
       fail-fast: false
       matrix:
         package:
-          - { name: scrybe.ai,         pattern: meta-scrybe-ai }
-          - { name: scrybe-py,         pattern: wheels-scrybe-py-* }
-          - { name: scrybe-cli,        pattern: wheels-scrybe-cli-* }
-          - { name: scrybe-mcp-server, pattern: wheels-scrybe-mcp-server-* }
-          - { name: scrybe-mermaid,    pattern: wheels-scrybe-mermaid-* }
+          # Filename-glob matches BOTH the wheels and the sdist for each
+          # PyPI project (PEP 503 normalization: scrybe.ai → scrybe_ai,
+          # scrybe-cli → scrybe_cli, etc.).
+          - { name: scrybe.ai,         glob: scrybe_ai-* }
+          - { name: scrybe-cli,        glob: scrybe_cli-* }
+          - { name: scrybe-py,         glob: scrybe_py-* }
+          - { name: scrybe-mcp-server, glob: scrybe_mcp_server-* }
+          - { name: scrybe-mermaid,    glob: scrybe_mermaid-* }
 
     steps:
-      - uses: actions/download-artifact@v4
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
         with:
-          pattern: ${{ matrix.package.pattern }}
-          merge-multiple: true
-          path: dist/
+          path: all-artifacts/
 
-      - name: Show artifacts to publish
-        run: ls -la dist/
+      - name: Filter to ${{ matrix.package.name }}
+        run: |
+          mkdir -p dist
+          find all-artifacts -name '${{ matrix.package.glob }}' -exec cp {} dist/ \;
+          echo "::group::dist/ contents for ${{ matrix.package.name }}"
+          ls -la dist/
+          echo "::endgroup::"
 
       - name: Publish ${{ matrix.package.name }}
         uses: pypa/gh-action-pypi-publish@release/v1

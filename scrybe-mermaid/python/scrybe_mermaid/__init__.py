@@ -3,7 +3,15 @@
 
 Architecture: ADR-0001 — Python on the outside, Rust on the inside.
 """
-__version__ = "0.5.20260506"
+try:
+    from importlib.metadata import PackageNotFoundError, version as _pkg_version
+
+    try:
+        __version__ = _pkg_version("scrybe-mermaid")
+    except PackageNotFoundError:
+        __version__ = "0.0.0+unknown"
+except ImportError:
+    __version__ = "0.0.0+unknown"
 
 _MISSING_MSG = (
     "scrybe-mermaid requires the compiled Rust extension.\n"
