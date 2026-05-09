@@ -38,15 +38,18 @@ jobs:
           - platform: macos-latest      # M-series Apple Silicon
             args: "--target aarch64-apple-darwin"
             label: macos-arm64
-          - platform: macos-13          # Intel x86_64
-            args: "--target x86_64-apple-darwin"
-            label: macos-x86_64
           - platform: ubuntu-22.04
             args: ""
             label: linux-x86_64
           - platform: windows-latest
             args: ""
             label: windows-x86_64
+          # macOS Intel (macos-13 runner) was dropped from the matrix:
+          # GitHub-hosted Intel Mac runners have multi-hour queue times
+          # as Apple winds down x86_64 hardware. Apple Silicon users get
+          # a native arm64 DMG; Intel Mac users can run that DMG via
+          # Rosetta 2 or build from source. Restore this entry if the
+          # runner queue improves or we set up a self-hosted Intel Mac.
 
     runs-on: ${{ matrix.platform }}
     steps:
@@ -60,7 +63,7 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
         with:
-          targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin' || matrix.platform == 'macos-13' && 'x86_64-apple-darwin' || '' }}
+          targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin' || '' }}
 
       - uses: Swatinem/rust-cache@v2
 
@@ -88,9 +91,9 @@ jobs:
             ### Install
 
             **macOS (Apple Silicon):** Download `Scrybe_*_aarch64.dmg`
-            **macOS (Intel):** Download `Scrybe_*_x86_64.dmg`
-            **Windows:** Download `Scrybe_*_x86_64-setup.exe`
-            **Linux:** Download `scrybe_*_amd64.AppImage` or `.deb`
+            **macOS (Intel):** Use the Apple Silicon `.dmg` via Rosetta 2, or build from source (`scrybe-app/`)
+            **Windows:** Download `Scrybe_*_x64-setup.exe` or `Scrybe_*_x64_en-US.msi`
+            **Linux:** Download `Scrybe_*_amd64.AppImage`, `.deb`, or `.rpm`
 
             **Python (all platforms):**
             ```bash
