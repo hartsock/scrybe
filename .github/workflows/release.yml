@@ -319,6 +319,15 @@ jobs:
           echo "CARGO_REGISTRY_TOKEN: present (${#CARGO_REGISTRY_TOKEN} chars)"
 
       - name: cargo publish ${{ matrix.crate.pkg }}
-        run: cargo publish -p ${{ matrix.crate.pkg }} --locked
+        # --no-verify: skip the local "extract tarball + rebuild" step.
+        # `cargo publish`'s verify pass writes to the cargo cache at
+        # CARGO_HOME (= /usr/local/cargo on this runner image), which is
+        # mounted from a FlexClone subPath that the runner user doesn't
+        # own — every dep fetch fails with "Permission denied (os error
+        # 13)". The verify pass is also redundant: the Rust lint + tests
+        # in ci.yml + the build-wheels jobs above already exercise this
+        # exact code on the same commit. We keep --locked so Cargo.lock
+        # drift still fails the publish.
+        run: cargo publish -p ${{ matrix.crate.pkg }} --locked --no-verify
         env:
           CARGO_TERM_COLOR: always
