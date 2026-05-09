@@ -4,9 +4,10 @@ build-backend = "maturin"
 
 [project]
 name = "scrybe-cli"
-version = "0.1.0a1"
+version = "0.1.0"
 description = "Scrybe CLI — headless Markdown render/lint/mermaid tool (binary wheel)"
 license = {text = "Apache-2.0"}
+readme = "README.md"
 requires-python = ">=3.9"
 dependencies = []
 
@@ -17,3 +18,8 @@ Homepage = "https://github.com/hartsock/scrybe"
 bindings = "bin"
 bin-name = "scrybe"
 manifest-path = "Cargo.toml"
+# python-source: ship a thin Python wrapper alongside the Rust binary so
+# `import scrybe_cli` works (re-exports `scrybe-py`'s library surface
+# when installed). The binary is the primary deliverable; the wrapper is
+# a convenience for Python developers introspecting / scripting.
+python-source = "python"

@@ -4,9 +4,10 @@ build-backend = "maturin"
 
 [project]
 name = "scrybe-mcp-server"
-version = "0.1.0a1"
+version = "0.1.0"
 description = "Scrybe MCP server — standalone inbound MCP server (binary wheel)"
 license = {text = "Apache-2.0"}
+readme = "README.md"
 requires-python = ">=3.9"
 dependencies = []
 
@@ -16,3 +17,13 @@ Homepage = "https://github.com/hartsock/scrybe"
 [tool.maturin]
 bindings = "bin"
 manifest-path = "Cargo.toml"
+# python-source: ship a thin Python wrapper alongside the Rust binary so
+# `import scrybe_mcp_server` works (re-exports `scrybe-py`'s library
+# surface when installed). The binary is the primary deliverable.
+python-source = "python"
+# module-name: explicitly tell maturin the Python module dir under
+# python-source. Without a Rust [lib] section to derive from, maturin
+# defaults to the PyPI project name (with hyphens), which isn't valid
+# for Python module names. scrybe-cli works without this only because
+# it has a [lib] name = "scrybe_cli" that maturin reads.
+module-name = "scrybe_mcp_server"

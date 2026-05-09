@@ -11,6 +11,14 @@ The real APIs live in those packages; this module exists only as a
 distribution anchor so the metapackage has a valid wheel.
 """
 
-__version__ = "0.5.20260507"
+try:
+    from importlib.metadata import PackageNotFoundError, version as _pkg_version
+
+    try:
+        __version__ = _pkg_version("scrybe.ai")
+    except PackageNotFoundError:
+        __version__ = "0.0.0+unknown"
+except ImportError:
+    __version__ = "0.0.0+unknown"
 
 __all__ = ["__version__"]

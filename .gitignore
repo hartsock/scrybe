@@ -10,3 +10,13 @@ Thumbs.db
 *.iml
 # Tauri generated files
 src-tauri/gen/
+# Maturin develop builds drop compiled extensions inside python/<pkg>/.
+# These shouldn't be tracked — CI builds them from source.
+**/python/**/*.so
+**/python/**/*.pyd
+**/python/**/__pycache__/
+
+# Python bytecode caches anywhere in the tree (more general than the
+# python/ tree-specific rule above).
+__pycache__/
+*.pyc

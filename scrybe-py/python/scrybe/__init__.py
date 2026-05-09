@@ -10,7 +10,18 @@ extension is absent, every public symbol raises ImportError on first use
 with clear instructions — there is no silent pure-Python fallback.
 """
 
-__version__ = "0.5.20260506"
+# Track the installed package version automatically so we never ship a stale
+# string. importlib.metadata is stdlib on Python 3.8+; falls back to a
+# placeholder when the source tree is run uninstalled.
+try:
+    from importlib.metadata import PackageNotFoundError, version as _pkg_version
+
+    try:
+        __version__ = _pkg_version("scrybe-py")
+    except PackageNotFoundError:
+        __version__ = "0.0.0+unknown"
+except ImportError:
+    __version__ = "0.0.0+unknown"
 
 try:
     from scrybe._rust import ContentId, Document, render_markdown
