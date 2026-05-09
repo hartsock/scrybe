@@ -21,7 +21,7 @@ dev = ["pytest>=8", "pytest-mock>=3"]
 scrybe-docx = "scrybe_plugin_docx.main:main"
 
 [project.urls]
-Homepage = "https://github.com/hartsock/gilabot"
+Homepage = "https://github.com/hartsock/scrybe"
 Issues = "https://github.com/hartsock/scrybe/issues/3"
 
 [tool.setuptools.packages.find]
