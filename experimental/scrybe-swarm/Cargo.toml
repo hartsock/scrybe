@@ -1,10 +1,12 @@
 [package]
 name = "scrybe-swarm"
-version = "0.1.0"
+version = "0.1.1-rc1"
 edition = "2021"
 description = "Scrybe swarm — async-nats wrapper for swarm-chat sidebar and activity feed"
 license = "Apache-2.0"
 repository = "https://github.com/hartsock/scrybe"
+# Experimental — not published.
+publish = false
 
 [dependencies]
 scrybe-core.workspace = true
