@@ -1,10 +1,13 @@
 [package]
 name = "scrybe-app"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 description = "Scrybe desktop application — Tauri 2 + CodeMirror 6"
 license = "Apache-2.0"
 repository = "https://github.com/hartsock/scrybe"
+# Tauri desktop app — distributed as platform installers (.dmg/.exe/.AppImage)
+# via release.yml, not as a crates.io crate.
+publish = false
 
 [lib]
 name = "scrybe_app_lib"

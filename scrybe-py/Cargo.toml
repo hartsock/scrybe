@@ -1,10 +1,12 @@
 [package]
 name = "scrybe-py"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 description = "Scrybe PyO3 bindings — scrybe._rust extension module"
 license = "Apache-2.0"
 repository = "https://github.com/hartsock/scrybe"
+# Distributed as a Python wheel (PyPI) via maturin, not as a crates.io crate.
+publish = false
 
 [lib]
 name = "scrybe"

@@ -1,10 +1,14 @@
 [package]
 name = "scrybe-mcp-server"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 description = "Scrybe MCP server — inbound MCP tools: open/read/section/edit/diff/find/embed/lint"
 license = "Apache-2.0"
 repository = "https://github.com/hartsock/scrybe"
+homepage = "https://github.com/hartsock/scrybe"
+readme = "README.md"
+keywords = ["mcp", "markdown", "ai-tools", "scrybe", "editor"]
+categories = ["command-line-utilities", "text-processing"]
 
 [[bin]]
 name = "scrybe-mcp-server"

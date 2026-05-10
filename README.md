@@ -11,6 +11,8 @@ as MCP peers. Scrybe is itself an MCP server, drivable by external agents.
 
 ## Install
 
+### Python (PyPI)
+
 ```bash
 pip install scrybe.ai          # full Python toolkit (library + CLI + MCP server + mermaid)
 ```
@@ -24,8 +26,33 @@ pip install scrybe-mcp-server  # standalone MCP server binary
 pip install scrybe-mermaid     # PNG iTXt codec for embedded Mermaid sources
 ```
 
+### Rust (crates.io)
+
+```bash
+cargo install scrybe-cli scrybe-mcp-server
+```
+
+That gets you the same two binaries (`scrybe`, `scrybe-mcp-server`) the
+PyPI wheels carry. The supporting library crates — `scrybe-core`,
+`scrybe-render`, `scrybe-mermaid`, `scrybe-rpc` — are available for
+direct dependency in Rust projects:
+
+```toml
+[dependencies]
+scrybe-core    = "0.1"
+scrybe-render  = "0.1"
+scrybe-mermaid = "0.1"
+```
+
+Crates.io has no metapackage equivalent of `scrybe.ai`; the bare name
+`scrybe` is held by an unrelated project. Install the binaries you want
+explicitly.
+
+### Desktop app
+
 The **desktop app** (Tauri 2 — macOS / Windows / Linux) ships via
-[GitHub Releases](https://github.com/hartsock/scrybe/releases), not PyPI.
+[GitHub Releases](https://github.com/hartsock/scrybe/releases), not PyPI
+or crates.io.
 
 macOS (coming soon): `brew install scrybe` — see [issue #1](https://github.com/hartsock/scrybe/issues/1)  
 Windows (coming soon): `choco install scrybe` — see [issue #2](https://github.com/hartsock/scrybe/issues/2)
@@ -65,18 +92,34 @@ Python on the outside, Rust on the inside.
 | [`scrybe-mcp-server`](scrybe-mcp-server/README.md) | Inbound MCP — 12 tools for agent document editing |
 | [`scrybe-mcp-client`](scrybe-mcp-client/README.md) | Outbound MCP — registers external agent servers |
 | [`scrybe-mermaid`](scrybe-mermaid/README.md) | Standalone PNG iTXt codec (Mermaid source in PNG metadata) |
+| [`scrybe-rpc`](scrybe-rpc/README.md) | JSON-RPC 2.0 wire protocol — CLI ↔ GUI over Unix socket |
 | [`scrybe-vcs`](scrybe-vcs/README.md) | git2 multi-remote VCS wrapper |
 | [`scrybe-py`](scrybe-py/README.md) | Python library — `import scrybe` for plugins and tooling |
 | [`scrybe-cli`](scrybe-cli/README.md) | Headless CLI binary (maturin wheel) |
 | [`scrybe-app`](scrybe-app/README.md) | Tauri 2 desktop app (Rust + TypeScript + CodeMirror 6) |
 
-## PyPI packages
+## Published packages
+
+### PyPI
 
 | Package | Install | What |
 |---|---|---|
+| `scrybe.ai` | `pip install scrybe.ai` | Metapackage — pulls in the four wheels below |
+| `scrybe-py` | `pip install scrybe-py` | PyO3 library — `import scrybe` |
 | `scrybe-cli` | `pip install scrybe-cli` | `scrybe` CLI binary |
 | `scrybe-mcp-server` | `pip install scrybe-mcp-server` | `scrybe-mcp-server` binary |
 | `scrybe-mermaid` | `pip install scrybe-mermaid` | PNG iTXt codec |
+
+### crates.io
+
+| Crate | Install / depend | What |
+|---|---|---|
+| `scrybe-cli` | `cargo install scrybe-cli` | `scrybe` CLI binary |
+| `scrybe-mcp-server` | `cargo install scrybe-mcp-server` | `scrybe-mcp-server` binary |
+| `scrybe-core` | dep | AST, Document, ContentAddressable, Plugin trait |
+| `scrybe-render` | dep | Markdown→HTML pipeline (syntect / KaTeX / Mermaid) |
+| `scrybe-mermaid` | dep | PNG iTXt codec |
+| `scrybe-rpc` | dep | CLI ↔ GUI JSON-RPC 2.0 wire types |
 
 ## License
 
