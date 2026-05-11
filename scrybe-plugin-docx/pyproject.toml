@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.backends.legacy:build"
+
+[project]
+name = "scrybe-plugin-docx"
+version = "0.1.0"
+description = "Scrybe plugin — render Markdown to Word (.docx) with embedded Mermaid PNGs"
+license = {text = "AGPL-3.0-or-later"}
+requires-python = ">=3.9"
+dependencies = [
+    "python-docx>=1.1",
+    "mistune>=3.0",
+    "Pillow>=10.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "pytest-mock>=3"]
+
+[project.scripts]
+scrybe-docx = "scrybe_plugin_docx.main:main"
+
+[project.urls]
+Homepage = "https://github.com/hartsock/scrybe"
+Issues = "https://github.com/hartsock/scrybe/issues/3"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["scrybe_plugin_docx*"]
