@@ -1,6 +1,6 @@
 [package]
 name = "scrybe-swarm"
-version = "0.1.1"
+version = "0.2.0"
 edition = "2021"
 description = "Scrybe swarm — async-nats wrapper for swarm-chat sidebar and activity feed"
 license = "Apache-2.0"
