@@ -311,11 +311,21 @@ impl Response {
 /// Resolve the socket path: `$SCRYBE_SOCK` if set, otherwise `~/.scrybe/sock`.
 /// Falls back to `/tmp/.scrybe-sock` only if `$HOME` is also unset.
 pub fn default_socket_path() -> PathBuf {
-    if let Ok(s) = std::env::var("SCRYBE_SOCK") {
+    resolve_socket_path(
+        std::env::var("SCRYBE_SOCK").ok().as_deref(),
+        std::env::var("HOME").ok().as_deref(),
+    )
+}
+
+/// Pure resolution logic for [`default_socket_path`]. Split out so it can be
+/// unit-tested without mutating process-global env vars (which races across
+/// parallel tests).
+fn resolve_socket_path(sock_override: Option<&str>, home: Option<&str>) -> PathBuf {
+    if let Some(s) = sock_override {
         return PathBuf::from(s);
     }
-    if let Ok(home) = std::env::var("HOME") {
-        return PathBuf::from(home).join(".scrybe").join("sock");
+    if let Some(h) = home {
+        return PathBuf::from(h).join(".scrybe").join("sock");
     }
     PathBuf::from("/tmp/.scrybe-sock")
 }
@@ -545,32 +555,29 @@ mod tests {
     }
 
     #[test]
-    fn default_socket_path_uses_env_override() {
-        // Save and restore so the test doesn't leak.
-        let prev_sock = std::env::var("SCRYBE_SOCK").ok();
-        std::env::set_var("SCRYBE_SOCK", "/tmp/custom-scrybe-sock");
-        let p = default_socket_path();
+    fn resolve_socket_path_uses_override() {
+        let p = resolve_socket_path(Some("/tmp/custom-scrybe-sock"), Some("/home/test"));
         assert_eq!(p, PathBuf::from("/tmp/custom-scrybe-sock"));
-        match prev_sock {
-            Some(v) => std::env::set_var("SCRYBE_SOCK", v),
-            None => std::env::remove_var("SCRYBE_SOCK"),
-        }
     }
 
     #[test]
-    fn default_socket_path_uses_home() {
-        let prev_sock = std::env::var("SCRYBE_SOCK").ok();
-        std::env::remove_var("SCRYBE_SOCK");
-        let prev_home = std::env::var("HOME").ok();
-        std::env::set_var("HOME", "/home/test");
-        let p = default_socket_path();
+    fn resolve_socket_path_uses_home_when_no_override() {
+        let p = resolve_socket_path(None, Some("/home/test"));
         assert_eq!(p, PathBuf::from("/home/test/.scrybe/sock"));
-        match prev_home {
-            Some(v) => std::env::set_var("HOME", v),
-            None => std::env::remove_var("HOME"),
-        }
-        if let Some(v) = prev_sock {
-            std::env::set_var("SCRYBE_SOCK", v);
-        }
+    }
+
+    #[test]
+    fn resolve_socket_path_falls_back_when_home_unset() {
+        let p = resolve_socket_path(None, None);
+        assert_eq!(p, PathBuf::from("/tmp/.scrybe-sock"));
+    }
+
+    #[test]
+    fn default_socket_path_returns_some_path() {
+        // Smoke test: the env-reading wrapper produces *some* path. The
+        // resolution logic itself is covered by the pure-function tests above,
+        // which don't race on process-global env vars.
+        let p = default_socket_path();
+        assert!(!p.as_os_str().is_empty());
     }
 }
