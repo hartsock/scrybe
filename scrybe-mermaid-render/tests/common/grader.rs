@@ -87,20 +87,27 @@ pub fn grade_flowchart(
 // ── Structural checks ─────────────────────────────────────────────────────────
 
 fn structural_check_sequence(candidate_svg: &str, oracle_svg_path: &Path) -> bool {
+    // All candidate SVGs must embed the Mermaid source in <metadata>.
+    if !candidate_svg.contains("scrybe:source") {
+        return false;
+    }
     if !oracle_svg_path.exists() {
-        // No oracle — treat as skip (not failure)
+        // No oracle yet — metadata check is sufficient for now.
         return true;
     }
     let oracle_svg = match std::fs::read_to_string(oracle_svg_path) {
         Ok(s) => s,
         Err(_) => return false,
     };
-    // Drake Phase 2: replace this with real element counting.
-    // For now: both SVGs must be non-empty.
+    // Drake Phase 2: replace with real element counting (lifelines, arrows).
     !candidate_svg.is_empty() && !oracle_svg.is_empty()
 }
 
 fn structural_check_flowchart(candidate_svg: &str, oracle_svg_path: &Path) -> bool {
+    // All candidate SVGs must embed the Mermaid source in <metadata>.
+    if !candidate_svg.contains("scrybe:source") {
+        return false;
+    }
     if !oracle_svg_path.exists() {
         return true;
     }
@@ -108,6 +115,7 @@ fn structural_check_flowchart(candidate_svg: &str, oracle_svg_path: &Path) -> bo
         Ok(s) => s,
         Err(_) => return false,
     };
+    // Drake Phase 5: replace with real element counting (nodes, edges).
     !candidate_svg.is_empty() && !oracle_svg.is_empty()
 }
 

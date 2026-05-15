@@ -13,13 +13,14 @@
 //! - `LayoutElement::Arrow` → `primitives::arrow`
 //! - `LayoutElement::GroupBox` → `primitives::group_box`
 //!
-//! Wrap with `primitives::svg_root(layout.width, layout.height, ...)`.
+//! Wrap with `primitives::svg_root(layout.width, layout.height, source, ...)`.
+//! The `source` argument is the original Mermaid text — embedded in `<metadata>`.
 
 use crate::error::{MermaidRenderError, Result};
 use crate::layout::types::LayoutResult;
 
-/// Render a flowchart layout to SVG.
-pub fn render(_layout: &LayoutResult) -> Result<String> {
+/// Render a flowchart layout to a self-describing SVG string.
+pub fn render(_layout: &LayoutResult, _source: &str) -> Result<String> {
     Err(MermaidRenderError::NotImplemented(
         "flowchart SVG builder (Drake Phase 5)".into(),
     ))

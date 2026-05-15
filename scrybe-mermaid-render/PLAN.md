@@ -22,6 +22,40 @@ No existing Mermaid parsing or graph layout exists in the workspace. The
 in `experimental/` and form the foundation for the drake-swarm orchestration
 layer.
 
+### Design revision: SVG-first
+
+Mermaid's native output is SVG — `mmdc` produces SVG and converts to PNG by
+screenshotting via Puppeteer/Chromium. This crate follows the same model:
+
+**SVG is the primary deliverable. PNG is a secondary conversion.**
+
+Every SVG produced embeds its Mermaid source in a `<metadata>` element,
+making it self-describing and round-trippable without a sidecar file.
+This extends the convention established by `scrybe-mermaid` (PNG iTXt) to SVG.
+
+```text
+source → parse → layout → SVG  ←  primary deliverable
+                            │       <metadata> embeds source + sha256
+                            ↓  (optional `png` feature)
+                        resvg/tiny-skia → PNG
+```
+
+SVG metadata format (namespace `https://scrybe.ai/ns/mermaid`):
+```xml
+<metadata>
+  <scrybe:mermaid xmlns:scrybe="https://scrybe.ai/ns/mermaid">
+    <scrybe:source><![CDATA[sequenceDiagram
+  A->>B: Hello]]></scrybe:source>
+    <scrybe:sha256>83af36...</scrybe:sha256>
+  </scrybe:mermaid>
+</metadata>
+```
+
+Consequences:
+- Trace tests compare SVG structurally first (no mmdc oracle needed for Tier 1)
+- SSIM grading rasterizes our SVG vs mmdc SVG — font differences tolerated at 0.85
+- `render_to_svg(source)` is the primary Python API; `render_to_png` is opt-in
+
 ---
 
 ## Deliverable 1: `scrybe-mermaid-render`
@@ -79,18 +113,19 @@ scrybe-mermaid-render/
 ### Public API
 
 ```rust
-pub enum OutputFormat { Svg, Png }
-
-pub fn render(source: &str, format: OutputFormat) -> Result<Vec<u8>>;
+/// Primary — returns SVG with <metadata> embedding source + sha256.
 pub fn render_to_svg(source: &str) -> Result<String>;
+
+/// Secondary — rasterizes render_to_svg output via resvg. Requires `png` feature.
+#[cfg(feature = "png")]
 pub fn render_to_png(source: &str) -> Result<Vec<u8>>;
 ```
 
-PyO3 Python surface mirrors mmdc's usage:
+PyO3 Python surface:
 ```python
-from scrybe_mermaid_render import render_to_png, render_to_svg
-png_bytes = render_to_png("sequenceDiagram\n  A->>B: Hello")
-svg_str   = render_to_svg("graph TD\n  A --> B")
+from scrybe_mermaid_render import render_to_svg, render_to_png
+svg_str   = render_to_svg("sequenceDiagram\n  A->>B: Hello")
+png_bytes = render_to_png("graph TD\n  A --> B")  # requires png feature
 ```
 
 ### Sequence Diagram Scope (MVP)

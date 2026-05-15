@@ -28,6 +28,8 @@ serde_json.workspace = true
 tracing.workspace = true
 nom.workspace = true
 petgraph.workspace = true
+sha2.workspace = true
+hex.workspace = true
 
 # PNG rasterization — optional, gated by `png` feature (Phase 5)
 resvg   = { version = "0.44", optional = true }

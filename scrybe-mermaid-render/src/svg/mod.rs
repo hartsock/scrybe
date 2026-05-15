@@ -11,10 +11,13 @@ use crate::error::Result;
 use crate::layout::types::LayoutResult;
 use crate::parser::types::DiagramAst;
 
-/// Render a laid-out diagram to an SVG string.
-pub fn render(ast: &DiagramAst, layout: &LayoutResult) -> Result<String> {
+/// Render a laid-out diagram to a self-describing SVG string.
+///
+/// `source` is the original Mermaid text — embedded verbatim in the SVG
+/// `<metadata>` element so the file is round-trippable without a sidecar.
+pub fn render(ast: &DiagramAst, layout: &LayoutResult, source: &str) -> Result<String> {
     match ast {
-        DiagramAst::Sequence(_) => sequence::render(layout),
-        DiagramAst::Flowchart(_) => flowchart::render(layout),
+        DiagramAst::Sequence(_) => sequence::render(layout, source),
+        DiagramAst::Flowchart(_) => flowchart::render(layout, source),
     }
 }

@@ -6,6 +6,10 @@
 #   Worker agent (ollama/local model) → receives goal → produces code
 #   Graders (claude-code, codex)      → review code and trace test results
 #   Drake                             → records RoundResult, advances on pass
+#
+# Design: SVG is the primary output. Every SVG embeds the Mermaid source in a
+# <metadata> element (namespace https://scrybe.ai/ns/mermaid) so diagrams are
+# self-describing and round-trippable. PNG is a secondary conversion via resvg.
 
 [swarm]
 name            = "scrybe-mermaid-render"
@@ -71,7 +75,7 @@ goals    = [
 # ── Phase 2: Sequence layout + SVG ───────────────────────────────────────────
 [[phase]]
 id       = "phase-2-sequence-layout-svg"
-name     = "Sequence diagram layout and SVG output"
+name     = "Sequence diagram layout and SVG output (SVG-first)"
 depends_on = ["phase-1-scaffold"]
 goals    = [
   """
@@ -97,13 +101,20 @@ goals    = [
   scrybe-mermaid-render/src/svg/primitives.rs.
 
   The function signature is:
-    pub fn render(layout: &LayoutResult) -> Result<String>
+    pub fn render(layout: &LayoutResult, source: &str) -> Result<String>
 
-  Walk layout.elements in order and emit SVG fragments.
-  Wrap with primitives::svg_root(layout.width, layout.height, ...).
+  The `source` parameter is the original Mermaid text. Pass it to
+  `primitives::svg_root(layout.width, layout.height, source, &body)`
+  so the SVG embeds the source in its <metadata> element.
+
+  Walk layout.elements in order and emit SVG fragments into `body`.
+  The resulting SVG must contain a <metadata> block with:
+    <scrybe:source><![CDATA[...]]></scrybe:source>
+    <scrybe:sha256>...</scrybe:sha256>
 
   After this phase: `cargo test -p scrybe-mermaid-render test_trace_sequence`
-  should print SKIP or PASS for all 10 fixtures (no panics).
+  should print PASS (not SKIP) for all 10 fixtures, with SSIM reported.
+  The structural check must verify the <metadata> block is present.
   """,
 ]
 
@@ -139,7 +150,7 @@ goals    = [
 # ── Phase 4: Flowchart SVG + PNG ─────────────────────────────────────────────
 [[phase]]
 id       = "phase-4-flowchart-svg-png"
-name     = "Flowchart SVG builder + PNG rasterization"
+name     = "Flowchart SVG builder + PNG rasterization (SVG-first)"
 depends_on = ["phase-2-sequence-layout-svg", "phase-3-flowchart-layout"]
 goals    = [
   """
@@ -147,7 +158,10 @@ goals    = [
   scrybe-mermaid-render/src/svg/flowchart.rs.
 
   The function signature is:
-    pub fn render(layout: &LayoutResult) -> Result<String>
+    pub fn render(layout: &LayoutResult, source: &str) -> Result<String>
+
+  The `source` parameter is the original Mermaid text. Pass it to
+  `primitives::svg_root(layout.width, layout.height, source, &body)`.
 
   Walk layout.elements:
     Box{shape: Rect}    → primitives::rect
@@ -157,23 +171,26 @@ goals    = [
     Arrow               → primitives::arrow
     GroupBox            → primitives::group_box
 
-  After this goal: trace_flowchart tests should print PASS or SKIP.
+  After this goal: trace_flowchart tests print PASS; SVG output contains
+  a valid <metadata> block with <scrybe:source> and <scrybe:sha256>.
   """,
 
   """
-  Goal: Implement PNG rasterization in
-  scrybe-mermaid-render/src/png.rs using resvg + tiny-skia.
+  Goal: Implement PNG rasterization in scrybe-mermaid-render/src/png.rs.
 
   The function signature is:
     pub fn rasterize(svg: &str) -> Result<Vec<u8>>
 
-  See the commented example in the file header. Verify the exact
-  usvg::Tree::from_str API for the pinned version in Cargo.toml.
+  Use resvg + tiny-skia (already declared as optional deps in Cargo.toml).
+  See the commented example in the file header for the API.
+  Enable with `--features png`.
 
-  Enable the `png` feature in Cargo.toml (already declared optional).
-  Add the SSIM computation to tests/common/grader.rs once this works.
+  Also implement the SSIM computation in tests/common/grader.rs:
+  rasterize candidate SVG, load oracle PNG, compute SSIM with image-compare.
+  SSIM scores should then appear in all trace test output.
 
-  After this goal: SSIM scores should appear in trace test output.
+  Note: resvg preserves unknown XML (including our <metadata>) in the SVG
+  tree — no stripping occurs during rasterization.
   """,
 ]
 

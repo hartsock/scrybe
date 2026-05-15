@@ -15,10 +15,21 @@
 //! Note: raw strings use `r##"..."##` so that `fill="#333"` (which contains `"#`)
 //! does not accidentally terminate a `r#"..."#` delimiter.
 
-/// Wrap SVG content in a root `<svg>` element.
-pub fn svg_root(width: f64, height: f64, content: &str) -> String {
+/// Wrap SVG content in a root `<svg>` element with embedded Mermaid source metadata.
+///
+/// The `<metadata>` block makes the SVG self-describing: the original Mermaid
+/// source and its SHA-256 digest travel with the file, matching the convention
+/// established by `scrybe-mermaid` for PNG iTXt embedding.
+///
+/// Namespace: `https://scrybe.ai/ns/mermaid`
+pub fn svg_root(width: f64, height: f64, source: &str, content: &str) -> String {
+    use sha2::{Digest, Sha256};
+    let sha256 = hex::encode(Sha256::digest(source.as_bytes()));
+    let metadata = format!(
+        r##"<metadata><scrybe:mermaid xmlns:scrybe="https://scrybe.ai/ns/mermaid"><scrybe:source><![CDATA[{source}]]></scrybe:source><scrybe:sha256>{sha256}</scrybe:sha256></scrybe:mermaid></metadata>"##
+    );
     format!(
-        r##"<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 0 {width} {height}">{defs}{content}</svg>"##,
+        r##"<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 0 {width} {height}">{metadata}{defs}{content}</svg>"##,
         defs = arrow_defs(),
     )
 }
