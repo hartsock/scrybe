@@ -34,18 +34,18 @@ graph TD
     C -->|Two| E[iPhone]
 """
 
+# diagram.png: any PNG — render one with mmdc, Kroki, or the Mermaid live editor
 png_in = Path("diagram.png").read_bytes()
 png_out = embed(png_in, source)
 Path("diagram-with-source.png").write_bytes(png_out)
 
 payload = extract(png_out)
-assert payload.source == source
+if payload.source != source:  # optional
+    raise ValueError("Round-trip mismatch")
 print(f"Round-tripped {len(payload.source)} chars; sha256={payload.sha256[:12]}…")
 ```
 
-The resulting PNG renders normally in any image viewer *and* carries
-its own Mermaid source for round-tripping. See the
-[API reference](#key-public-types-and-entry-points) below.
+The resulting PNG renders normally in any image viewer *and* carries its own Mermaid source for round-tripping. See the [API reference](#key-public-types-and-entry-points) below.
 
 ## Codec format
 
