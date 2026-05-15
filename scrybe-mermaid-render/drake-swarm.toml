@@ -1,0 +1,202 @@
+# drake-swarm.toml — Phase and goal configuration for scrybe-mermaid-render.
+#
+# Drake (agent identity: Drake on gnuc, qwen3-coder:30b or similar) reads this
+# file to orchestrate the agentic development loop:
+#
+#   Worker agent (ollama/local model) → receives goal → produces code
+#   Graders (claude-code, codex)      → review code and trace test results
+#   Drake                             → records RoundResult, advances on pass
+
+[swarm]
+name            = "scrybe-mermaid-render"
+worker          = "ollama"
+graders         = ["claude-code", "codex"]
+max_rounds      = 5          # maximum retry rounds per goal before escalating
+ssim_threshold  = 0.85       # SSIM score required for trace test pass (Tier 2)
+structural_required = true   # structural check must pass (Tier 1, gates test)
+
+# ── Phase 1: Scaffold + parsers ───────────────────────────────────────────────
+[[phase]]
+id       = "phase-1-scaffold"
+name     = "Crate scaffold + diagram type lexer + sequence parser"
+depends_on = []
+goals    = [
+  """
+  Goal: Implement the sequence diagram parser in
+  scrybe-mermaid-render/src/parser/sequence.rs.
+
+  The function signature is:
+    pub fn parse(source: &str) -> Result<SequenceDiagram>
+
+  Supported syntax (see file header for full list):
+    - participant / actor declarations
+    - message arrows: ->>, -->, ->, -->>, -x, --x
+    - Note over / left of / right of
+    - activate / deactivate
+    - loop, alt (with else), opt, par blocks
+
+  Constraints:
+    - Zero clippy warnings
+    - Unit tests in #[cfg(test)] covering at least: minimal parse,
+      participant auto-registration, arrow type variants, alt/loop blocks
+    - Do NOT use subprocess — parse the source string directly
+    - Use nom combinators or a hand-written line iterator
+
+  The existing test stubs in sequence.rs are marked #[ignore]; remove
+  the #[ignore] attribute when they pass.
+  """,
+
+  """
+  Goal: Implement the flowchart parser in
+  scrybe-mermaid-render/src/parser/flowchart.rs.
+
+  The function signature is:
+    pub fn parse(source: &str) -> Result<FlowchartDiagram>
+
+  Supported syntax (see file header for full list):
+    - graph TD|LR|BT|RL / flowchart TD|…
+    - Node shapes: [] () {} ([]) (()) {{}}
+    - Quoted node labels: A["My Label"]
+    - Edge types: --> --- -.-> ==> --text-->
+    - subgraph blocks
+
+  Constraints:
+    - Zero clippy warnings
+    - Unit tests in #[cfg(test)] covering at least: minimal, direction variants,
+      node shapes, edge types, subgraph
+    - Auto-create nodes referenced in edges but not declared
+  """,
+]
+
+# ── Phase 2: Sequence layout + SVG ───────────────────────────────────────────
+[[phase]]
+id       = "phase-2-sequence-layout-svg"
+name     = "Sequence diagram layout and SVG output"
+depends_on = ["phase-1-scaffold"]
+goals    = [
+  """
+  Goal: Implement linear vertical layout for sequence diagrams in
+  scrybe-mermaid-render/src/layout/sequence.rs.
+
+  The function signature is:
+    pub fn layout(diagram: &SequenceDiagram) -> Result<LayoutResult>
+
+  Algorithm (see file header for constants):
+    1. Assign each participant a fixed x-coordinate (evenly spaced)
+    2. Walk statements top-to-bottom, incrementing y for each element
+    3. Track activation stacks per participant
+    4. Draw lifelines from header box bottom to diagram bottom
+
+  Output: LayoutResult with LayoutElement variants for Lifeline,
+  Activation, Arrow, NoteBox, GroupBox.
+  """,
+
+  """
+  Goal: Implement the sequence diagram SVG builder in
+  scrybe-mermaid-render/src/svg/sequence.rs using the primitives in
+  scrybe-mermaid-render/src/svg/primitives.rs.
+
+  The function signature is:
+    pub fn render(layout: &LayoutResult) -> Result<String>
+
+  Walk layout.elements in order and emit SVG fragments.
+  Wrap with primitives::svg_root(layout.width, layout.height, ...).
+
+  After this phase: `cargo test -p scrybe-mermaid-render test_trace_sequence`
+  should print SKIP or PASS for all 10 fixtures (no panics).
+  """,
+]
+
+# ── Phase 3: Flowchart parser (already in phase-1, this phase is layout) ─────
+[[phase]]
+id       = "phase-3-flowchart-layout"
+name     = "Sugiyama hierarchical layout for flowcharts"
+depends_on = ["phase-1-scaffold"]
+goals    = [
+  """
+  Goal: Implement Sugiyama hierarchical layout in
+  scrybe-mermaid-render/src/layout/flowchart.rs.
+
+  The function signature is:
+    pub fn layout(diagram: &FlowchartDiagram) -> Result<LayoutResult>
+
+  Implement all four steps (see file header for algorithm details):
+  1. Cycle removal (DFS back-edge reversal)
+  2. Layer assignment (Longest Path)
+  3. Crossing minimization (Barycenter heuristic — up to 3 passes)
+  4. Coordinate assignment (simplified Brandes-Köpf)
+
+  Use petgraph for graph representation. Insert dummy nodes for
+  edges spanning multiple layers.
+
+  Constraints:
+  - Zero clippy warnings
+  - Unit tests covering: acyclic graph, cyclic graph (cycle removed),
+    multi-layer graph, left-right direction
+  """,
+]
+
+# ── Phase 4: Flowchart SVG + PNG ─────────────────────────────────────────────
+[[phase]]
+id       = "phase-4-flowchart-svg-png"
+name     = "Flowchart SVG builder + PNG rasterization"
+depends_on = ["phase-2-sequence-layout-svg", "phase-3-flowchart-layout"]
+goals    = [
+  """
+  Goal: Implement the flowchart SVG builder in
+  scrybe-mermaid-render/src/svg/flowchart.rs.
+
+  The function signature is:
+    pub fn render(layout: &LayoutResult) -> Result<String>
+
+  Walk layout.elements:
+    Box{shape: Rect}    → primitives::rect
+    Box{shape: Diamond} → primitives::diamond
+    Box{shape: Rounded} → primitives::rect with rx=6
+    Box{shape: Stadium} → primitives::rect with rx=20
+    Arrow               → primitives::arrow
+    GroupBox            → primitives::group_box
+
+  After this goal: trace_flowchart tests should print PASS or SKIP.
+  """,
+
+  """
+  Goal: Implement PNG rasterization in
+  scrybe-mermaid-render/src/png.rs using resvg + tiny-skia.
+
+  The function signature is:
+    pub fn rasterize(svg: &str) -> Result<Vec<u8>>
+
+  See the commented example in the file header. Verify the exact
+  usvg::Tree::from_str API for the pinned version in Cargo.toml.
+
+  Enable the `png` feature in Cargo.toml (already declared optional).
+  Add the SSIM computation to tests/common/grader.rs once this works.
+
+  After this goal: SSIM scores should appear in trace test output.
+  """,
+]
+
+# ── Phase 5: Python bindings ──────────────────────────────────────────────────
+[[phase]]
+id       = "phase-5-python-bindings"
+name     = "PyO3 Python bindings + maturin packaging"
+depends_on = ["phase-4-flowchart-svg-png"]
+goals    = [
+  """
+  Goal: Verify and wire up the PyO3 bindings in
+  scrybe-mermaid-render/src/python.rs (already scaffolded).
+
+  Steps:
+  1. Run: cd scrybe-mermaid-render && maturin develop --features python,extension-module
+  2. Verify: python -c "from scrybe_mermaid_render import render_to_svg; print(render_to_svg('sequenceDiagram\\n  A->>B: hi'))"
+  3. Create tests/test_python_bindings.py mirroring scrybe-mermaid's pytest pattern
+  4. Run: pytest tests/ -v
+
+  Also create python/scrybe_mermaid_render/__init__.py and py.typed
+  following the scrybe-mermaid pattern.
+
+  Graders will check: pytest passes, _RUST_AVAILABLE=True, render_to_svg
+  returns valid SVG with <svg> root element.
+  """,
+]

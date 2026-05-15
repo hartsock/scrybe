@@ -1,0 +1,9 @@
+sequenceDiagram
+  participant OrderManagementService
+  participant InventoryWarehouseSystem
+  participant NotificationEmailGateway
+
+  OrderManagementService->>InventoryWarehouseSystem: Reserve SKU-48291 quantity 3
+  InventoryWarehouseSystem-->>OrderManagementService: Reservation confirmed, hold expires in 15 minutes
+  OrderManagementService->>NotificationEmailGateway: Send order confirmation to customer
+  NotificationEmailGateway-->>OrderManagementService: Email queued for delivery

@@ -1,0 +1,9 @@
+sequenceDiagram
+  participant Alice
+  participant Bob
+  Note over Alice,Bob: Initial handshake
+  Alice->>Bob: SYN
+  Note right of Bob: Bob receives SYN
+  Bob-->>Alice: SYN-ACK
+  Note left of Alice: Alice confirms
+  Alice->>Bob: ACK

@@ -1,0 +1,9 @@
+graph TD
+  subgraph Frontend
+    A[Browser] --> B[React App]
+  end
+  subgraph Backend
+    C[API Gateway] --> D[Auth Service]
+    C --> E[Order Service]
+  end
+  B --> C

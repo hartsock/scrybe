@@ -1,0 +1,24 @@
+[build-system]
+requires = ["maturin>=1.4,<2.0"]
+build-backend = "maturin"
+
+[project]
+name = "scrybe-mermaid-render"
+version = "0.1.0"
+description = "Scrybe mermaid-render — pure-Rust Mermaid diagram renderer (Python bindings)"
+license = {text = "Apache-2.0"}
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = []
+
+[project.urls]
+Homepage = "https://github.com/hartsock/scrybe"
+
+[tool.maturin]
+module-name = "scrybe_mermaid_render._rust"
+python-source = "python"
+features = ["python", "extension-module"]
+manifest-path = "Cargo.toml"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

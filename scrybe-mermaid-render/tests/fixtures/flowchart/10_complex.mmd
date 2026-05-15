@@ -1,0 +1,25 @@
+graph TD
+  subgraph Ingestion
+    A[HTTP Endpoint] --> B[Request Parser]
+    B --> C{Valid schema?}
+    C -->|No| D[Return 400]
+    C -->|Yes| E[Enqueue to Kafka]
+  end
+
+  subgraph Processing
+    E --> F[Stream Processor]
+    F --> G{Needs enrichment?}
+    G -->|Yes| H[Enrich from Redis]
+    G -->|No| I[Write to Postgres]
+    H --> I
+  end
+
+  subgraph Notification
+    I --> J{Alert condition?}
+    J -->|Yes| K[Send to PagerDuty]
+    J -->|No| L[Update dashboard]
+  end
+
+  D --> M([End])
+  K --> M
+  L --> M

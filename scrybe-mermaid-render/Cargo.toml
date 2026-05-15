@@ -1,0 +1,46 @@
+[package]
+name = "scrybe-mermaid-render"
+version = "0.1.0"
+edition = "2021"
+description = "Scrybe mermaid-render — pure-Rust Mermaid diagram renderer (sequence + flowchart)"
+license = "Apache-2.0"
+repository = "https://github.com/hartsock/scrybe"
+homepage = "https://github.com/hartsock/scrybe"
+readme = "README.md"
+keywords = ["mermaid", "diagram", "svg", "render", "scrybe"]
+categories = ["multimedia::images", "graphics", "visualization"]
+# Experimental: not yet published. Promote to publish = true after Phase 6.
+publish = false
+
+[features]
+default = []
+# Enable PNG rasterization via resvg + tiny-skia (Phase 5).
+png = ["dep:resvg", "dep:usvg", "dep:tiny-skia"]
+# Enable Python bindings via PyO3.
+python = ["dep:pyo3"]
+extension-module = ["pyo3?/extension-module"]
+
+[dependencies]
+anyhow.workspace = true
+thiserror.workspace = true
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+tracing.workspace = true
+nom.workspace = true
+petgraph.workspace = true
+
+# PNG rasterization — optional, gated by `png` feature (Phase 5)
+resvg   = { version = "0.44", optional = true }
+usvg    = { version = "0.44", optional = true }
+tiny-skia = { version = "0.11", optional = true }
+
+# Python bindings — optional, gated by `python` feature (Phase 6)
+pyo3 = { version = "0.28", features = ["abi3-py39"], optional = true }
+
+[dev-dependencies]
+# Image comparison for SSIM grading in trace tests.
+image = "0.25"
+image-compare = "0.4"
+
+[lints]
+workspace = true

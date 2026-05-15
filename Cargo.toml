@@ -6,6 +6,7 @@ members = [
     "scrybe-mcp-client",
     "scrybe-mcp-server",
     "scrybe-mermaid",
+    "scrybe-mermaid-render",
     "scrybe-vcs",
     "scrybe-py",
     "scrybe-cli",
@@ -52,6 +53,15 @@ which = "7"
 # PNG / image codec (scrybe-mermaid iTXt)
 png = "0.17"
 base64 = "0.22"
+
+# Parsing
+nom = "7.1"
+
+# Graph data structures (flowchart layout)
+petgraph = "0.6"
+
+# SQLite (scrybe-panels calibration log)
+rusqlite = { version = "0.32", features = ["bundled"] }
 
 # PyO3
 pyo3 = { version = "0.28", features = ["auto-initialize"] }

@@ -1,0 +1,9 @@
+graph TD
+  A["User uploads file"]
+  B["Virus scanner checks file"]
+  C{"File is safe?"}
+  D["Store in S3"]
+  E["Reject & notify user"]
+  A --> B --> C
+  C -->|Yes| D
+  C -->|No| E

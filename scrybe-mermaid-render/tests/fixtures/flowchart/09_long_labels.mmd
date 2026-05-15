@@ -1,0 +1,6 @@
+graph TD
+  A["Receive HTTP request from external client"] --> B["Authenticate JWT token via AuthService"]
+  B --> C{"Token valid and not expired?"}
+  C -->|"Yes — proceed"| D["Route to appropriate microservice handler"]
+  C -->|"No — reject"| E["Return 401 Unauthorized with WWW-Authenticate header"]
+  D --> F["Return 200 OK with JSON response body"]

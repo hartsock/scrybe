@@ -1,0 +1,12 @@
+sequenceDiagram
+  participant User
+  participant Browser
+  participant AuthServer
+  participant Database
+
+  User->>Browser: Enter credentials
+  Browser->>AuthServer: POST /login
+  AuthServer->>Database: SELECT user WHERE email=?
+  Database-->>AuthServer: User record
+  AuthServer-->>Browser: JWT token
+  Browser-->>User: Redirect to dashboard

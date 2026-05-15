@@ -1,0 +1,7 @@
+sequenceDiagram
+  participant Poller
+  participant Service
+  loop Every 30 seconds
+    Poller->>Service: GET /health
+    Service-->>Poller: 200 OK
+  end

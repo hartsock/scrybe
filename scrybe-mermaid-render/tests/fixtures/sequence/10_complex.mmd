@@ -1,0 +1,32 @@
+sequenceDiagram
+  actor User
+  participant Frontend
+  participant Gateway
+  participant AuthService
+  participant OrderService
+  participant Database
+
+  User->>Frontend: Click "Place Order"
+  activate Frontend
+  Frontend->>Gateway: POST /orders
+  activate Gateway
+  Gateway->>AuthService: Validate JWT
+  AuthService-->>Gateway: Token valid, user=42
+
+  alt Order valid
+    Gateway->>OrderService: CreateOrder(userId=42, items=[...])
+    activate OrderService
+    OrderService->>Database: INSERT order
+    Database-->>OrderService: order_id=9001
+    OrderService-->>Gateway: Order created
+    deactivate OrderService
+    Gateway-->>Frontend: 201 {"order_id": 9001}
+  else Validation failed
+    Gateway-->>Frontend: 400 Bad Request
+  end
+
+  deactivate Gateway
+  Frontend-->>User: Show confirmation
+  deactivate Frontend
+
+  Note over Frontend,Gateway: All calls use TLS 1.3

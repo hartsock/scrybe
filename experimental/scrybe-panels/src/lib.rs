@@ -1,15 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Shawn Hartsock and contributors
 
-//! Scrybe panels — bake-off orchestrator and calibration log.
-//!
-//! Sends the same prompt to N registered agents and presents their
-//! responses side-by-side. Human thumbs-up/down feedback is recorded
-//! in a local SQLite calibration database.
-//!
+//! scrybe-panels — bake-off orchestrator, drake-swarm runner, and calibration log.
 
 pub mod calibration;
 pub mod orchestrator;
+pub mod phase;
 
-pub use calibration::CalibrationLog;
-pub use orchestrator::PanelOrchestrator;
+pub use calibration::{CalibrationEvent, CalibrationLog};
+pub use orchestrator::{PanelOrchestrator, RoundResult};
+pub use phase::SwarmConfig;
