@@ -22,16 +22,13 @@ fn run_trace(fixture_stem: &str) {
 
     match scrybe_mermaid_render::render_to_svg(&source) {
         Ok(svg) => {
-            let result = common::grader::grade_flowchart(fixture_stem, &svg, &oracle_dir());
+            let result = common::grader::grade_flowchart(fixture_stem, &source, &svg, &oracle_dir());
             result.print_report();
-            assert!(
-                result.structural_pass,
-                "structural check failed for {fixture_stem}"
-            );
+            assert!(result.is_passing(), "grade failed for {fixture_stem}");
             if let Some(ssim) = result.ssim {
                 assert!(
-                    ssim >= 0.85,
-                    "SSIM {ssim:.3} below threshold 0.85 for {fixture_stem}"
+                    ssim >= 0.92,
+                    "SSIM {ssim:.3} below threshold 0.92 for {fixture_stem}"
                 );
             }
         }

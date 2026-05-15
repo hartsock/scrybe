@@ -16,7 +16,7 @@ name            = "scrybe-mermaid-render"
 worker          = "ollama"
 graders         = ["claude-code", "codex"]
 max_rounds      = 5          # maximum retry rounds per goal before escalating
-ssim_threshold  = 0.85       # SSIM score required for trace test pass (Tier 2)
+ssim_threshold  = 0.92       # SSIM threshold — both sides rasterized by resvg (apples-to-apples)
 structural_required = true   # structural check must pass (Tier 1, gates test)
 
 # ── Phase 1: Scaffold + parsers ───────────────────────────────────────────────

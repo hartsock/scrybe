@@ -161,58 +161,95 @@ Rust dagre equivalent exists).
 
 ### Fixture Corpus
 
-Create 10 sequence + 10 flowchart `.mmd` fixture files covering:
-- Minimal (2-3 nodes/participants)
-- Medium (5-8 nodes, multiple edge types)
-- Complex (10+ nodes, subgraph or alt blocks)
-- Edge cases: long labels, unicode, self-loops
+Two sources, both MIT licensed:
+
+**Hand-written** (`tests/fixtures/`): 10 sequence + 10 flowchart `.mmd` files
+covering minimal → complex, edge types, long labels, subgraphs, blocks.
+Already committed to the repo.
+
+**Upstream** (mermaid-cli `test-positive/`): The official mermaid-cli regression
+suite at `github.com/mermaid-js/mermaid-cli`. MIT licensed. Pulled on demand by
+`gen_oracle.sh --with-upstream`. These are the same fixtures mermaid-cli uses in
+its own CI — an ideal conformance reference. File names: `sequence.mmd`,
+`flowchart1.mmd`, `flowchart2.mmd`, `flowchart3.mmd`, etc.
+
+As coverage grows toward 100% mmdc parity, the upstream fixtures drive
+conformance; the hand-written fixtures drive edge-case coverage.
+
+### Mermaid diagram type catalog (17+ types)
+
+MVP scope: **Sequence**, **Flowchart** (phases 1–5)
+
+Full catalog for future phases (all MIT licensed in mermaid-js/mermaid):
+
+| Type | Complexity | Source |
+|---|---|---|
+| Flowchart / graph | High (Sugiyama) | phase 3–4 |
+| Sequence | Medium (linear) | phase 1–2 |
+| Class | High | future |
+| State | High | future |
+| ER (Entity Relationship) | High | future |
+| Gantt | Medium | future |
+| Pie chart | Low | future |
+| Git graph | Medium | future |
+| Mindmap | Medium | future |
+| Timeline | Low | future |
+| User Journey | Low | future |
+| C4 | High | future |
+| Sankey | Medium | future |
+| XY Chart | Medium | future |
+| Block diagram | Medium | future |
+| Architecture | High | future |
+| Kanban | Low | future |
 
 ### Oracle Generation
 
-`scripts/gen_oracle.sh`:
+`scripts/gen_oracle.sh` produces **SVG only** — PNG is not needed as an oracle
+because both sides are rasterized by the same engine (resvg) for SSIM comparison.
+
 ```bash
-#!/usr/bin/env bash
-# Requires mmdc on PATH (npm install -g @mermaid-js/mermaid-cli)
-# Outputs to scrybe-mermaid-render/tests/oracle/<type>/<name>.{png,svg}
-for f in tests/fixtures/**/*.mmd; do
-  name=$(basename "$f" .mmd)
-  type=$(dirname "$f" | xargs basename)
-  mmdc -i "$f" -o "tests/oracle/$type/$name.png" -b transparent
-  mmdc -i "$f" -o "tests/oracle/$type/$name.svg"
-done
+bash scripts/gen_oracle.sh              # hand-written fixtures only
+bash scripts/gen_oracle.sh --with-upstream  # + mermaid-cli test-positive/
 ```
 
-Oracle files are **gitignored** (binary, reproducible from fixtures + mmdc).
-CI generates them in a setup step before running trace tests.
+Oracle SVG files are **gitignored** (reproducible from fixtures + mmdc).
 
-### Grading: Two-Tier
+### Grading: Three Tiers
 
-**Tier 1 — Structural pass/fail** (gates test success):
-- Parse both oracle SVG and candidate SVG
-- Assert presence of expected elements:
-  - Sequence: correct number of lifelines, message arrows, activation boxes
-  - Flowchart: correct node count, edge count, node labels present
-- Test fails if structural check fails
+**Tier 0 — Metadata round-trip** (always runs, gates test, no oracle needed):
+- Verify `<scrybe:source>` is present in candidate SVG
+- Verify the embedded source matches the original input verbatim
+- Self-contained check — no oracle file required
 
-**Tier 2 — SSIM score** (reported, not gating):
-- Rasterize both oracle PNG and candidate PNG to same dimensions
-- Compute SSIM using `image-compare` or manual SSIM formula
-- Score [0.0, 1.0] reported via `println!` and saved to a JSON report
-- Drake-swarm reads this score to decide if a round passes
+**Tier 1 — Semantic element comparison** (gates test, requires oracle SVG):
+- Parse mmdc oracle SVG: extract element counts + visible text labels
+  - Sequence: `rect.actor` count, `line`/arrow count, `text.messageText` labels
+  - Flowchart: `g.node` count, `g.edgePaths` count, `text.label` labels
+- Compare against candidate SVG extraction
+- Counts and label sets must match (within tolerance)
 
-### Grader Module (`tests/grader.rs`)
+**Tier 2 — SSIM visual score** (not gating, requires oracle SVG + `png` feature):
+- Rasterize oracle SVG with resvg → pixels
+- Rasterize candidate SVG with resvg → pixels
+- Compute SSIM — both sides use the same renderer, so threshold is **0.92+**
+  (was 0.85 when comparing Chromium vs resvg; now apples-to-apples)
+- Score recorded in CalibrationLog; Drake uses it to decide round pass/fail
+
+### Grader API (`tests/common/grader.rs`)
 
 ```rust
 pub struct GradeResult {
-    pub structural_pass: bool,
-    pub ssim: f64,
+    pub fixture: String,
+    pub metadata_pass: bool,           // Tier 0
+    pub structural_pass: Option<bool>, // Tier 1 (None if no oracle)
+    pub ssim: Option<f64>,             // Tier 2 (None if no oracle or no png feature)
     pub notes: Vec<String>,
 }
 
-pub fn grade_sequence(oracle_svg: &str, candidate_svg: &str,
-                      oracle_png: &[u8], candidate_png: &[u8]) -> GradeResult;
-pub fn grade_flowchart(oracle_svg: &str, candidate_svg: &str,
-                       oracle_png: &[u8], candidate_png: &[u8]) -> GradeResult;
+pub fn grade_sequence(fixture: &str, source: &str,
+                      candidate_svg: &str, oracle_dir: &Path) -> GradeResult;
+pub fn grade_flowchart(fixture: &str, source: &str,
+                       candidate_svg: &str, oracle_dir: &Path) -> GradeResult;
 ```
 
 ---
