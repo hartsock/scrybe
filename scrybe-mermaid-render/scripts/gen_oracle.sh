@@ -86,5 +86,29 @@ if $WITH_UPSTREAM; then
   done
 fi
 
+echo "==> Writing oracle metadata..."
+MMDC_VERSION="$(mmdc --version 2>/dev/null | tr -d '[:space:]' || echo unknown)"
+# Extract mermaid version from mmdc's bundled package.json if available
+MERMAID_VERSION="$(npm list -g mermaid 2>/dev/null | grep mermaid@ | sed 's/.*mermaid@//' | tr -d '[:space:]' || echo unknown)"
+GENERATED_AT="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+
+SEQ_FIXTURES="$(ls "$CRATE_DIR/tests/fixtures/sequence/"*.mmd 2>/dev/null | xargs -I{} basename {} .mmd | jq -R . | jq -s . 2>/dev/null || echo '[]')"
+FC_FIXTURES="$(ls "$CRATE_DIR/tests/fixtures/flowchart/"*.mmd 2>/dev/null | xargs -I{} basename {} .mmd | jq -R . | jq -s . 2>/dev/null || echo '[]')"
+
+cat > "$ORACLE_DIR/.oracle-meta.json" <<EOF
+{
+  "generated_at": "$GENERATED_AT",
+  "mmdc_version": "$MMDC_VERSION",
+  "mermaid_version": "$MERMAID_VERSION",
+  "generator": "scripts/gen_oracle.sh",
+  "oracle_dir": "tests/oracle/",
+  "fixtures": {
+    "sequence": $SEQ_FIXTURES,
+    "flowchart": $FC_FIXTURES
+  }
+}
+EOF
+
 echo "==> Done. Oracle files written to tests/oracle/"
+echo "    mmdc: $MMDC_VERSION  mermaid: $MERMAID_VERSION"
 find "$ORACLE_DIR" -name "*.svg" | sort | xargs ls -lh 2>/dev/null || true
