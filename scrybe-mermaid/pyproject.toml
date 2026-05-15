@@ -14,6 +14,9 @@ dependencies = []
 [project.urls]
 Homepage = "https://github.com/hartsock/scrybe"
 
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
 [tool.maturin]
 module-name = "scrybe_mermaid._rust"
 python-source = "python"
