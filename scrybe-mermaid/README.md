@@ -16,6 +16,37 @@ Mermaid diagram source alongside the rendered image. The PNG is fully valid
 and renders normally in any image viewer. The source text travels with the
 image and can be round-tripped without loss.
 
+## Python quick start
+
+```bash
+pip install scrybe-mermaid
+```
+
+```python
+from pathlib import Path
+from scrybe_mermaid import embed, extract
+
+source = """
+graph TD
+    A[Christmas] -->|Get money| B(Go shopping)
+    B --> C{Let me think}
+    C -->|One| D[Laptop]
+    C -->|Two| E[iPhone]
+"""
+
+# diagram.png: any PNG — render one with mmdc, Kroki, or the Mermaid live editor
+png_in = Path("diagram.png").read_bytes()
+png_out = embed(png_in, source)
+Path("diagram-with-source.png").write_bytes(png_out)
+
+payload = extract(png_out)
+if payload.source != source:  # optional
+    raise ValueError("Round-trip mismatch")
+print(f"Round-tripped {len(payload.source)} chars; sha256={payload.sha256[:12]}…")
+```
+
+The resulting PNG renders normally in any image viewer *and* carries its own Mermaid source for round-tripping. See the [API reference](#key-public-types-and-entry-points) below.
+
 ## Codec format
 
 - **Chunk key:** `scrybe-mermaid`
