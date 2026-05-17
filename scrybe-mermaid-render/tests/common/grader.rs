@@ -1,6 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Shawn Hartsock and contributors
 
+// `mod common;` is included by each integration test binary
+// (test_trace_sequence.rs, test_trace_flowchart.rs). Rust's dead_code
+// lint runs per-crate, so a function used only by one test binary
+// looks unused from another binary's vantage. The conventional fix
+// for shared test helpers is the file-level allow.
+#![allow(dead_code)]
+
 //! Three-tier grader for trace tests.
 //!
 //! ## Tier 0 — Metadata round-trip (always runs, gates test)
@@ -45,10 +52,8 @@ impl GradeResult {
         if !self.metadata_pass {
             return false;
         }
-        match self.structural_pass {
-            Some(pass) => pass,
-            None => true, // no oracle yet — skip structural check
-        }
+        // None → no oracle yet, skip structural check (treat as pass).
+        self.structural_pass.unwrap_or(true)
     }
 
     pub fn print_report(&self) {
@@ -59,7 +64,7 @@ impl GradeResult {
         };
         let ssim_str = self
             .ssim
-            .map(|s| format!("{:.3}", s))
+            .map(|s| format!("{s:.3}"))
             .unwrap_or_else(|| "N/A".into());
         println!(
             "[{}] metadata={} structural={} ssim={} notes={:?}",
