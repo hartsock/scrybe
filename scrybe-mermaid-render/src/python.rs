@@ -25,7 +25,8 @@ fn py_render_to_svg(source: &str) -> PyResult<String> {
 fn py_render_to_png<'py>(py: Python<'py>, source: &str) -> PyResult<Bound<'py, PyBytes>> {
     #[cfg(feature = "png")]
     {
-        let bytes = crate::render_to_png(source).map_err(|e| PyValueError::new_err(e.to_string()))?;
+        let bytes =
+            crate::render_to_png(source).map_err(|e| PyValueError::new_err(e.to_string()))?;
         return Ok(PyBytes::new(py, &bytes));
     }
     #[cfg(not(feature = "png"))]

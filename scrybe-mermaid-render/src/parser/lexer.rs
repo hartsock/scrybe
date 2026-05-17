@@ -27,13 +27,17 @@ pub fn detect_diagram_type(source: &str) -> Result<DiagramType> {
         if lower.starts_with("sequencediagram") {
             return Ok(DiagramType::Sequence);
         }
-        if lower.starts_with("graph ") || lower.starts_with("graph\t") || lower == "graph"
+        if lower.starts_with("graph ")
+            || lower.starts_with("graph\t")
+            || lower == "graph"
             || lower.starts_with("flowchart ")
             || lower.starts_with("flowchart\t")
         {
             return Ok(DiagramType::Flowchart);
         }
-        return Err(MermaidRenderError::UnsupportedDiagramType(trimmed.to_string()));
+        return Err(MermaidRenderError::UnsupportedDiagramType(
+            trimmed.to_string(),
+        ));
     }
     Err(MermaidRenderError::Parse("empty or blank source".into()))
 }

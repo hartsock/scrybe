@@ -45,13 +45,43 @@ fn run_trace(fixture_stem: &str) {
     }
 }
 
-#[test] fn trace_01_minimal()          { run_trace("01_minimal"); }
-#[test] fn trace_02_request_response() { run_trace("02_request_response"); }
-#[test] fn trace_03_login_flow()       { run_trace("03_login_flow"); }
-#[test] fn trace_04_activation()       { run_trace("04_activation"); }
-#[test] fn trace_05_notes()            { run_trace("05_notes"); }
-#[test] fn trace_06_alt_block()        { run_trace("06_alt_block"); }
-#[test] fn trace_07_loop_block()       { run_trace("07_loop_block"); }
-#[test] fn trace_08_arrow_types()      { run_trace("08_arrow_types"); }
-#[test] fn trace_09_long_labels()      { run_trace("09_long_labels"); }
-#[test] fn trace_10_complex()          { run_trace("10_complex"); }
+#[test]
+fn trace_01_minimal() {
+    run_trace("01_minimal");
+}
+#[test]
+fn trace_02_request_response() {
+    run_trace("02_request_response");
+}
+#[test]
+fn trace_03_login_flow() {
+    run_trace("03_login_flow");
+}
+#[test]
+fn trace_04_activation() {
+    run_trace("04_activation");
+}
+#[test]
+fn trace_05_notes() {
+    run_trace("05_notes");
+}
+#[test]
+fn trace_06_alt_block() {
+    run_trace("06_alt_block");
+}
+#[test]
+fn trace_07_loop_block() {
+    run_trace("07_loop_block");
+}
+#[test]
+fn trace_08_arrow_types() {
+    run_trace("08_arrow_types");
+}
+#[test]
+fn trace_09_long_labels() {
+    run_trace("09_long_labels");
+}
+#[test]
+fn trace_10_complex() {
+    run_trace("10_complex");
+}

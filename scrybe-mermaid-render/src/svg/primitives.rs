@@ -77,7 +77,11 @@ pub fn diamond(cx: f64, cy: f64, half_w: f64, half_h: f64, label: &str) -> Strin
 
 /// A directed arrow line with an arrowhead.
 pub fn arrow(x1: f64, y1: f64, x2: f64, y2: f64, label: Option<&str>, dashed: bool) -> String {
-    let dash = if dashed { r##" stroke-dasharray="5,3""## } else { "" };
+    let dash = if dashed {
+        r##" stroke-dasharray="5,3""##
+    } else {
+        ""
+    };
     let mid_x = (x1 + x2) / 2.0;
     let mid_y = (y1 + y2) / 2.0 - 6.0;
     let label_el = label.map_or_else(String::new, |t| small_text(mid_x, mid_y, t));
