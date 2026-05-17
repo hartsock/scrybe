@@ -1,23 +1,102 @@
-# drake-swarm.toml — Phase and goal configuration for scrybe-mermaid-render.
+# .drake/swarm.toml — phase + goal configuration for scrybe-mermaid-render.
 #
-# Drake (agent identity: Drake on gnuc, qwen3-coder:30b or similar) reads this
-# file to orchestrate the agentic development loop:
+# Lives under `.drake/` (analogous to `.github/workflows/`) so the
+# project source tree stays free of tooling-specific files at the
+# top level. Drake infrastructure is replaceable; the source code
+# isn't. If drake gets swapped out for a different orchestrator,
+# this dot-directory disappears without touching the actual project.
 #
-#   Worker agent (ollama/local model) → receives goal → produces code
-#   Graders (claude-code, codex)      → review code and trace test results
-#   Drake                             → records RoundResult, advances on pass
+# Foreman invocation:
+#   drake-foreman --config scrybe-mermaid-render/.drake/swarm.toml ...
 #
-# Design: SVG is the primary output. Every SVG embeds the Mermaid source in a
-# <metadata> element (namespace https://scrybe.ai/ns/mermaid) so diagrams are
-# self-describing and round-trippable. PNG is a secondary conversion via resvg.
+# **Phase 5c shape — bake-off dispatch.** This file ships scrybe-
+# mermaid-render's first bake-off pilot: foreman fans the goal out
+# to three heterogeneous workers in parallel, drake-arbiter picks
+# the best candidate (or refines, or restarts), foreman retries with
+# the arbiter critique baked into the next round's prompts.
+#
+# Topology:
+#   Workers (drake-pool fan-out)  →  three code-producing agents:
+#     - claude       (Claude Sonnet via claude-code-acp)
+#     - codex-openai (OpenAI Codex via codex-acp, paid API path)
+#     - codex-dgx    (Local Nemotron3:33b via codex-acp on DGX Ollama)
+#   Arbiter (drake-arbiter trio) →  three-family quorum picks Winner /
+#     Refine / FreshStart on each round
+#   Foreman → records every round to
+#     /workspaces/.drake-state/calibration/scrybe-mermaid-render.ndjson
+#
+# Design: SVG is the primary output. Every SVG embeds the Mermaid source
+# in a <metadata> element (namespace https://scrybe.ai/ns/mermaid) so
+# diagrams are self-describing and round-trippable. PNG is a secondary
+# conversion via resvg.
+#
+# ## Known gap: workspace isolation
+#
+# Bake-off fan-out has all three workers editing the same NFS workspace
+# in parallel. This file pins `default_workspace_path` to the canonical
+# scrybe-mermaid-render path — the FIRST round produces a clean
+# bake-off because workers create disjoint files; SUBSEQUENT rounds
+# (refinement) WILL race on the existing files. Per proposal-0001
+# §"Out-of-scope follow-ups (not blocking this proposal)":
+#
+# > Per-worker workspace isolation (drake-foreman B4) — needed once
+# > bake-off has multiple workers concurrently editing the same NFS
+# > workspace.
+#
+# For the first pilot, run with `max_rounds = 1` to avoid the race.
+# For multi-round refinement loops, drake-foreman needs B4 (per-worker
+# git-worktree-per-rung or FlexClone) — tracked separately.
 
 [swarm]
-name            = "scrybe-mermaid-render"
-worker          = "ollama"
-graders         = ["claude-code", "codex"]
-max_rounds      = 5          # maximum retry rounds per goal before escalating
-ssim_threshold  = 0.92       # SSIM threshold — both sides rasterized by resvg (apples-to-apples)
-structural_required = true   # structural check must pass (Tier 1, gates test)
+name                   = "scrybe-mermaid-render"
+max_rounds             = 1       # First pilot: avoid workspace race on refinement rounds.
+default_timeout_seconds = 1800   # 30 min — Rust workspace can be slow to compile + test.
+default_workspace_path  = "/workspaces/scrybe/scrybe-mermaid-render"
+
+# Policy hints kept for future use — the bake-off prompt could surface
+# these as `consider_criteria` once SSIM-aware grading lands. Phase 5c
+# treats them as documentation, not active config.
+ssim_threshold      = 0.92
+structural_required = true
+
+# ── Bake-off dispatch (Phase 5b + 5c) ────────────────────────────────
+#
+# Three-family worker fleet. claude carries the heaviest workload
+# (best at Rust); codex-openai is the diversity check; codex-dgx is
+# the local fallback when paid-API budget matters. All three speak
+# ACP; subject_prefix defaults to `drake.pool.tasks.acp.` so the
+# dispatched subjects are `drake.pool.tasks.acp.claude`,
+# `…codex-openai`, `…codex-dgx`.
+#
+# `arbiter_timeout_seconds = 240` is wider than the default 120s
+# because each replica burns 5–30s grading a Rust diff +
+# tier-1/2 trace test results; with three replicas in parallel + KV
+# write latency, 4 minutes gives headroom without false timeouts.
+
+[swarm.bake_off]
+workers                 = ["claude", "codex-openai", "codex-dgx"]
+arbiter_timeout_seconds = 240
+
+# `consider_criteria` steers the arbiter prompt's pick logic. Each
+# criterion gets one bullet in the bake-off prompt; the arbiter is
+# free to weigh them however it sees fit. Stable ids so an operator
+# can grep ndjson + KV consensus entries.
+
+[[swarm.bake_off.consider_criteria]]
+id          = "compiles-cleanly"
+instruction = "Code compiles with zero `cargo clippy -- -D warnings` warnings."
+
+[[swarm.bake_off.consider_criteria]]
+id          = "tests-added"
+instruction = "Unit tests cover at least the cases listed in the goal prompt; no `#[ignore]` on stubs that should now pass."
+
+[[swarm.bake_off.consider_criteria]]
+id          = "style"
+instruction = "Match scrybe project conventions: zero clippy warnings, idiomatic Rust, no `unwrap()` on user-facing paths, `Result<T, ScrybeError>` returns, docstrings on public APIs."
+
+[[swarm.bake_off.consider_criteria]]
+id          = "structural-correctness"
+instruction = "Tier-1 structural check passes: SVG output contains the <metadata> block with <scrybe:source> + <scrybe:sha256> (when applicable to the goal)."
 
 # ── Phase 1: Scaffold + parsers ───────────────────────────────────────────────
 [[phase]]
