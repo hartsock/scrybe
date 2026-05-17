@@ -5,6 +5,7 @@ import "./styles/preview.css";
 import "./styles/sidebar.css";
 import "./styles/mcp_panel.css";
 import "./styles/vcs_panel.css";
+import "./styles/status_bar.css";
 import { invoke, convertFileSrc } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { homeDir } from "@tauri-apps/api/path";
@@ -19,6 +20,7 @@ import { Sidebar } from "./sidebar";
 import { PluginManager } from "./plugins";
 import { McpPanel } from "./mcp_panel";
 import { VcsPanel } from "./vcs_panel";
+import { StatusBar } from "./status_bar";
 
 // Forward console output to /tmp/scrybe-debug.log so the scrybe MCP `logs`
 // tool can surface errors to Claude Code without needing DevTools open.
@@ -78,6 +80,13 @@ const toolbarEl = document.getElementById("toolbar")!;
 const sidebarEl = document.getElementById("sidebar")!;
 
 const preview = new PreviewPane(previewEl);
+
+const statusBarHost = document.getElementById("status-bar-host")!;
+const statusBar = new StatusBar(statusBarHost);
+invoke<string | null>("get_content_root")
+  .then(root => statusBar.setContentRoot(root))
+  .catch(console.error);
+homeDir().then(home => statusBar.setHome(home)).catch(console.error);
 
 function flashSidebar(dir: string): void {
   sidebar.loadDirectory(dir);
@@ -270,6 +279,7 @@ function redrawTabs(): void {
     () => newTab(),
     id => { applyViewMode(state.cycleViewMode(id)); redrawTabs(); },
   );
+  statusBar.update(state);
 }
 
 function selectTab(id: string): void {
