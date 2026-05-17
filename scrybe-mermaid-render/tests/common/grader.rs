@@ -81,7 +81,9 @@ pub fn grade_sequence(
     candidate_svg: &str,
     oracle_dir: &Path,
 ) -> GradeResult {
-    let oracle_svg_path = oracle_dir.join("sequence").join(format!("{fixture_name}.svg"));
+    let oracle_svg_path = oracle_dir
+        .join("sequence")
+        .join(format!("{fixture_name}.svg"));
 
     let metadata_pass = tier0_metadata(candidate_svg, source);
     let structural_pass = tier1_sequence(candidate_svg, &oracle_svg_path);
@@ -103,7 +105,9 @@ pub fn grade_flowchart(
     candidate_svg: &str,
     oracle_dir: &Path,
 ) -> GradeResult {
-    let oracle_svg_path = oracle_dir.join("flowchart").join(format!("{fixture_name}.svg"));
+    let oracle_svg_path = oracle_dir
+        .join("flowchart")
+        .join(format!("{fixture_name}.svg"));
 
     let metadata_pass = tier0_metadata(candidate_svg, source);
     let structural_pass = tier1_flowchart(candidate_svg, &oracle_svg_path);

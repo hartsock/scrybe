@@ -61,14 +61,14 @@ pub struct Message {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ArrowType {
-    Solid,        // ->
-    SolidAsync,   // ->>
-    Dotted,       // -->
-    DottedAsync,  // -->>
-    Cross,        // -x
-    DotCross,     // --x
-    Point,        // --)
-    DotPoint,     // --) (open-arrow variant)
+    Solid,       // ->
+    SolidAsync,  // ->>
+    Dotted,      // -->
+    DottedAsync, // -->>
+    Cross,       // -x
+    DotCross,    // --x
+    Point,       // --)
+    DotPoint,    // --) (open-arrow variant)
 }
 
 #[derive(Debug, Clone)]
@@ -136,12 +136,12 @@ pub struct FlowNode {
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum NodeShape {
     #[default]
-    Rect,     // [text]
-    Rounded,  // (text)
-    Diamond,  // {text}
-    Stadium,  // ([text])
-    Circle,   // ((text))
-    Hexagon,  // {{text}}
+    Rect, // [text]
+    Rounded, // (text)
+    Diamond, // {text}
+    Stadium, // ([text])
+    Circle,  // ((text))
+    Hexagon, // {{text}}
 }
 
 #[derive(Debug, Clone)]
@@ -155,10 +155,10 @@ pub struct FlowEdge {
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum EdgeKind {
     #[default]
-    Arrow,   // -->
-    Line,    // ---
-    Dotted,  // -.->
-    Thick,   // ==>
+    Arrow, // -->
+    Line,   // ---
+    Dotted, // -.->
+    Thick,  // ==>
 }
 
 #[derive(Debug, Clone)]

@@ -22,7 +22,8 @@ fn run_trace(fixture_stem: &str) {
 
     match scrybe_mermaid_render::render_to_svg(&source) {
         Ok(svg) => {
-            let result = common::grader::grade_flowchart(fixture_stem, &source, &svg, &oracle_dir());
+            let result =
+                common::grader::grade_flowchart(fixture_stem, &source, &svg, &oracle_dir());
             result.print_report();
             assert!(result.is_passing(), "grade failed for {fixture_stem}");
             if let Some(ssim) = result.ssim {
@@ -39,13 +40,43 @@ fn run_trace(fixture_stem: &str) {
     }
 }
 
-#[test] fn trace_01_minimal()      { run_trace("01_minimal"); }
-#[test] fn trace_02_linear()       { run_trace("02_linear"); }
-#[test] fn trace_03_decision()     { run_trace("03_decision"); }
-#[test] fn trace_04_node_shapes()  { run_trace("04_node_shapes"); }
-#[test] fn trace_05_edge_types()   { run_trace("05_edge_types"); }
-#[test] fn trace_06_left_right()   { run_trace("06_left_right"); }
-#[test] fn trace_07_subgraph()     { run_trace("07_subgraph"); }
-#[test] fn trace_08_quoted_labels(){ run_trace("08_quoted_labels"); }
-#[test] fn trace_09_long_labels()  { run_trace("09_long_labels"); }
-#[test] fn trace_10_complex()      { run_trace("10_complex"); }
+#[test]
+fn trace_01_minimal() {
+    run_trace("01_minimal");
+}
+#[test]
+fn trace_02_linear() {
+    run_trace("02_linear");
+}
+#[test]
+fn trace_03_decision() {
+    run_trace("03_decision");
+}
+#[test]
+fn trace_04_node_shapes() {
+    run_trace("04_node_shapes");
+}
+#[test]
+fn trace_05_edge_types() {
+    run_trace("05_edge_types");
+}
+#[test]
+fn trace_06_left_right() {
+    run_trace("06_left_right");
+}
+#[test]
+fn trace_07_subgraph() {
+    run_trace("07_subgraph");
+}
+#[test]
+fn trace_08_quoted_labels() {
+    run_trace("08_quoted_labels");
+}
+#[test]
+fn trace_09_long_labels() {
+    run_trace("09_long_labels");
+}
+#[test]
+fn trace_10_complex() {
+    run_trace("10_complex");
+}
