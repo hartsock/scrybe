@@ -27,6 +27,7 @@
 //! - [`vcs_fetch`]         — fetch from a named remote (P4.8)
 //! - [`vcs_log`]           — return recent commit summaries (P4.8)
 //! - [`vcs_remotes`]       — list configured remotes with roles (P4.8)
+//! - [`get_content_root`]  — canonical CWD at startup, for relative tab paths
 //!
 //! Full editor integration (P4.2–P4.11) builds on this IPC bridge.
 
@@ -301,6 +302,22 @@ fn get_initial_directory() -> Option<String> {
     } else {
         None
     }
+}
+
+/// Return the "content root" — the directory scrybe was invoked from.
+///
+/// This is the working directory of the process at startup, canonicalized.
+/// The frontend uses it to display tab paths relative to a stable anchor
+/// (the directory from which the user ran `scrybe`), matching the
+/// "content root" convention familiar from IDEs. Returns None only when
+/// the process has no accessible CWD (e.g. it was deleted out from under
+/// us), in which case the frontend falls back to absolute paths.
+#[tauri::command]
+fn get_content_root() -> Option<String> {
+    let cwd = std::env::current_dir().ok()?;
+    cwd.canonicalize()
+        .ok()
+        .map(|p| p.to_string_lossy().into_owned())
 }
 
 /// Return the file to open in a tab on startup.
@@ -719,6 +736,7 @@ pub fn run() {
             log_append,
             get_initial_directory,
             get_initial_file,
+            get_content_root,
             cli_rpc::cli_rpc_reply,
         ])
         .setup(|app| {
@@ -786,4 +804,18 @@ pub fn run() {
         })
         .run(tauri::generate_context!())
         .expect("error while running Scrybe");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn content_root_resolves_to_existing_directory() {
+        // CWD at test time is the crate's manifest dir — always valid.
+        let root = get_content_root().expect("CWD should be readable in tests");
+        assert!(std::path::Path::new(&root).is_dir());
+        // Canonicalized: contains no `..` segments.
+        assert!(!root.contains("/.."));
+    }
 }
