@@ -67,14 +67,18 @@ structural_required = true
 # `drake.pool.tasks.acp.` so the dispatched subjects are
 # `drake.pool.tasks.acp.claude`, `…codex`, `…codex-dgx`.
 #
-# `arbiter_timeout_seconds = 240` is wider than the default 120s
-# because each replica burns 5–30s grading a Rust diff +
-# tier-1/2 trace test results; with three replicas in parallel + KV
-# write latency, 4 minutes gives headroom without false timeouts.
+# `arbiter_timeout_seconds = 600` accommodates the v2 70b arbiter
+# fleet (deepseek-r1:70b + codellama:70b on DGX, qwen2.5-coder:32b
+# on gnuc). 70b models cold-load in 60-180s; with a refinement-round
+# prompt that includes prior candidate text and 4-axis criteria, a
+# single replica can spend 5–8 min grading. 10 minutes leaves
+# headroom without false timeouts. Original (pre-v2) value was 240s
+# but rounds 2+3 of the first scrybe#37 dispatch consistently hit
+# that limit.
 
 [swarm.bake_off]
 workers                 = ["claude", "codex", "codex-dgx"]
-arbiter_timeout_seconds = 240
+arbiter_timeout_seconds = 600
 
 # `consider_criteria` steers the arbiter prompt's pick logic. Each
 # criterion gets one bullet in the bake-off prompt; the arbiter is
