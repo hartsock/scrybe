@@ -17,9 +17,12 @@
 #
 # Topology:
 #   Workers (drake-pool fan-out)  →  three code-producing agents:
-#     - claude       (Claude Sonnet via claude-code-acp)
-#     - codex-openai (OpenAI Codex via codex-acp, paid API path)
-#     - codex-dgx    (Local Nemotron3:33b via codex-acp on DGX Ollama)
+#     - claude     (Claude Sonnet via claude-code-acp)
+#     - codex      (OpenAI Codex via codex-acp, paid API path; the
+#                   drake-pool-codex-openai-* pod listens on the
+#                   `codex` subject suffix — pod name diverges from
+#                   subject name as a deploy quirk)
+#     - codex-dgx  (Local Nemotron3:33b via codex-acp on DGX Ollama)
 #   Arbiter (drake-arbiter trio) →  three-family quorum picks Winner /
 #     Refine / FreshStart on each round
 #   Foreman → records every round to
@@ -62,11 +65,11 @@ structural_required = true
 # ── Bake-off dispatch (Phase 5b + 5c) ────────────────────────────────
 #
 # Three-family worker fleet. claude carries the heaviest workload
-# (best at Rust); codex-openai is the diversity check; codex-dgx is
-# the local fallback when paid-API budget matters. All three speak
-# ACP; subject_prefix defaults to `drake.pool.tasks.acp.` so the
-# dispatched subjects are `drake.pool.tasks.acp.claude`,
-# `…codex-openai`, `…codex-dgx`.
+# (best at Rust); codex is the diversity check (OpenAI Codex via the
+# paid API); codex-dgx is the local fallback when paid-API budget
+# matters. All three speak ACP; subject_prefix defaults to
+# `drake.pool.tasks.acp.` so the dispatched subjects are
+# `drake.pool.tasks.acp.claude`, `…codex`, `…codex-dgx`.
 #
 # `arbiter_timeout_seconds = 240` is wider than the default 120s
 # because each replica burns 5–30s grading a Rust diff +
@@ -74,7 +77,7 @@ structural_required = true
 # write latency, 4 minutes gives headroom without false timeouts.
 
 [swarm.bake_off]
-workers                 = ["claude", "codex-openai", "codex-dgx"]
+workers                 = ["claude", "codex", "codex-dgx"]
 arbiter_timeout_seconds = 240
 
 # `consider_criteria` steers the arbiter prompt's pick logic. Each
