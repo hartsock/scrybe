@@ -33,26 +33,22 @@
 # diagrams are self-describing and round-trippable. PNG is a secondary
 # conversion via resvg.
 #
-# ## Known gap: workspace isolation
+# ## Workspace isolation — closed by drake-foreman B4
 #
-# Bake-off fan-out has all three workers editing the same NFS workspace
-# in parallel. This file pins `default_workspace_path` to the canonical
-# scrybe-mermaid-render path — the FIRST round produces a clean
-# bake-off because workers create disjoint files; SUBSEQUENT rounds
-# (refinement) WILL race on the existing files. Per proposal-0001
-# §"Out-of-scope follow-ups (not blocking this proposal)":
+# Earlier versions of this file pinned `max_rounds = 1` because the
+# bake-off fan-out had all three workers editing the same NFS path
+# in parallel; refinement rounds would race on the same files. B4
+# (gilabot#1695) closes that gap: drake-foreman now provisions one
+# git-worktree-per-worker before each round and rsyncs the winning
+# rung's edits back onto this directory on Pass.
 #
-# > Per-worker workspace isolation (drake-foreman B4) — needed once
-# > bake-off has multiple workers concurrently editing the same NFS
-# > workspace.
-#
-# For the first pilot, run with `max_rounds = 1` to avoid the race.
-# For multi-round refinement loops, drake-foreman needs B4 (per-worker
-# git-worktree-per-rung or FlexClone) — tracked separately.
+# Refinement is now safe to run — bumping `max_rounds = 3` so the
+# arbiter trio can hand the loop a "Refine" verdict and we actually
+# iterate instead of escalating on every Refine.
 
 [swarm]
 name                   = "scrybe-mermaid-render"
-max_rounds             = 1       # First pilot: avoid workspace race on refinement rounds.
+max_rounds             = 3       # B4 enabled; refinement chain is safe.
 default_timeout_seconds = 1800   # 30 min — Rust workspace can be slow to compile + test.
 default_workspace_path  = "/workspaces/scrybe/scrybe-mermaid-render"
 
