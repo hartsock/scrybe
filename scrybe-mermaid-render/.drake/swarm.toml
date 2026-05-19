@@ -58,6 +58,17 @@ default_workspace_path  = "/workspaces/scrybe/scrybe-mermaid-render"
 ssim_threshold      = 0.92
 structural_required = true
 
+# PR F — soft cap on cumulative tokens across all workers + rounds
+# of a single goal. Captures recursive context bloat (the dominant
+# YOLO-mode failure mode for long-lived ACP sessions) before it
+# hits `context_length_exceeded` on the provider side. Foreman
+# bails the goal with outcome `token-cap` when the running total
+# crosses this. 500k is generous headroom for a 3-worker × 3-round
+# bake-off against modern context windows; tighten as we observe
+# real-run telemetry.
+[swarm.guards]
+max_tokens_per_goal = 500_000
+
 # ── Bake-off dispatch (Phase 5b + 5c) ────────────────────────────────
 #
 # Three-family worker fleet. claude carries the heaviest workload
