@@ -78,18 +78,65 @@ max_tokens_per_goal = 500_000
 # `drake.pool.tasks.acp.` so the dispatched subjects are
 # `drake.pool.tasks.acp.claude`, `…codex`, `…codex-dgx`.
 #
-# `arbiter_timeout_seconds = 600` accommodates the v2 70b arbiter
-# fleet (deepseek-r1:70b + codellama:70b on DGX, qwen2.5-coder:32b
-# on gnuc). 70b models cold-load in 60-180s; with a refinement-round
-# prompt that includes prior candidate text and 4-axis criteria, a
-# single replica can spend 5–8 min grading. 10 minutes leaves
-# headroom without false timeouts. Original (pre-v2) value was 240s
-# but rounds 2+3 of the first scrybe#37 dispatch consistently hit
-# that limit.
+# `arbiter_timeout_seconds = 240` is fine again now that the v3
+# arbiter fleet runs small judges (deepseek-r1:1.5b + nemotron-mini:4b
+# + qwen2.5-coder:7b on gnuc — gilabot#1708 2026-05-19). The v2 70b
+# lineup thrashed DGX VRAM and consistently hit 600s; v3 grades in
+# <60s/replica. The cost is small-judge brittleness — see the
+# `[swarm.bake_off.arbiter] strictness = "loose"` lever below.
+#
+# The 2026-05-19 first dispatch of this swarm against v2 hit
+# all-Refine for 3 rounds in a row and escalated on max_rounds.
+# That was the motivating failure for the gilabot#1708/#1711/#1710
+# bake-off-redesign series.
 
 [swarm.bake_off]
-workers                 = ["claude", "codex", "codex-dgx"]
-arbiter_timeout_seconds = 600
+# v3 5-worker lineup (gilabot#1708 2026-05-19) — diverse providers
+# across gnuc + DGX. Mixing local + paid-API workers keeps cost down
+# while preserving Anthropic + OpenAI as quality anchors.
+#   - claude              : Anthropic Sonnet (quality anchor, ACP)
+#   - codex-openai        : OpenAI GPT-5/Codex (diversity anchor, ACP)
+#   - codex-dgx           : qwen3-coder:30b on DGX Ollama (local, capable)
+#   - codex-dgx-nemotron  : nemotron-3-nano:30b on DGX Ollama (local, diverse)
+#   - codex-gnuc-coder    : qwen2.5-coder:14b on gnuc Ollama (local, cheap)
+#
+# Pod-name vs subject-name quirk: drake-pool-codex-openai-worker
+# listens on `drake.pool.tasks.acp.codex` (subject suffix `codex`,
+# deploy oddity from when there was only one codex worker). Until
+# that subject is renamed, use `codex` here, not `codex-openai`.
+workers = [
+  "claude",
+  "codex",
+  "codex-dgx",
+  "codex-dgx-nemotron",
+  "codex-gnuc-coder",
+]
+arbiter_timeout_seconds = 240
+
+# PR 3 (gilabot#1710) — strictness lever. `loose` biases the v3
+# small judges toward picking a Winner instead of the all-Refine
+# failure mode. Easy to dial up to `default` once we see the bake-off
+# converge, or `strict` once the per-rung PR queue gets long enough
+# to triage manually.
+[swarm.bake_off.arbiter]
+strictness = "loose"
+
+# PR 3 (gilabot#1710) — per-rung PR mode. After every round, foreman
+# opens one PR per non-erroring candidate; branch + title identify
+# the worker model, arbiter consensus notes land as PR comments
+# identifying the replica lineage. Labels: `drake/winner` /
+# `drake/refine` / `drake/rejected`. Reviewer (Shawn) is the merge
+# gate; the arbiter is advisory.
+#
+# **Deploy dependency:** foreman pod must have `gh` CLI installed
+# and a GH token mounted (via drake-keysmith fetch — NOT statically
+# baked). Until that lands, leaving this block in the config is
+# safe: the opener fails best-effort and logs a warning per
+# candidate, but the bake-off verdict still records.
+[swarm.bake_off.output]
+mode        = "per-rung-pr"
+gh_repo     = "hartsock/scrybe"
+base_branch = "feat/scrybe-mermaid-render"
 
 # `consider_criteria` steers the arbiter prompt's pick logic. Each
 # criterion gets one bullet in the bake-off prompt; the arbiter is
