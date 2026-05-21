@@ -1,0 +1,104 @@
+# .drake/swarm-gitea-pilot.toml — small 1-goal smoke test against the
+# in-cluster Gitea mirror at gitea.home.lab/hartsock/scrybe.
+#
+# Purpose: validate the gilabot#1727 foreman-side Gitea support
+# (TeaCliPrOpener + host="gitea" dispatch + the rung-propagation
+# safety net from gilabot#1726) without burning ~2 hours on a
+# full 5-phase pilot or polluting hartsock/scrybe on GitHub.
+#
+# The goal text mirrors phase-1-scaffold goal 0 from the main
+# swarm.toml (sequence parser), which we know is winnable — that
+# was the only surviving artifact from the 2026-05-20 pilot (see
+# hartsock/scrybe#49). Picking a known-good goal isolates "did
+# Gitea PR plumbing work?" from "did the model produce useful
+# code?".
+#
+# Foreman invocation (kustomize patch on the job template):
+#   DRAKE_FOREMAN_CONFIG=/workspaces/scrybe/scrybe-mermaid-render/.drake/swarm-gitea-pilot.toml
+#
+# Project name is suffixed `-gitea-pilot` so the foreman state pointer
+# + ndjson don't collide with the main pilot's history.
+
+[swarm]
+name                    = "scrybe-mermaid-render-gitea-pilot"
+max_rounds              = 3
+default_timeout_seconds = 1800
+default_workspace_path  = "/workspaces/scrybe/scrybe-mermaid-render"
+
+[swarm.guards]
+max_tokens_per_goal = 500_000
+
+[swarm.bake_off]
+# v3.1.3 fleet — same as the main pilot.
+workers = [
+  "claude",
+  "codex",
+  "codex-dgx",
+  "codex-dgx-nemotron",
+  "codex-gnuc-coder",
+]
+arbiter_timeout_seconds = 240
+
+[[swarm.bake_off.consider_criteria]]
+id          = "compiles-cleanly"
+instruction = "Code compiles with zero `cargo clippy -- -D warnings` warnings."
+
+[[swarm.bake_off.consider_criteria]]
+id          = "tests-added"
+instruction = "Unit tests cover at least: minimal parse, participant auto-registration, arrow type variants, alt/loop blocks. No `#[ignore]` on stubs that should now pass."
+
+[[swarm.bake_off.consider_criteria]]
+id          = "style"
+instruction = "Idiomatic Rust, no `unwrap()` on user-facing paths, `Result<T, ScrybeError>` returns, docstrings on public APIs."
+
+[swarm.bake_off.arbiter]
+strictness = "loose"
+
+# Per-rung-PR against the in-cluster Gitea mirror. New shape from
+# gilabot#1727 — the `host` field picks the CLI (gh vs tea), and the
+# `gitea_url` field tells `TeaCliPrOpener` where the Gitea instance
+# lives. `gh_repo` is the push-target fork on Gitea
+# (`armadillo/scrybe`, not the read-only mirror `hartsock/scrybe`).
+# See operator card `knowledge#homelab-2026-05-21-scrybe-push-target-gitea`.
+[swarm.bake_off.output]
+mode        = "per-rung-pr"
+host        = "gitea"
+gitea_url   = "https://gitea.home.lab"
+gh_repo     = "armadillo/scrybe"
+base_branch = "feat/scrybe-mermaid-render"
+
+# ── ONE phase, ONE goal ─────────────────────────────────────────────
+# Mirrors phase-1-scaffold goal 0 from the main swarm.toml so the
+# 2026-05-20 pilot's known-good outcome (claude winning the sequence
+# parser) gives us a clear pass/fail signal for the Gitea wiring.
+
+[[phase]]
+id         = "phase-1-scaffold"
+name       = "Sequence parser (Gitea pilot)"
+depends_on = []
+goals      = [
+  """
+  Goal: Implement the sequence diagram parser in
+  scrybe-mermaid-render/src/parser/sequence.rs.
+
+  The function signature is:
+    pub fn parse(source: &str) -> Result<SequenceDiagram>
+
+  Supported syntax (see file header for full list):
+    - participant / actor declarations
+    - message arrows: ->>, -->, ->, -->>, -x, --x
+    - Note over / left of / right of
+    - activate / deactivate
+    - loop, alt (with else), opt, par blocks
+
+  Constraints:
+    - Zero clippy warnings
+    - Unit tests in #[cfg(test)] covering at least: minimal parse,
+      participant auto-registration, arrow type variants, alt/loop blocks
+    - Do NOT use subprocess — parse the source string directly
+    - Use nom combinators or a hand-written line iterator
+
+  The existing test stubs in sequence.rs are marked #[ignore]; remove
+  the #[ignore] attribute when they pass.
+  """,
+]
