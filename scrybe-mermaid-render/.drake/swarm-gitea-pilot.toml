@@ -57,13 +57,14 @@ strictness = "loose"
 # Per-rung-PR against the in-cluster Gitea mirror. New shape from
 # gilabot#1727 — the `host` field picks the CLI (gh vs tea), and the
 # `gitea_url` field tells `TeaCliPrOpener` where the Gitea instance
-# lives. `gh_repo` continues to identify the repo path inside the
-# host (here, `hartsock/scrybe` on Gitea, not GitHub).
+# lives. `gh_repo` is the push-target fork on Gitea
+# (`armadillo/scrybe`, not the read-only mirror `hartsock/scrybe`).
+# See operator card `knowledge#homelab-2026-05-21-scrybe-push-target-gitea`.
 [swarm.bake_off.output]
 mode        = "per-rung-pr"
 host        = "gitea"
 gitea_url   = "https://gitea.home.lab"
-gh_repo     = "hartsock/scrybe"
+gh_repo     = "armadillo/scrybe"
 base_branch = "feat/scrybe-mermaid-render"
 
 # ── ONE phase, ONE goal ─────────────────────────────────────────────
