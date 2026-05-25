@@ -1,4 +1,4 @@
-# .drake/swarm.toml — phase + goal configuration for scrybe-mermaid-render.
+# .drake/swarm.toml — durable swarm config for scrybe-mermaid-render.
 #
 # Lives under `.drake/` (analogous to `.github/workflows/`) so the
 # project source tree stays free of tooling-specific files at the
@@ -6,45 +6,54 @@
 # isn't. If drake gets swapped out for a different orchestrator,
 # this dot-directory disappears without touching the actual project.
 #
-# Foreman invocation:
-#   drake-foreman --config scrybe-mermaid-render/.drake/swarm.toml ...
+# ## Goals are transient; this file isn't.
 #
-# **Phase 5c shape — bake-off dispatch.** This file ships scrybe-
-# mermaid-render's first bake-off pilot: foreman fans the goal out
-# to three heterogeneous workers in parallel, drake-arbiter picks
-# the best candidate (or refines, or restarts), foreman retries with
-# the arbiter critique baked into the next round's prompts.
+# Previously this file mixed durable swarm config (fleet, criteria,
+# guards) with transient work items (per-phase goal prompts). Per the
+# goals-are-transient redesign (gilabot#1810, 2026-05-25), goals now
+# live as GitHub issues. Foreman pulls each one at dispatch time:
 #
-# Topology:
-#   Workers (drake-pool fan-out)  →  three code-producing agents:
-#     - claude     (Claude Sonnet via claude-code-acp)
-#     - codex      (OpenAI Codex via codex-acp, paid API path; the
-#                   drake-pool-codex-openai-* pod listens on the
-#                   `codex` subject suffix — pod name diverges from
-#                   subject name as a deploy quirk)
-#     - codex-dgx  (Local Nemotron3:33b via codex-acp on DGX Ollama)
-#   Arbiter (drake-arbiter trio) →  three-family quorum picks Winner /
-#     Refine / FreshStart on each round
-#   Foreman → records every round to
-#     /workspaces/.drake-state/calibration/scrybe-mermaid-render.ndjson
+#   drake-foreman \
+#     --config scrybe-mermaid-render/.drake/swarm.toml \
+#     --goal-from-issue hartsock/scrybe#52
 #
-# Design: SVG is the primary output. Every SVG embeds the Mermaid source
-# in a <metadata> element (namespace https://scrybe.ai/ns/mermaid) so
+# This file holds only the slow-moving stuff: which workers fan out,
+# arbiter quorum config, token guards, structural / style criteria.
+# A new issue (e.g. scrybe#86) is dispatchable without touching this
+# file — the swarm.toml describes WHO and HOW, the issue describes
+# WHAT.
+#
+# ## Topology (durable)
+#
+# Workers (drake-pool fan-out) → 5 code-producing agents across
+# providers + hardware (claude, codex, codex-dgx, codex-dgx-nemotron,
+# codex-gnuc-coder). See `[swarm.bake_off]` below.
+#
+# Arbiter (drake-arbiter trio) → small-judge quorum picks Winner /
+# Refine / FreshStart per round. Strictness = "loose" biases toward
+# selecting a Winner instead of looping on Refine forever (a v2-70b-
+# fleet failure mode that motivated the v3 redesign).
+#
+# Foreman → records every round to
+#   /workspaces/.drake-state/calibration/scrybe-mermaid-render.ndjson
+#
+# ## Design contract (project-level, not swarm-level)
+#
+# SVG is the primary output. Every SVG embeds the Mermaid source in a
+# <metadata> element (namespace https://scrybe.ai/ns/mermaid) so
 # diagrams are self-describing and round-trippable. PNG is a secondary
-# conversion via resvg.
+# conversion via resvg. These contracts are encoded in the structural-
+# correctness criterion below; per-goal acceptance criteria live in
+# the GitHub issue.
 #
-# ## Workspace isolation — closed by drake-foreman B4
+# ## Workspace isolation
 #
-# Earlier versions of this file pinned `max_rounds = 1` because the
-# bake-off fan-out had all three workers editing the same NFS path
-# in parallel; refinement rounds would race on the same files. B4
-# (gilabot#1695) closes that gap: drake-foreman now provisions one
-# git-worktree-per-worker before each round and rsyncs the winning
-# rung's edits back onto this directory on Pass.
-#
-# Refinement is now safe to run — bumping `max_rounds = 3` so the
-# arbiter trio can hand the loop a "Refine" verdict and we actually
-# iterate instead of escalating on every Refine.
+# drake-foreman B4 (gilabot#1695) provisions one git-worktree-per-
+# worker before each round and rsyncs the winning rung's edits back
+# onto `default_workspace_path` on Pass. The bare-repo-not-forge work
+# (gilabot#1805) then pushes each rung branch into a swarm-internal
+# bare repo at `/workspaces/.drake-state/swarm-git/<project>.git`
+# for review via the drake-observatory storyboard.
 
 [swarm]
 name                   = "scrybe-mermaid-render"
@@ -53,44 +62,23 @@ default_timeout_seconds = 1800   # 30 min — Rust workspace can be slow to comp
 default_workspace_path  = "/workspaces/scrybe/scrybe-mermaid-render"
 
 # Policy hints kept for future use — the bake-off prompt could surface
-# these as `consider_criteria` once SSIM-aware grading lands. Phase 5c
-# treats them as documentation, not active config.
+# these as `consider_criteria` once SSIM-aware grading lands. For now
+# they're documentation, not active config.
 ssim_threshold      = 0.92
 structural_required = true
 
-# PR F — soft cap on cumulative tokens across all workers + rounds
-# of a single goal. Captures recursive context bloat (the dominant
-# YOLO-mode failure mode for long-lived ACP sessions) before it
-# hits `context_length_exceeded` on the provider side. Foreman
-# bails the goal with outcome `token-cap` when the running total
-# crosses this. 500k is generous headroom for a 3-worker × 3-round
-# bake-off against modern context windows; tighten as we observe
-# real-run telemetry.
+# Soft cap on cumulative tokens across all workers + rounds of a
+# single goal. Captures recursive context bloat (the dominant YOLO-
+# mode failure mode for long-lived ACP sessions) before it hits
+# `context_length_exceeded` on the provider side. Foreman bails the
+# goal with outcome `token-cap` when the running total crosses this.
+# 500k is generous headroom for a 5-worker × 3-round bake-off against
+# modern context windows; tighten as we observe real-run telemetry.
 [swarm.guards]
 max_tokens_per_goal = 500_000
 
-# ── Bake-off dispatch (Phase 5b + 5c) ────────────────────────────────
+# ── Bake-off dispatch ───────────────────────────────────────────────
 #
-# Three-family worker fleet. claude carries the heaviest workload
-# (best at Rust); codex is the diversity check (OpenAI Codex via the
-# paid API); codex-dgx is the local fallback when paid-API budget
-# matters. All three speak ACP; subject_prefix defaults to
-# `drake.pool.tasks.acp.` so the dispatched subjects are
-# `drake.pool.tasks.acp.claude`, `…codex`, `…codex-dgx`.
-#
-# `arbiter_timeout_seconds = 240` is fine again now that the v3
-# arbiter fleet runs small judges (deepseek-r1:1.5b + nemotron-mini:4b
-# + qwen2.5-coder:7b on gnuc — gilabot#1708 2026-05-19). The v2 70b
-# lineup thrashed DGX VRAM and consistently hit 600s; v3 grades in
-# <60s/replica. The cost is small-judge brittleness — see the
-# `[swarm.bake_off.arbiter] strictness = "loose"` lever below.
-#
-# The 2026-05-19 first dispatch of this swarm against v2 hit
-# all-Refine for 3 rounds in a row and escalated on max_rounds.
-# That was the motivating failure for the gilabot#1708/#1711/#1710
-# bake-off-redesign series.
-
-[swarm.bake_off]
 # v3 5-worker lineup (gilabot#1708 2026-05-19) — diverse providers
 # across gnuc + DGX. Mixing local + paid-API workers keeps cost down
 # while preserving Anthropic + OpenAI as quality anchors.
@@ -104,6 +92,15 @@ max_tokens_per_goal = 500_000
 # listens on `drake.pool.tasks.acp.codex` (subject suffix `codex`,
 # deploy oddity from when there was only one codex worker). Until
 # that subject is renamed, use `codex` here, not `codex-openai`.
+#
+# `arbiter_timeout_seconds = 240` is fine for the v3 small-judge
+# fleet (deepseek-r1:1.5b + nemotron-mini:4b + qwen2.5-coder:7b on
+# gnuc — gilabot#1708 2026-05-19). The v2 70b lineup thrashed DGX
+# VRAM and consistently hit 600s; v3 grades in <60s/replica. The
+# cost is small-judge brittleness — see `strictness = "loose"`
+# below.
+
+[swarm.bake_off]
 workers = [
   "claude",
   "codex",
@@ -113,26 +110,25 @@ workers = [
 ]
 arbiter_timeout_seconds = 240
 
-# PR 3 (gilabot#1710) — strictness lever. `loose` biases the v3
-# small judges toward picking a Winner instead of the all-Refine
-# failure mode. Easy to dial up to `default` once we see the bake-off
-# converge, or `strict` once the per-rung PR queue gets long enough
-# to triage manually.
+# `loose` biases the v3 small judges toward picking a Winner instead
+# of the all-Refine failure mode. Dial up to `default` once we see
+# the bake-off converge, or `strict` once the per-rung PR queue gets
+# long enough to triage manually.
 [swarm.bake_off.arbiter]
 strictness = "loose"
 
-# PR 3 (gilabot#1710) — per-rung PR mode. After every round, foreman
-# opens one PR per non-erroring candidate; branch + title identify
-# the worker model, arbiter consensus notes land as PR comments
-# identifying the replica lineage. Labels: `drake/winner` /
-# `drake/refine` / `drake/rejected`. Reviewer (Shawn) is the merge
-# gate; the arbiter is advisory.
+# Per-rung PR mode — after every round, foreman opens one PR per
+# non-erroring candidate; branch + title identify the worker model,
+# arbiter consensus notes land as PR comments identifying the
+# replica lineage. Labels: `drake/winner` / `drake/refine` /
+# `drake/rejected`. Reviewer (human) is the merge gate; the arbiter
+# is advisory.
 #
 # **Deploy dependency:** foreman pod must have `gh` CLI installed
-# and a GH token mounted (via drake-keysmith fetch — NOT statically
-# baked). Until that lands, leaving this block in the config is
-# safe: the opener fails best-effort and logs a warning per
-# candidate, but the bake-off verdict still records.
+# and a GH token mounted. The bare-repo-not-forge work
+# (gilabot#1805/#1807) is shifting this to an operator-triggered
+# button in the dashboard storyboard, but per-rung-PR is still the
+# default until that surface lands.
 [swarm.bake_off.output]
 mode        = "per-rung-pr"
 gh_repo     = "hartsock/scrybe"
@@ -142,6 +138,10 @@ base_branch = "feat/scrybe-mermaid-render"
 # criterion gets one bullet in the bake-off prompt; the arbiter is
 # free to weigh them however it sees fit. Stable ids so an operator
 # can grep ndjson + KV consensus entries.
+#
+# These are PROJECT-LEVEL criteria that apply to every flight. Per-
+# goal criteria belong in the GitHub issue body — workers and arbiters
+# see both in the same prompt.
 
 [[swarm.bake_off.consider_criteria]]
 id          = "compiles-cleanly"
@@ -159,201 +159,22 @@ instruction = "Match scrybe project conventions: zero clippy warnings, idiomatic
 id          = "structural-correctness"
 instruction = "Tier-1 structural check passes: SVG output contains the <metadata> block with <scrybe:source> + <scrybe:sha256> (when applicable to the goal)."
 
-# ── Phase 1: Scaffold + parsers ───────────────────────────────────────────────
-[[phase]]
-id       = "phase-1-scaffold"
-name     = "Crate scaffold + diagram type lexer + sequence parser"
-depends_on = []
-goals    = [
-  """
-  Goal: Implement the sequence diagram parser in
-  scrybe-mermaid-render/src/parser/sequence.rs.
-
-  The function signature is:
-    pub fn parse(source: &str) -> Result<SequenceDiagram>
-
-  Supported syntax (see file header for full list):
-    - participant / actor declarations
-    - message arrows: ->>, -->, ->, -->>, -x, --x
-    - Note over / left of / right of
-    - activate / deactivate
-    - loop, alt (with else), opt, par blocks
-
-  Constraints:
-    - Zero clippy warnings
-    - Unit tests in #[cfg(test)] covering at least: minimal parse,
-      participant auto-registration, arrow type variants, alt/loop blocks
-    - Do NOT use subprocess — parse the source string directly
-    - Use nom combinators or a hand-written line iterator
-
-  The existing test stubs in sequence.rs are marked #[ignore]; remove
-  the #[ignore] attribute when they pass.
-  """,
-
-  """
-  Goal: Implement the flowchart parser in
-  scrybe-mermaid-render/src/parser/flowchart.rs.
-
-  The function signature is:
-    pub fn parse(source: &str) -> Result<FlowchartDiagram>
-
-  Supported syntax (see file header for full list):
-    - graph TD|LR|BT|RL / flowchart TD|…
-    - Node shapes: [] () {} ([]) (()) {{}}
-    - Quoted node labels: A["My Label"]
-    - Edge types: --> --- -.-> ==> --text-->
-    - subgraph blocks
-
-  Constraints:
-    - Zero clippy warnings
-    - Unit tests in #[cfg(test)] covering at least: minimal, direction variants,
-      node shapes, edge types, subgraph
-    - Auto-create nodes referenced in edges but not declared
-  """,
-]
-
-# ── Phase 2: Sequence layout + SVG ───────────────────────────────────────────
-[[phase]]
-id       = "phase-2-sequence-layout-svg"
-name     = "Sequence diagram layout and SVG output (SVG-first)"
-depends_on = ["phase-1-scaffold"]
-goals    = [
-  """
-  Goal: Implement linear vertical layout for sequence diagrams in
-  scrybe-mermaid-render/src/layout/sequence.rs.
-
-  The function signature is:
-    pub fn layout(diagram: &SequenceDiagram) -> Result<LayoutResult>
-
-  Algorithm (see file header for constants):
-    1. Assign each participant a fixed x-coordinate (evenly spaced)
-    2. Walk statements top-to-bottom, incrementing y for each element
-    3. Track activation stacks per participant
-    4. Draw lifelines from header box bottom to diagram bottom
-
-  Output: LayoutResult with LayoutElement variants for Lifeline,
-  Activation, Arrow, NoteBox, GroupBox.
-  """,
-
-  """
-  Goal: Implement the sequence diagram SVG builder in
-  scrybe-mermaid-render/src/svg/sequence.rs using the primitives in
-  scrybe-mermaid-render/src/svg/primitives.rs.
-
-  The function signature is:
-    pub fn render(layout: &LayoutResult, source: &str) -> Result<String>
-
-  The `source` parameter is the original Mermaid text. Pass it to
-  `primitives::svg_root(layout.width, layout.height, source, &body)`
-  so the SVG embeds the source in its <metadata> element.
-
-  Walk layout.elements in order and emit SVG fragments into `body`.
-  The resulting SVG must contain a <metadata> block with:
-    <scrybe:source><![CDATA[...]]></scrybe:source>
-    <scrybe:sha256>...</scrybe:sha256>
-
-  After this phase: `cargo test -p scrybe-mermaid-render test_trace_sequence`
-  should print PASS (not SKIP) for all 10 fixtures, with SSIM reported.
-  The structural check must verify the <metadata> block is present.
-  """,
-]
-
-# ── Phase 3: Flowchart parser (already in phase-1, this phase is layout) ─────
-[[phase]]
-id       = "phase-3-flowchart-layout"
-name     = "Sugiyama hierarchical layout for flowcharts"
-depends_on = ["phase-1-scaffold"]
-goals    = [
-  """
-  Goal: Implement Sugiyama hierarchical layout in
-  scrybe-mermaid-render/src/layout/flowchart.rs.
-
-  The function signature is:
-    pub fn layout(diagram: &FlowchartDiagram) -> Result<LayoutResult>
-
-  Implement all four steps (see file header for algorithm details):
-  1. Cycle removal (DFS back-edge reversal)
-  2. Layer assignment (Longest Path)
-  3. Crossing minimization (Barycenter heuristic — up to 3 passes)
-  4. Coordinate assignment (simplified Brandes-Köpf)
-
-  Use petgraph for graph representation. Insert dummy nodes for
-  edges spanning multiple layers.
-
-  Constraints:
-  - Zero clippy warnings
-  - Unit tests covering: acyclic graph, cyclic graph (cycle removed),
-    multi-layer graph, left-right direction
-  """,
-]
-
-# ── Phase 4: Flowchart SVG + PNG ─────────────────────────────────────────────
-[[phase]]
-id       = "phase-4-flowchart-svg-png"
-name     = "Flowchart SVG builder + PNG rasterization (SVG-first)"
-depends_on = ["phase-2-sequence-layout-svg", "phase-3-flowchart-layout"]
-goals    = [
-  """
-  Goal: Implement the flowchart SVG builder in
-  scrybe-mermaid-render/src/svg/flowchart.rs.
-
-  The function signature is:
-    pub fn render(layout: &LayoutResult, source: &str) -> Result<String>
-
-  The `source` parameter is the original Mermaid text. Pass it to
-  `primitives::svg_root(layout.width, layout.height, source, &body)`.
-
-  Walk layout.elements:
-    Box{shape: Rect}    → primitives::rect
-    Box{shape: Diamond} → primitives::diamond
-    Box{shape: Rounded} → primitives::rect with rx=6
-    Box{shape: Stadium} → primitives::rect with rx=20
-    Arrow               → primitives::arrow
-    GroupBox            → primitives::group_box
-
-  After this goal: trace_flowchart tests print PASS; SVG output contains
-  a valid <metadata> block with <scrybe:source> and <scrybe:sha256>.
-  """,
-
-  """
-  Goal: Implement PNG rasterization in scrybe-mermaid-render/src/png.rs.
-
-  The function signature is:
-    pub fn rasterize(svg: &str) -> Result<Vec<u8>>
-
-  Use resvg + tiny-skia (already declared as optional deps in Cargo.toml).
-  See the commented example in the file header for the API.
-  Enable with `--features png`.
-
-  Also implement the SSIM computation in tests/common/grader.rs:
-  rasterize candidate SVG, load oracle PNG, compute SSIM with image-compare.
-  SSIM scores should then appear in all trace test output.
-
-  Note: resvg preserves unknown XML (including our <metadata>) in the SVG
-  tree — no stripping occurs during rasterization.
-  """,
-]
-
-# ── Phase 5: Python bindings ──────────────────────────────────────────────────
-[[phase]]
-id       = "phase-5-python-bindings"
-name     = "PyO3 Python bindings + maturin packaging"
-depends_on = ["phase-4-flowchart-svg-png"]
-goals    = [
-  """
-  Goal: Verify and wire up the PyO3 bindings in
-  scrybe-mermaid-render/src/python.rs (already scaffolded).
-
-  Steps:
-  1. Run: cd scrybe-mermaid-render && maturin develop --features python,extension-module
-  2. Verify: python -c "from scrybe_mermaid_render import render_to_svg; print(render_to_svg('sequenceDiagram\\n  A->>B: hi'))"
-  3. Create tests/test_python_bindings.py mirroring scrybe-mermaid's pytest pattern
-  4. Run: pytest tests/ -v
-
-  Also create python/scrybe_mermaid_render/__init__.py and py.typed
-  following the scrybe-mermaid pattern.
-
-  Graders will check: pytest passes, _RUST_AVAILABLE=True, render_to_svg
-  returns valid SVG with <svg> root element.
-  """,
-]
+# ── Dispatch a flight ────────────────────────────────────────────────
+#
+# Pick one or more open issues from the scrybe-mermaid-render set
+# (https://github.com/hartsock/scrybe/issues — labels:
+# `mermaid-render`, sub-issues of #37) and pass them to foreman:
+#
+#   drake-foreman \
+#     --config scrybe-mermaid-render/.drake/swarm.toml \
+#     --goal-from-issue hartsock/scrybe#52
+#
+# Or fan out across multiple issues in one flight:
+#
+#   drake-foreman \
+#     --config scrybe-mermaid-render/.drake/swarm.toml \
+#     --goal-from-issue hartsock/scrybe#52 \
+#     --goal-from-issue hartsock/scrybe#53
+#
+# The phase id ends up as `issues-52` (or `issues-52-53`), making
+# the audit trail in `<project>.ndjson` obvious.
