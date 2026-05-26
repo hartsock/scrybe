@@ -117,22 +117,34 @@ arbiter_timeout_seconds = 240
 [swarm.bake_off.arbiter]
 strictness = "loose"
 
-# Per-rung PR mode — after every round, foreman opens one PR per
-# non-erroring candidate; branch + title identify the worker model,
-# arbiter consensus notes land as PR comments identifying the
-# replica lineage. Labels: `drake/winner` / `drake/refine` /
-# `drake/rejected`. Reviewer (human) is the merge gate; the arbiter
-# is advisory.
+# NO [swarm.bake_off.output] block.
 #
-# **Deploy dependency:** foreman pod must have `gh` CLI installed
-# and a GH token mounted. The bare-repo-not-forge work
-# (gilabot#1805/#1807) is shifting this to an operator-triggered
-# button in the dashboard storyboard, but per-rung-PR is still the
-# default until that surface lands.
-[swarm.bake_off.output]
-mode        = "per-rung-pr"
-gh_repo     = "hartsock/scrybe"
-base_branch = "feat/scrybe-mermaid-render"
+# 2026-05-25 — disabled per-rung-PR auto-push after observing the
+# first scrybe#52 flight produce misleading PRs. Workers that scrub
+# (no file edits) still had their rung branches pushed to GitHub,
+# and the PR rendered the stale base-branch delta as if it were
+# worker output. Same root cause as gilabot#1805 (the
+# bare-repo-not-forge architecture): the swarm's internal git
+# surface is a bare repo on NFS; forge push is operator-triggered
+# via the drake-observatory storyboard, NOT automatic.
+#
+# Promote workflow now:
+#   1. flight ends → per-rung branches live in the swarm-internal
+#      bare repo at /workspaces/.drake-state/swarm-git/scrybe-
+#      mermaid-render.git
+#   2. operator opens the Storyboard tab in drake-observatory
+#   3. reviews each rung's patch + arbiter notes
+#   4. clicks "Promote to GitHub" on the candidate(s) worth shipping
+#
+# To re-enable auto-PR temporarily (NOT recommended outside debug),
+# uncomment and explicitly opt out of the operator gate:
+#   [swarm.bake_off.output]
+#   mode = "per-rung-pr"
+#   gh_repo = "hartsock/scrybe"
+#   base_branch = "feat/scrybe-mermaid-render"
+#   gated_by_operator = false
+# Foreman warns at startup if this knob is set without the explicit
+# opt-out — see gilabot#1814.
 
 # `consider_criteria` steers the arbiter prompt's pick logic. Each
 # criterion gets one bullet in the bake-off prompt; the arbiter is
