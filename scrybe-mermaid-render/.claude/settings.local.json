@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cargo test:*)",
+      "Bash(/opt/rust/stable/bin/cargo test --lib parser::sequence::tests -- --nocapture)",
+      "Bash(~/.cargo/bin/cargo test --lib parser::sequence::tests -- --nocapture)",
+      "Bash(export PATH=\"/opt/rust/.cargo/bin:$PATH\")",
+      "Bash(cargo clippy:*)"
+    ]
+  }
+}
