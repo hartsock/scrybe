@@ -32,6 +32,7 @@ pub fn detect_diagram_type(source: &str) -> Result<DiagramType> {
             || lower == "graph"
             || lower.starts_with("flowchart ")
             || lower.starts_with("flowchart\t")
+            || lower == "flowchart"
         {
             return Ok(DiagramType::Flowchart);
         }
@@ -66,6 +67,14 @@ mod tests {
     fn test_detect_flowchart_keyword() {
         assert_eq!(
             detect_diagram_type("flowchart LR\n  A --> B").unwrap(),
+            DiagramType::Flowchart
+        );
+    }
+
+    #[test]
+    fn test_detect_flowchart_without_direction() {
+        assert_eq!(
+            detect_diagram_type("flowchart\n  A --> B").unwrap(),
             DiagramType::Flowchart
         );
     }
