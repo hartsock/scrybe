@@ -63,14 +63,14 @@ tauri-build = { version = "2", features = [] }
 # Internal crates — version pinned (=) so cargo publish accepts the
 # tarballs (path-deps without versions are rejected at publish time).
 # Workspace lock-step: every release bumps all members together.
-scrybe-core       = { path = "scrybe-core",       version = "=0.3.0" }
-scrybe-render     = { path = "scrybe-render",     version = "=0.3.0" }
-scrybe-mcp-client = { path = "scrybe-mcp-client", version = "=0.3.0" }
-scrybe-mcp-server = { path = "scrybe-mcp-server", version = "=0.3.0" }
-scrybe-mermaid    = { path = "scrybe-mermaid",    version = "=0.3.0" }
-scrybe-vcs        = { path = "scrybe-vcs",        version = "=0.3.0" }
-scrybe-py         = { path = "scrybe-py",         version = "=0.3.0" }
-scrybe-rpc        = { path = "scrybe-rpc",        version = "=0.3.0" }
+scrybe-core       = { path = "scrybe-core",       version = "=0.2.1-dev" }
+scrybe-render     = { path = "scrybe-render",     version = "=0.2.1-dev" }
+scrybe-mcp-client = { path = "scrybe-mcp-client", version = "=0.2.1-dev" }
+scrybe-mcp-server = { path = "scrybe-mcp-server", version = "=0.2.1-dev" }
+scrybe-mermaid    = { path = "scrybe-mermaid",    version = "=0.2.1-dev" }
+scrybe-vcs        = { path = "scrybe-vcs",        version = "=0.2.1-dev" }
+scrybe-py         = { path = "scrybe-py",         version = "=0.2.1-dev" }
+scrybe-rpc        = { path = "scrybe-rpc",        version = "=0.2.1-dev" }
 
 [workspace.lints.clippy]
 explicit_iter_loop     = "warn"

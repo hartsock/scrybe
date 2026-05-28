@@ -1,6 +1,6 @@
 [package]
 name = "scrybe-cli"
-version = "0.3.0"
+version = "0.2.1-dev"
 edition = "2021"
 description = "Scrybe CLI — headless render/lint/mermaid/panel command-line tool"
 license = "Apache-2.0"
