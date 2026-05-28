@@ -28,8 +28,27 @@ export function createEditor(
   });
 }
 
+/// Set true while a programmatic dispatch is replacing buffer content
+/// (e.g., tab switch, file load, external-change reload). CodeMirror's
+/// updateListener fires synchronously during dispatch; consumers can
+/// read this flag in their onChange handler to distinguish a user edit
+/// from a programmatic load and skip the autosave it would otherwise
+/// schedule. See `fix/0.2.1-tab-reload-and-mcp-open` for the bug this
+/// guards against (issue: autosave on programmatic load opens a
+/// self-write window that swallows the next external edit).
+let suppressAutosave = false;
+
+export function shouldSuppressAutosave(): boolean {
+  return suppressAutosave;
+}
+
 export function swapDocument(view: EditorView, content: string): void {
-  view.dispatch({
-    changes: { from: 0, to: view.state.doc.length, insert: content },
-  });
+  suppressAutosave = true;
+  try {
+    view.dispatch({
+      changes: { from: 0, to: view.state.doc.length, insert: content },
+    });
+  } finally {
+    suppressAutosave = false;
+  }
 }
