@@ -157,8 +157,19 @@ fn read_file(path: String) -> Result<String, String> {
     std::fs::read_to_string(&path).map_err(|e| e.to_string())
 }
 
+/// Path of the autosave sidecar buffer for `path`.
+///
+/// The sidecar is the "in-progress edit buffer" — autosaves go here so
+/// the real file is never touched by debounced keystroke saves. The
+/// real file is committed only on explicit save (`save_file`).
+fn buffer_path_for(path: &str) -> std::path::PathBuf {
+    std::path::PathBuf::from(format!("{path}.scrybe-buffer"))
+}
+
 /// Write `content` to `path`, creating `<path>~` on the first save of each
-/// session so the original on-disk version is always recoverable.
+/// session so the original on-disk version is always recoverable. Also
+/// clears the `<path>.scrybe-buffer` autosave sidecar (if present), since
+/// an explicit save flushes the in-progress edits to the real file.
 ///
 /// The `~` backup is written only once per path: if it already exists it is
 /// left alone, preserving the true "opened from disk" snapshot across multiple
@@ -171,16 +182,86 @@ fn save_file(path: String, content: String) -> Result<(), String> {
     if p.exists() && !bak.exists() {
         std::fs::copy(p, &bak).map_err(|e| format!("backup failed: {e}"))?;
     }
-    std::fs::write(p, content).map_err(|e| format!("write failed: {e}"))
+    std::fs::write(p, content).map_err(|e| format!("write failed: {e}"))?;
+    // Sidecar buffer is now stale — explicit save committed the bytes
+    // to the real file. Remove it so future autosaves start fresh and
+    // the buffer can't accidentally be restored over a saved file.
+    let bp = buffer_path_for(&path);
+    if bp.exists() {
+        let _ = std::fs::remove_file(&bp);
+    }
+    Ok(())
 }
 
-/// Remove the `<path>~` backup file when a tab is closed.
-/// Silent no-op if the backup doesn't exist.
+/// Write the in-progress edit buffer to the autosave sidecar
+/// (`<path>.scrybe-buffer`). The real file is never touched by this
+/// command — that's the point. The sidecar is cleared by `save_file`
+/// (explicit save) and by `clear_buffer` (tab close).
+///
+/// This is the Phase 2 replacement for the previous autosave path which
+/// wrote keystrokes directly to the real file. Writing to a sidecar
+/// instead eliminates the entire class of "external edit → fs-watch
+/// event → self-write-filter swallows it" bugs by making autosave
+/// never write to the watched file.
+#[tauri::command]
+fn save_buffer(path: String, content: String) -> Result<(), String> {
+    let bp = buffer_path_for(&path);
+    std::fs::write(&bp, content).map_err(|e| format!("buffer write failed: {e}"))
+}
+
+/// Remove the autosave sidecar buffer for `path`. Silent no-op if it
+/// doesn't exist. Called on tab close.
+#[tauri::command]
+fn clear_buffer(path: String) -> Result<(), String> {
+    let bp = buffer_path_for(&path);
+    if bp.exists() {
+        std::fs::remove_file(&bp).map_err(|e| format!("clear buffer failed: {e}"))?;
+    }
+    Ok(())
+}
+
+/// Return the sidecar buffer content if it exists and differs from disk.
+///
+/// Used on tab open to detect a previous session's unsaved edits — for
+/// example, when Scrybe crashed or the tab was closed without an
+/// explicit save. Returns None when: no sidecar exists, the sidecar is
+/// empty, or the sidecar content matches what's on disk (already
+/// saved). The caller decides whether to restore, prompt, or discard.
+#[tauri::command]
+fn read_buffer_if_exists(path: String) -> Result<Option<String>, String> {
+    let bp = buffer_path_for(&path);
+    if !bp.exists() {
+        return Ok(None);
+    }
+    let buffer = std::fs::read_to_string(&bp).map_err(|e| e.to_string())?;
+    if buffer.is_empty() {
+        return Ok(None);
+    }
+    let real = std::fs::read_to_string(&path).unwrap_or_default();
+    if buffer == real {
+        Ok(None)
+    } else {
+        Ok(Some(buffer))
+    }
+}
+
+/// Remove the `<path>~` backup file when a tab is closed. Also clears
+/// the autosave sidecar (`<path>.scrybe-buffer`) so closing a tab
+/// always leaves the filesystem clean.
+///
+/// If the tab was dirty (unsaved edits in the sidecar), those edits are
+/// dropped on close. Phase 3 will add a "save changes?" prompt before
+/// reaching this command; for Phase 2 we match the existing close
+/// behavior of dropping unsaved edits silently.
 #[tauri::command]
 fn remove_backup(path: String) -> Result<(), String> {
     let bak = std::path::PathBuf::from(format!("{path}~"));
     if bak.exists() {
         std::fs::remove_file(&bak).map_err(|e| format!("remove backup failed: {e}"))?;
+    }
+    let bp = buffer_path_for(&path);
+    if bp.exists() {
+        let _ = std::fs::remove_file(&bp);
     }
     Ok(())
 }
@@ -697,6 +778,9 @@ pub fn run() {
             path_type,
             read_file,
             save_file,
+            save_buffer,
+            clear_buffer,
+            read_buffer_if_exists,
             remove_backup,
             get_builtin_agents,
             set_agent_enabled,
@@ -744,6 +828,21 @@ pub fn run() {
                     }
                     for path in &event.paths {
                         let path_str = path.display().to_string();
+                        // On macOS the watcher operates at directory granularity, so
+                        // we see events for any sibling file (including our own
+                        // `.scrybe-buffer` autosave sidecars). Skip anything we
+                        // didn't ask to watch — buffer writes must never trigger
+                        // a reload of the real file.
+                        let is_watched = {
+                            let guard = WATCH.lock().unwrap();
+                            guard
+                                .as_ref()
+                                .map(|s| s.watched.contains(&path_str))
+                                .unwrap_or(false)
+                        };
+                        if !is_watched {
+                            continue;
+                        }
                         // Check and remove self-write record without overlapping borrows.
                         let self_write = {
                             let mut guard = WATCH.lock().unwrap();
@@ -786,4 +885,117 @@ pub fn run() {
         })
         .run(tauri::generate_context!())
         .expect("error while running Scrybe");
+}
+
+#[cfg(test)]
+mod tests {
+    //! Unit tests for the sidecar autosave buffer commands.
+    //!
+    //! These exercise the file-level contract — the Tauri IPC layer is a
+    //! thin wrapper around the underlying functions, so direct calls are
+    //! sufficient. All tests use `tempfile::tempdir` to avoid touching
+    //! real user files.
+    use super::*;
+
+    fn temp_file(name: &str, content: &str) -> (tempfile::TempDir, String) {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join(name);
+        std::fs::write(&path, content).expect("seed write");
+        let s = path.to_string_lossy().into_owned();
+        (dir, s)
+    }
+
+    #[test]
+    fn save_buffer_writes_sidecar_not_real_file() {
+        let (_dir, path) = temp_file("doc.md", "original on disk");
+        save_buffer(path.clone(), "in-progress edits".into()).unwrap();
+
+        // Real file must be untouched
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "original on disk");
+        // Sidecar must hold the buffer
+        let bp = buffer_path_for(&path);
+        assert_eq!(std::fs::read_to_string(&bp).unwrap(), "in-progress edits");
+    }
+
+    #[test]
+    fn save_file_clears_sidecar() {
+        let (_dir, path) = temp_file("doc.md", "v1");
+        save_buffer(path.clone(), "v2-buffered".into()).unwrap();
+        assert!(buffer_path_for(&path).exists());
+
+        save_file(path.clone(), "v2-committed".into()).unwrap();
+
+        // Real file got the committed bytes; sidecar is gone.
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "v2-committed");
+        assert!(!buffer_path_for(&path).exists());
+    }
+
+    #[test]
+    fn clear_buffer_removes_sidecar_when_present() {
+        let (_dir, path) = temp_file("doc.md", "v1");
+        save_buffer(path.clone(), "drafted".into()).unwrap();
+        assert!(buffer_path_for(&path).exists());
+
+        clear_buffer(path.clone()).unwrap();
+        assert!(!buffer_path_for(&path).exists());
+    }
+
+    #[test]
+    fn clear_buffer_is_silent_noop_when_missing() {
+        let (_dir, path) = temp_file("doc.md", "v1");
+        // No sidecar yet — must not error.
+        clear_buffer(path).unwrap();
+    }
+
+    #[test]
+    fn read_buffer_returns_none_when_no_sidecar() {
+        let (_dir, path) = temp_file("doc.md", "v1");
+        assert_eq!(read_buffer_if_exists(path).unwrap(), None);
+    }
+
+    #[test]
+    fn read_buffer_returns_none_when_sidecar_matches_disk() {
+        let (_dir, path) = temp_file("doc.md", "same content");
+        save_buffer(path.clone(), "same content".into()).unwrap();
+        // Sidecar exists but matches disk — no recovery needed.
+        assert_eq!(read_buffer_if_exists(path).unwrap(), None);
+    }
+
+    #[test]
+    fn read_buffer_returns_content_when_sidecar_differs() {
+        let (_dir, path) = temp_file("doc.md", "v1");
+        save_buffer(path.clone(), "unsaved v2".into()).unwrap();
+        assert_eq!(
+            read_buffer_if_exists(path).unwrap(),
+            Some("unsaved v2".into())
+        );
+    }
+
+    #[test]
+    fn read_buffer_returns_none_for_empty_sidecar() {
+        let (_dir, path) = temp_file("doc.md", "v1");
+        save_buffer(path.clone(), "".into()).unwrap();
+        // Empty sidecar — discard rather than offer to restore-to-nothing.
+        assert_eq!(read_buffer_if_exists(path).unwrap(), None);
+    }
+
+    #[test]
+    fn remove_backup_clears_both_backup_and_sidecar() {
+        let (_dir, path) = temp_file("doc.md", "v1");
+        save_buffer(path.clone(), "drafted".into()).unwrap();
+        // Trigger the ~ backup via save_file
+        save_file(path.clone(), "v2".into()).unwrap();
+        // save_file clears the sidecar, so re-create one to test cleanup
+        save_buffer(path.clone(), "drafted again".into()).unwrap();
+
+        let bak = std::path::PathBuf::from(format!("{path}~"));
+        let bp = buffer_path_for(&path);
+        assert!(bak.exists());
+        assert!(bp.exists());
+
+        remove_backup(path).unwrap();
+
+        assert!(!bak.exists());
+        assert!(!bp.exists());
+    }
 }

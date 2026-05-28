@@ -20,3 +20,9 @@ src-tauri/gen/
 # python/ tree-specific rule above).
 __pycache__/
 *.pyc
+
+# Scrybe autosave sidecars — per-keystroke buffers written next to the
+# real file so external editors can never be clobbered by debounced
+# autosaves. Cleared on explicit save (Ctrl+S) or tab close; should
+# never be committed.
+*.scrybe-buffer

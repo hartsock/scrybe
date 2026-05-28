@@ -253,21 +253,27 @@ const view = createEditor(editorEl, WELCOME, async (content) => {
   // lands inside that window. See `editor.ts::swapDocument`.
   if (isProgrammaticLoad) return;
 
-  // Autosave: 1 s debounce. At fire time, re-read content from state so
-  // the saved bytes are always the latest keystrokes, not a stale closure.
+  // Autosave: 1 s debounce, writes to the `<path>.scrybe-buffer` sidecar
+  // (not the real file). At fire time, re-read content from state so the
+  // saved bytes are always the latest keystrokes, not a stale closure.
+  //
+  // The tab stays `isDirty: true` until an explicit save (Ctrl+S / 💾)
+  // flushes the buffer to the real file. Sidecar writes do not change
+  // dirty state because the real file is still out of sync.
   if (savePath && saveId) {
     if (saveTimer) clearTimeout(saveTimer);
     saveTimer = setTimeout(async () => {
       const current = state.tabs.find(t => t.id === saveId);
       if (!current?.path) return;
-      console.log("Autosave:", current.path);
+      console.log("Autosave to buffer:", current.path);
       try {
-        await invoke("save_file", { path: current.path, content: current.content });
-        invoke("note_autosave", { path: current.path }).catch(() => {});
-        state.markClean(saveId);
-        redrawTabs();
+        await invoke("save_buffer", { path: current.path, content: current.content });
+        // No `note_autosave` here — buffer writes don't touch the real
+        // file, so the OS fs-watch never sees them. The self-write
+        // filter only protects explicit `save_file` calls.
+        // No `markClean` either — tab stays dirty until explicit save.
       } catch (err) {
-        console.error("Autosave failed:", err);
+        console.error("Buffer autosave failed:", err);
       }
     }, 1000);
   }
