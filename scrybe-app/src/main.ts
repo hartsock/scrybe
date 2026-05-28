@@ -12,7 +12,7 @@ import { open as openExternal } from "@tauri-apps/plugin-shell";
 import { showToast } from "./toast";
 import { AppState } from "./state";
 import { renderTabBar } from "./tabs";
-import { createEditor, swapDocument } from "./editor";
+import { createEditor, swapDocument, shouldSuppressAutosave } from "./editor";
 import { PreviewPane } from "./preview";
 import { buildToolbar } from "./toolbar";
 import { Sidebar } from "./sidebar";
@@ -223,8 +223,19 @@ window.addEventListener("keydown", (e) => {
 let saveTimer: ReturnType<typeof setTimeout> | null = null;
 
 const view = createEditor(editorEl, WELCOME, async (content) => {
+  // Snapshot the flag synchronously — `shouldSuppressAutosave()` returns
+  // true only while CodeMirror is mid-dispatch from `swapDocument`. By
+  // the time we hit our first `await` below, the flag will have been
+  // reset, so capture it now.
+  const isProgrammaticLoad = shouldSuppressAutosave();
+
   if (state.activeTabId) {
     state.updateContent(state.activeTabId, content);
+    // A programmatic load (file open, tab switch, external-change reload)
+    // is not a user edit. Setting isDirty=true would (a) show a misleading
+    // dirty badge, and (b) chain into the autosave path below. Mark the
+    // tab clean to undo the dirty-flip that `updateContent` always sets.
+    if (isProgrammaticLoad) state.markClean(state.activeTabId);
     redrawTabs();
   }
   // Capture tab BEFORE any awaits — prevents a race where onChange(WELCOME)
@@ -235,6 +246,12 @@ const view = createEditor(editorEl, WELCOME, async (content) => {
 
   const processed = await pluginManager.runAll(content);
   preview.render(processed || content);
+
+  // Programmatic loads must not schedule an autosave: doing so would
+  // immediately call `note_autosave()` and open a 2 s self-write window
+  // in the OS file watcher, swallowing any genuine external edit that
+  // lands inside that window. See `editor.ts::swapDocument`.
+  if (isProgrammaticLoad) return;
 
   // Autosave: 1 s debounce. At fire time, re-read content from state so
   // the saved bytes are always the latest keystrokes, not a stale closure.
