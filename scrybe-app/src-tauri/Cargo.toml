@@ -1,6 +1,6 @@
 [package]
 name = "scrybe-app"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2021"
 description = "Scrybe desktop application — Tauri 2 + CodeMirror 6"
 license = "Apache-2.0"
