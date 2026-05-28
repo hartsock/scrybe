@@ -110,7 +110,60 @@ tail -f /tmp/scrybe-debug.log
 ## Branch and PR Rules for Agent Contributions
 
 1. Never commit directly to `main`
-2. Create a feature branch: `feat/description` or `fix/description`
+2. Create a feature branch: `feat/description`, `fix/description`,
+   `chore/description`, or `docs/description`
 3. All checks must pass before pushing (pre-push hook enforces this)
 4. Open a PR via `gh pr create`
 5. Include agent identity in the PR description
+6. Apply a risk label (see below) so the autonomy rules can be applied
+
+## Risk Classification
+
+Every PR carries one of two labels.
+
+A change is **`risk:low`** if ALL of these are true:
+
+- Scoped to a single issue, bug fix, doc update, or version bump
+- Has a regression test for every behavioral fix
+- Touches no CI/CD workflows, push hooks, or build configuration
+- Deletes nothing that isn't provably dead
+- Local `just check` and `just test` pass
+
+Everything else is **`risk:high`** — including but not limited to:
+
+- Multi-issue / cross-cutting changes
+- Edits to `.github/workflows/`, `.githooks/`, `Cargo.toml` workspace
+  membership, `justfile`, `pyproject.toml` build metadata
+- Code or asset deletions whose dead-ness isn't obvious
+- Any change without a corresponding test
+- Anything an agent feels uncertain about — when in doubt, label `risk:high`
+
+The labels exist in the repo (`risk:low` green, `risk:high` red). If a PR
+lands without a risk label, treat it as `risk:high` until labeled.
+
+## Agent Autonomy Table
+
+| Action | Autonomous? |
+|---|---|
+| Create branch + push | Yes |
+| Open PR | Yes |
+| Push fixup commits to own PR | Yes |
+| Apply / change a risk label | Yes |
+| Merge a `risk:low` PR after CI green | Yes |
+| Merge a `risk:high` PR | Only after explicit human approval |
+| Tag and push `v*` (cuts a release) | Only when the human asks for a release |
+| Cut a `release/0.Y.x` branch | Only when a real backport is in flight (see `RELEASE.md`) |
+| Close issues | Only via `Fixes #N` in a merged PR body |
+| Force-push to any branch | Never |
+| Bypass push hooks (`--no-verify`) | Never |
+
+## CI / Hook Parity
+
+The push hook is the local equivalent of the CI pipeline. When editing
+either side, audit the other:
+
+- Editing `.github/workflows/*.yml`? Update `.githooks/pre-push` to match.
+- Editing `.githooks/pre-push`? Update the workflows to match.
+
+Both files should carry a top-of-file comment naming their counterpart so
+the relationship is auditable.
