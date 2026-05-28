@@ -1,6 +1,6 @@
 [package]
 name = "scrybe-panels"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2021"
 description = "Scrybe panels — bake-off orchestrator and SQLite calibration log"
 license = "Apache-2.0"

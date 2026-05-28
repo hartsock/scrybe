@@ -1,6 +1,6 @@
 [package]
 name = "scrybe-rpc"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2021"
 description = "Scrybe CLI ↔ GUI wire protocol — JSON-RPC 2.0 types over a Unix socket."
 license = "Apache-2.0"
