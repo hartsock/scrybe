@@ -44,6 +44,11 @@ export class AppState {
     if (tab) tab.isDirty = false;
   }
 
+  markDirty(id: string): void {
+    const tab = this.tabs.find(t => t.id === id);
+    if (tab) tab.isDirty = true;
+  }
+
   cycleViewMode(id: string): ViewMode {
     const tab = this.tabs.find(t => t.id === id);
     if (!tab) return "both";

@@ -313,7 +313,57 @@ function newTab(content = WELCOME): void {
   redrawTabs();
 }
 
-function closeTab(id: string): void {
+/// 3-button modal: returns "primary" | "secondary" | "cancel".
+///
+/// The dialog is opaque to its callers — they pick the labels and act
+/// on the return value. Used for save-on-close ("Save" / "Discard")
+/// and restore-on-open ("Restore" / "Discard"). Enter selects primary,
+/// Escape returns cancel.
+type ModalChoice = "primary" | "secondary" | "cancel";
+
+function showModal(
+  title: string,
+  message: string,
+  primaryLabel: string,
+  secondaryLabel: string,
+): Promise<ModalChoice> {
+  return new Promise<ModalChoice>(resolve => {
+    const overlay = document.getElementById("modal-overlay")!;
+    const titleEl = document.getElementById("modal-title")!;
+    const msgEl = document.getElementById("modal-message")!;
+    const primary = document.getElementById("modal-primary") as HTMLButtonElement;
+    const secondary = document.getElementById("modal-secondary") as HTMLButtonElement;
+    const cancel = document.getElementById("modal-cancel") as HTMLButtonElement;
+
+    titleEl.textContent = title;
+    msgEl.textContent = message;
+    primary.textContent = primaryLabel;
+    secondary.textContent = secondaryLabel;
+    overlay.style.display = "flex";
+    primary.focus();
+
+    const cleanup = () => {
+      overlay.style.display = "none";
+      primary.onclick = null;
+      secondary.onclick = null;
+      cancel.onclick = null;
+      document.removeEventListener("keydown", onKey);
+    };
+    const finish = (choice: ModalChoice) => { cleanup(); resolve(choice); };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") { e.preventDefault(); finish("cancel"); }
+      else if (e.key === "Enter") { e.preventDefault(); finish("primary"); }
+    };
+    primary.onclick = () => finish("primary");
+    secondary.onclick = () => finish("secondary");
+    cancel.onclick = () => finish("cancel");
+    document.addEventListener("keydown", onKey);
+  });
+}
+
+/// Tear down a tab without prompting. Split out from `closeTab` so the
+/// save-on-close prompt can await the user's choice before invoking it.
+function doCloseTab(id: string): void {
   const tab = state.tabs.find(t => t.id === id);
   if (tab?.path) {
     invoke("remove_backup", { path: tab.path }).catch(() => {});
@@ -325,6 +375,41 @@ function closeTab(id: string): void {
   swapDocument(view, content);
   if (content) preview.render(content);
   redrawTabs();
+}
+
+function closeTab(id: string): void {
+  const tab = state.tabs.find(t => t.id === id);
+  if (!tab) return;
+
+  // Dirty buffer → prompt before closing. The sidecar still has the
+  // edits, but `remove_backup` (called from doCloseTab) deletes it on
+  // close, so dropping out without saving really does lose work.
+  if (tab.isDirty && tab.path) {
+    const name = tab.path.split("/").pop() ?? "(untitled)";
+    const path = tab.path;
+    void showModal(
+      "Unsaved changes",
+      `Save changes to "${name}" before closing?`,
+      "Save",      // primary
+      "Discard",   // secondary
+    ).then(async choice => {
+      if (choice === "cancel") return; // keep the tab open
+      if (choice === "primary") {
+        try {
+          await invoke("save_file", { path, content: tab.content });
+          invoke("note_autosave", { path }).catch(() => {});
+        } catch (err) {
+          showToast(`Save failed: ${err instanceof Error ? err.message : err}`);
+          return; // bail — don't close on save failure
+        }
+      }
+      // "primary" (Save succeeded) or "secondary" (Discard) — close
+      doCloseTab(id);
+    });
+    return;
+  }
+
+  doCloseTab(id);
 }
 
 function extOf(path: string): string {
@@ -360,11 +445,46 @@ async function openFileByPath(path: string): Promise<void> {
       return;
     }
 
-    const content: string = await invoke("read_file", { path });
-    state.addTab(path, content);
+    const diskContent: string = await invoke("read_file", { path });
+
+    // Check for an unsaved sidecar buffer left over from a prior session
+    // (crash, force-close, or "Discard" not actually discarding). If the
+    // buffer differs from disk, prompt the user to restore or discard.
+    // The backend's `read_buffer_if_exists` returns null when the buffer
+    // is missing, empty, or already matches disk.
+    const buffer: string | null = await invoke<string | null>(
+      "read_buffer_if_exists",
+      { path },
+    ).catch(() => null);
+
+    let useContent = diskContent;
+    let restoredFromBuffer = false;
+    if (buffer !== null) {
+      const name = path.split("/").pop() ?? path;
+      const choice = await showModal(
+        "Restore unsaved edits?",
+        `An autosave buffer for "${name}" exists from a previous session.\n\n` +
+          `Restore the unsaved edits, or discard them and open the file as-is on disk?`,
+        "Restore",
+        "Discard",
+      );
+      if (choice === "cancel") return; // user backed out of the open
+      if (choice === "primary") {
+        useContent = buffer;
+        restoredFromBuffer = true;
+      } else {
+        // Discard — clear the sidecar so the prompt doesn't keep coming back
+        invoke("clear_buffer", { path }).catch(() => {});
+      }
+    }
+
+    const newTabId = state.addTab(path, useContent);
     invoke("watch_file", { path }).catch(() => {});
-    swapDocument(view, content);
-    preview.render(ext === "mmd" ? "```mermaid\n" + content + "\n```" : content);
+    swapDocument(view, useContent);
+    preview.render(ext === "mmd" ? "```mermaid\n" + useContent + "\n```" : useContent);
+    // Restored buffer differs from disk → flag the tab dirty so the user
+    // gets the dirty indicator and the save-on-close prompt next time.
+    if (restoredFromBuffer) state.markDirty(newTabId);
     redrawTabs();
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);

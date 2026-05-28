@@ -37,12 +37,35 @@
       #conflict-bar { background: #6b3a00; color: #ffd; font-size: 13px; padding: 0 12px; height: 34px; align-items: center; gap: 10px; flex-shrink: 0; border-bottom: 1px solid #a05000; }
       #conflict-bar button { padding: 2px 10px; font-size: 12px; cursor: pointer; border-radius: 3px; border: 1px solid #a05000; background: #3d2000; color: #ffd; }
       #conflict-bar button:hover { background: #5a3000; }
+      /* Modal overlay — used by 3-button prompts (save-on-close, restore-on-open) */
+      #modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.6); display: none; align-items: center; justify-content: center; z-index: 1000; }
+      #modal-dialog { background: #2d2d2d; color: #eee; border: 1px solid #555; border-radius: 6px; padding: 20px 24px; min-width: 360px; max-width: 520px; box-shadow: 0 8px 24px rgba(0,0,0,0.5); }
+      #modal-title { font-size: 14px; font-weight: 600; margin-bottom: 8px; color: #fff; }
+      #modal-message { font-size: 13px; line-height: 1.45; margin-bottom: 18px; color: #ccc; white-space: pre-wrap; }
+      #modal-buttons { display: flex; justify-content: flex-end; gap: 8px; }
+      #modal-buttons button { padding: 6px 14px; font-size: 12px; cursor: pointer; border-radius: 4px; border: 1px solid #555; background: #3d3d3d; color: #eee; min-width: 80px; }
+      #modal-buttons button:hover { background: #4d4d4d; }
+      #modal-buttons button.primary { background: #0a5fa5; border-color: #1577c4; color: #fff; }
+      #modal-buttons button.primary:hover { background: #1577c4; }
+      #modal-buttons button.danger { background: #6b1a1a; border-color: #8b2a2a; color: #fff; }
+      #modal-buttons button.danger:hover { background: #8b2a2a; }
     </style>
   </head>
   <body>
     <div id="app">
       <div id="toolbar">Scrybe</div>
       <div id="conflict-bar" style="display:none"></div>
+      <div id="modal-overlay">
+        <div id="modal-dialog">
+          <div id="modal-title"></div>
+          <div id="modal-message"></div>
+          <div id="modal-buttons">
+            <button id="modal-primary" class="primary"></button>
+            <button id="modal-secondary" class="danger"></button>
+            <button id="modal-cancel">Cancel</button>
+          </div>
+        </div>
+      </div>
       <div id="content">
         <div id="sidebar-col">
           <div id="sidebar-header">Explorer</div>
