@@ -750,6 +750,95 @@ fn note_autosave(path: String) {
     }
 }
 
+// ─── UI-control parity: state mirror + MCP signal pollers ────────────────────
+//
+// Project rule: every human control has an MCP equivalent and vice versa.
+// The frontend mirrors its UI state here so the MCP `state` tool can read
+// it, and polls the signal files below so the MCP `set_theme`/`view_mode`/
+// `set_vim` tools can drive the same controls a human clicks.
+
+/// Mirror the frontend's current UI state to `/tmp/scrybe-state.json`.
+/// Read by the MCP `state` tool. Best-effort; never blocks the UI.
+#[tauri::command]
+fn publish_state(state: serde_json::Value) -> Result<(), String> {
+    let s = serde_json::to_string(&state).map_err(|e| e.to_string())?;
+    std::fs::write("/tmp/scrybe-state.json", s).map_err(|e| e.to_string())
+}
+
+/// Read-and-delete a single-shot signal file written by an MCP tool.
+/// Returns the trimmed contents, or None if no signal is pending.
+fn poll_signal(path: &str) -> Option<String> {
+    let p = std::path::Path::new(path);
+    if !p.exists() {
+        return None;
+    }
+    let content = std::fs::read_to_string(p).ok()?;
+    let _ = std::fs::remove_file(p);
+    Some(content.trim().to_string())
+}
+
+/// Poll for an MCP `set_theme` signal (`default` | `dark` | `solarized`).
+#[tauri::command]
+fn poll_set_theme() -> Option<String> {
+    poll_signal("/tmp/scrybe-set-theme.txt")
+}
+
+/// Poll for an MCP `view_mode` signal (`both` | `edit` | `preview` | `cycle`).
+#[tauri::command]
+fn poll_view_mode() -> Option<String> {
+    poll_signal("/tmp/scrybe-view-mode.txt")
+}
+
+/// Poll for an MCP `set_vim` signal (`on` | `off`).
+#[tauri::command]
+fn poll_set_vim() -> Option<String> {
+    poll_signal("/tmp/scrybe-set-vim.txt")
+}
+
+/// Locate the `scrybe-docx` CLI (from the `scrybe-plugin-docx` package).
+fn which_scrybe_docx() -> Result<String, String> {
+    which::which("scrybe-docx")
+        .map(|p| p.to_string_lossy().into_owned())
+        .map_err(|_| {
+            "scrybe-docx not found on PATH. Install with: pip install scrybe-plugin-docx"
+                .to_string()
+        })
+}
+
+/// Export Markdown `content` to a Word (.docx) file at `output` by shelling
+/// to `scrybe-docx`. The buffer is piped on stdin so unsaved edits export
+/// too; `scrybe-docx` renders Mermaid fenced blocks to PNGs with the source
+/// embedded in PNG metadata. Mirrored by the MCP `export` tool.
+#[tauri::command]
+fn export_docx(content: String, output: String, no_diagrams: bool) -> Result<String, String> {
+    use std::io::Write as _;
+    let bin = which_scrybe_docx()?;
+    let mut cmd = Command::new(&bin);
+    cmd.arg("-o").arg(&output);
+    if no_diagrams {
+        cmd.arg("--no-diagrams");
+    }
+    let mut child = cmd
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("failed to spawn scrybe-docx: {e}"))?;
+    if let Some(mut stdin) = child.stdin.take() {
+        stdin
+            .write_all(content.as_bytes())
+            .map_err(|e| format!("write to scrybe-docx stdin failed: {e}"))?;
+    }
+    let out = child
+        .wait_with_output()
+        .map_err(|e| format!("scrybe-docx failed: {e}"))?;
+    if out.status.success() {
+        Ok(output)
+    } else {
+        Err(String::from_utf8_lossy(&out.stderr).trim().to_string())
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -772,6 +861,11 @@ pub fn run() {
             list_directory,
             poll_close_tab,
             poll_reload_tab,
+            publish_state,
+            poll_set_theme,
+            poll_view_mode,
+            poll_set_vim,
+            export_docx,
             watch_file,
             unwatch_file,
             note_autosave,

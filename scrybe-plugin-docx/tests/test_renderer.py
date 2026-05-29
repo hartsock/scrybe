@@ -15,10 +15,10 @@ mistune = pytest.importorskip("mistune", reason="mistune not installed")
 
 from scrybe_plugin_docx.renderer import MarkdownToDocx, _inline_text  # noqa: E402
 
-
 # ---------------------------------------------------------------------------
 # _inline_text helper
 # ---------------------------------------------------------------------------
+
 
 def test_inline_text_plain():
     tokens = [{"type": "raw", "raw": "hello world"}]
@@ -45,6 +45,7 @@ def test_inline_text_softline():
 # ---------------------------------------------------------------------------
 # MarkdownToDocx.build()
 # ---------------------------------------------------------------------------
+
 
 def _build(md: str, **kwargs):
     return MarkdownToDocx(md, **kwargs).build()
@@ -124,8 +125,15 @@ def test_mermaid_no_diagrams_fallback():
 def test_mermaid_mmdc_unavailable_falls_back(monkeypatch):
     """When mmdc is not on PATH, mermaid block falls back to monospace text."""
     import scrybe_plugin_docx.mermaid as m
-    monkeypatch.setattr(m, "render_mermaid_to_png",
-                        lambda _: (_ for _ in ()).throw(m.MermaidUnavailable("no mmdc")))
+    import scrybe_plugin_docx.renderer as r
+
+    def _raise(_):
+        raise m.MermaidUnavailable("no mmdc")
+
+    # renderer.py imports `render_mermaid_to_png` by value, so patch the name
+    # bound in the renderer module (patching the mermaid module's attribute
+    # would not affect the already-imported reference).
+    monkeypatch.setattr(r, "render_mermaid_to_png", _raise)
 
     md = "```mermaid\ngraph TD; A-->B\n```"
     doc = _build(md, render_diagrams=True)
@@ -156,6 +164,7 @@ def test_inline_code():
 # ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
+
 
 def test_cli_stdin(tmp_path, monkeypatch):
     import io, sys

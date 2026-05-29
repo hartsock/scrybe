@@ -1,0 +1,49 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+/* Path bar — selectable full-path display above the editor (#1). */
+
+#path-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 24px;
+  padding: 0 10px;
+  background: #252526;
+  border-bottom: 1px solid #333;
+  flex-shrink: 0;
+  font-size: 11px;
+  color: #b0b0b0;
+}
+
+#path-bar .pb-path {
+  flex: 1;
+  min-width: 0;
+  overflow-x: auto;
+  white-space: nowrap;
+  /* The whole point of this bar: let the user select the path text. */
+  user-select: text;
+  cursor: text;
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  scrollbar-width: none;
+}
+
+#path-bar .pb-path::-webkit-scrollbar { height: 0; }
+
+#path-bar .pb-path.pb-empty {
+  color: #6b6b6b;
+  font-style: italic;
+}
+
+#path-bar .pb-copy {
+  flex-shrink: 0;
+  background: transparent;
+  border: 1px solid #444;
+  border-radius: 3px;
+  color: #ccc;
+  font-size: 11px;
+  line-height: 1;
+  padding: 2px 6px;
+  cursor: pointer;
+}
+
+#path-bar .pb-copy:hover:not(:disabled) { background: #3a3a3a; }
+#path-bar .pb-copy:disabled { opacity: 0.4; cursor: default; }

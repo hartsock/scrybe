@@ -3,8 +3,10 @@
 
 //! Tool registry for the Scrybe MCP server.
 //!
-//! Exposes 9 tools to MCP clients: open, read, section, edit, find,
-//! render, embed, extract, lint.
+//! Exposes the Scrybe tool surface to MCP clients: open, read, section,
+//! edit, find, render, embed, extract, lint, logs, quit, close_tab,
+//! reload, plus the UI-control parity tools state, set_theme, view_mode,
+//! set_vim, and export (each mirrors a human control in scrybe-app).
 
 use scrybe_core::{Document, Node, Workspace};
 use scrybe_render::{render_html, Theme};
@@ -26,6 +28,11 @@ pub const TOOL_NAMES: &[&str] = &[
     "quit",
     "close_tab",
     "reload",
+    "state",
+    "set_theme",
+    "view_mode",
+    "set_vim",
+    "export",
 ];
 
 /// Path shared between the Tauri app's `log_append` command and this tool.
@@ -192,6 +199,57 @@ impl ToolRegistry {
                         "tail": {"type": "integer", "minimum": 1, "maximum": 1000, "description": "Max lines to return from the end of the log (default 50)"}
                     }
                 }
+            },
+            {
+                "name": "state",
+                "description": "Report the running Scrybe app's current UI state: the active tab's path/title/dirty flag, view mode, theme, and whether Vim mode is on. Human equivalent: the path bar, tab mode icon, theme dropdown, and Vim toggle.",
+                "inputSchema": { "type": "object", "properties": {} }
+            },
+            {
+                "name": "set_theme",
+                "description": "Set the editor + preview theme in the running Scrybe app. Human equivalent: the toolbar theme dropdown.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "theme": {"type": "string", "enum": ["default", "dark", "solarized"]}
+                    },
+                    "required": ["theme"]
+                }
+            },
+            {
+                "name": "view_mode",
+                "description": "Set the active tab's view mode in the running Scrybe app. Human equivalent: the toolbar View button / per-tab mode icon.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "mode": {"type": "string", "enum": ["both", "edit", "preview", "cycle"], "description": "Concrete mode, or 'cycle' to advance both→edit→preview"}
+                    },
+                    "required": ["mode"]
+                }
+            },
+            {
+                "name": "set_vim",
+                "description": "Enable or disable Vim keybindings in the running Scrybe editor. Human equivalent: the toolbar Vim toggle.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "enabled": {"type": "boolean"}
+                    },
+                    "required": ["enabled"]
+                }
+            },
+            {
+                "name": "export",
+                "description": "Export a Markdown file to a Word (.docx) document with Mermaid diagrams rendered to PNGs (source embedded in PNG metadata). Human equivalent: the toolbar Export button.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "input": {"type": "string", "description": "Path to the Markdown file to export"},
+                        "output": {"type": "string", "description": "Output .docx path (default: input with .docx extension)"},
+                        "no_diagrams": {"type": "boolean", "description": "Skip Mermaid rendering; keep fenced blocks as monospace text"}
+                    },
+                    "required": ["input"]
+                }
             }
         ]})
     }
@@ -212,6 +270,11 @@ impl ToolRegistry {
             "quit" => self.tool_quit(),
             "close_tab" => self.tool_close_tab(args),
             "reload" => self.tool_reload(args),
+            "state" => self.tool_state(),
+            "set_theme" => self.tool_set_theme(args),
+            "view_mode" => self.tool_view_mode(args),
+            "set_vim" => self.tool_set_vim(args),
+            "export" => self.tool_export(args),
             other => json!({"error": format!("unknown tool: {other}")}),
         }
     }
@@ -560,6 +623,97 @@ impl ToolRegistry {
         json!({"ok": true, "path": path_str, "bytes": new_source.len()})
     }
 
+    // ── UI-control parity tools (mirror scrybe-app human controls) ──────────
+
+    /// Report the running app's current UI state (active path, view mode,
+    /// theme, vim). The app mirrors this to `/tmp/scrybe-state.json` via its
+    /// `publish_state` command whenever the human changes something.
+    fn tool_state(&self) -> Value {
+        const STATE_FILE: &str = "/tmp/scrybe-state.json";
+        match std::fs::read_to_string(STATE_FILE) {
+            Ok(s) => match serde_json::from_str::<Value>(&s) {
+                Ok(v) => v,
+                Err(e) => json!({"error": format!("invalid state file: {e}")}),
+            },
+            Err(_) => json!({
+                "note": "no state available — is scrybe-app running?",
+                "path": STATE_FILE
+            }),
+        }
+    }
+
+    /// Signal the running app to change the editor + preview theme. The
+    /// frontend polls `/tmp/scrybe-set-theme.txt` and applies it.
+    fn tool_set_theme(&self, args: &Value) -> Value {
+        let theme = match args["theme"].as_str() {
+            Some(t @ ("default" | "dark" | "solarized")) => t,
+            Some(other) => return json!({"error": format!("invalid theme: {other}")}),
+            None => return json!({"error": "theme required"}),
+        };
+        match std::fs::write("/tmp/scrybe-set-theme.txt", theme) {
+            Ok(_) => json!({"ok": true, "theme": theme}),
+            Err(e) => json!({"error": e.to_string()}),
+        }
+    }
+
+    /// Signal the running app to change the active tab's view mode.
+    fn tool_view_mode(&self, args: &Value) -> Value {
+        let mode = match args["mode"].as_str() {
+            Some(m @ ("both" | "edit" | "preview" | "cycle")) => m,
+            Some(other) => return json!({"error": format!("invalid mode: {other}")}),
+            None => return json!({"error": "mode required"}),
+        };
+        match std::fs::write("/tmp/scrybe-view-mode.txt", mode) {
+            Ok(_) => json!({"ok": true, "mode": mode}),
+            Err(e) => json!({"error": e.to_string()}),
+        }
+    }
+
+    /// Signal the running app to enable/disable Vim keybindings.
+    fn tool_set_vim(&self, args: &Value) -> Value {
+        let enabled = match args["enabled"].as_bool() {
+            Some(b) => b,
+            None => return json!({"error": "enabled (boolean) required"}),
+        };
+        let signal = if enabled { "on" } else { "off" };
+        match std::fs::write("/tmp/scrybe-set-vim.txt", signal) {
+            Ok(_) => json!({"ok": true, "vim": enabled}),
+            Err(e) => json!({"error": e.to_string()}),
+        }
+    }
+
+    /// Export a Markdown file to Word (.docx) by shelling to `scrybe-docx`.
+    /// Renders Mermaid blocks to PNGs with the source embedded in metadata.
+    fn tool_export(&self, args: &Value) -> Value {
+        let input = match args["input"].as_str() {
+            Some(p) => p.to_string(),
+            None => return json!({"error": "input required"}),
+        };
+        let output = match args["output"].as_str() {
+            Some(o) => o.to_string(),
+            None => {
+                let p = std::path::Path::new(&input);
+                p.with_extension("docx").to_string_lossy().into_owned()
+            }
+        };
+        let no_diagrams = args["no_diagrams"].as_bool().unwrap_or(false);
+
+        let mut cmd = std::process::Command::new("scrybe-docx");
+        cmd.arg(&input).arg("-o").arg(&output);
+        if no_diagrams {
+            cmd.arg("--no-diagrams");
+        }
+        match cmd.output() {
+            Ok(out) if out.status.success() => json!({"ok": true, "output": output}),
+            Ok(out) => json!({
+                "error": String::from_utf8_lossy(&out.stderr).trim().to_string()
+            }),
+            Err(e) => json!({
+                "error": format!("failed to run scrybe-docx ({e}). Install: pip install scrybe-plugin-docx")
+            }),
+        }
+    }
+
     fn tool_logs(&self, args: &Value) -> Value {
         let tail = args["tail"].as_u64().unwrap_or(50) as usize;
         match std::fs::read_to_string(LOG_FILE) {
@@ -657,11 +811,40 @@ mod tests {
     use serde_json::json;
 
     #[test]
-    fn test_list_tools_returns_nine() {
+    fn test_list_tools_count_matches_registry() {
         let reg = ToolRegistry::new();
         let tools = reg.list_tools_json();
         let arr = tools["tools"].as_array().unwrap();
-        assert_eq!(arr.len(), 13);
+        assert_eq!(arr.len(), TOOL_NAMES.len());
+        assert_eq!(arr.len(), 18);
+    }
+
+    #[test]
+    fn test_set_theme_rejects_invalid() {
+        let mut reg = ToolRegistry::new();
+        let result = reg.call_tool("set_theme", &json!({"theme": "neon"}));
+        assert!(result["error"].as_str().unwrap().contains("invalid theme"));
+    }
+
+    #[test]
+    fn test_view_mode_requires_mode() {
+        let mut reg = ToolRegistry::new();
+        let result = reg.call_tool("view_mode", &json!({}));
+        assert!(result["error"].is_string());
+    }
+
+    #[test]
+    fn test_set_vim_requires_bool() {
+        let mut reg = ToolRegistry::new();
+        let result = reg.call_tool("set_vim", &json!({"enabled": "yes"}));
+        assert!(result["error"].is_string());
+    }
+
+    #[test]
+    fn test_export_requires_input() {
+        let mut reg = ToolRegistry::new();
+        let result = reg.call_tool("export", &json!({}));
+        assert!(result["error"].as_str().unwrap().contains("input required"));
     }
 
     #[test]
