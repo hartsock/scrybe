@@ -5,16 +5,20 @@ import "./styles/preview.css";
 import "./styles/sidebar.css";
 import "./styles/mcp_panel.css";
 import "./styles/vcs_panel.css";
+import "./styles/pathbar.css";
 import { invoke, convertFileSrc } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { homeDir } from "@tauri-apps/api/path";
 import { open as openExternal } from "@tauri-apps/plugin-shell";
+import { save as saveDialog } from "@tauri-apps/plugin-dialog";
 import { showToast } from "./toast";
 import { AppState } from "./state";
 import { renderTabBar } from "./tabs";
-import { createEditor, swapDocument, shouldSuppressAutosave } from "./editor";
+import { createEditor, swapDocument, shouldSuppressAutosave, setEditorTheme, setVim } from "./editor";
 import { PreviewPane } from "./preview";
-import { buildToolbar } from "./toolbar";
+import { buildToolbar, setToolbarViewMode, setToolbarTheme, setToolbarVim } from "./toolbar";
+import type { Theme } from "./toolbar";
+import { renderPathBar } from "./pathbar";
 import { Sidebar } from "./sidebar";
 import { PluginManager } from "./plugins";
 import { McpPanel } from "./mcp_panel";
@@ -72,12 +76,18 @@ pluginManager.load();
 
 const state = new AppState();
 const tabBarEl = document.getElementById("tab-bar")!;
+const pathBarEl = document.getElementById("path-bar")!;
 const editorEl = document.getElementById("editor")!;
 const previewEl = document.getElementById("preview")!;
 const toolbarEl = document.getElementById("toolbar")!;
 const sidebarEl = document.getElementById("sidebar")!;
 
 const preview = new PreviewPane(previewEl);
+
+// Current editor/preview theme and Vim state. These are app-wide (not
+// per-tab) and are mirrored to the MCP `state` tool via `publishState`.
+let currentTheme: Theme = "default";
+let vimEnabled = false;
 
 function flashSidebar(dir: string): void {
   sidebar.loadDirectory(dir);
@@ -191,19 +201,111 @@ async function reloadActiveTabNow(): Promise<void> {
 }
 
 buildToolbar(toolbarEl, {
-  onThemeChange: (theme) => {
-    preview.setTheme(theme);
-    const tab = state.activeTab();
-    if (tab) preview.render(tab.content);
-  },
-  onTogglePreview: () => {
-    previewEl.style.display = previewEl.style.display === "none" ? "" : "none";
-  },
+  onThemeChange: (theme) => applyTheme(theme),
+  onCyclePreview: () => cyclePreviewMode(),
   onOpenFile: openFileByPath,
   onOpenFolder: (path) => sidebar.loadDirectory(path),
   onSave: () => { void saveActiveTabNow(); },
   onReload: () => { void reloadActiveTabNow(); },
+  onExport: () => { void exportActiveTabToWord(); },
+  onToggleVim: () => setVimEnabled(!vimEnabled),
 });
+
+/// Apply a theme to BOTH panes so the editor chrome matches the preview,
+/// update the toolbar dropdown, and mirror the choice to the MCP `state`
+/// tool. This is the single entry point for theme changes — the toolbar
+/// dropdown and the MCP `set_theme` poller both route through here.
+function applyTheme(theme: Theme): void {
+  currentTheme = theme;
+  preview.setTheme(theme);
+  setEditorTheme(view, theme);
+  setToolbarTheme(toolbarEl, theme);
+  const tab = state.activeTab();
+  if (tab) preview.render(tab.content);
+  publishState();
+}
+
+/// Cycle the active tab's view mode (both → edit → preview → both). Shared
+/// by the toolbar View button and the MCP `view_mode` poller.
+function cyclePreviewMode(): void {
+  const id = state.activeTabId;
+  if (!id) return;
+  applyViewMode(state.cycleViewMode(id));
+  redrawTabs();
+}
+
+/// Set a specific view mode on the active tab (used by the MCP poller when
+/// a concrete mode, not "cycle", is requested).
+function setViewMode(mode: string): void {
+  const tab = state.activeTab();
+  if (!tab) return;
+  if (mode === "both" || mode === "edit" || mode === "preview") {
+    tab.viewMode = mode;
+    applyViewMode(mode);
+    redrawTabs();
+  }
+}
+
+/// Enable/disable Vim in the editor, update the toolbar button, mirror to
+/// MCP. Shared by the toolbar toggle and the MCP `set_vim` poller.
+function setVimEnabled(on: boolean): void {
+  vimEnabled = on;
+  setVim(view, on);
+  setToolbarVim(toolbarEl, on);
+  publishState();
+}
+
+/// Publish the current UI state to `/tmp/scrybe-state.json` so the MCP
+/// `state` tool can report what the human is looking at (active path,
+/// view mode, theme, vim). The human-side equivalents are the path bar,
+/// the tab mode icon, the theme dropdown, and the Vim toggle.
+function publishState(): void {
+  const tab = state.activeTab();
+  invoke("publish_state", {
+    state: {
+      active_path: tab?.path ?? null,
+      active_title: tab?.title ?? null,
+      is_dirty: tab?.isDirty ?? false,
+      view_mode: tab?.viewMode ?? "both",
+      theme: currentTheme,
+      vim: vimEnabled,
+      open_paths: state.tabs.map(t => t.path).filter((p): p is string => !!p),
+    },
+  }).catch(() => { /* state mirror is best-effort */ });
+}
+
+/// Update the selectable path bar to show the active tab's full path, and
+/// re-publish the MCP state mirror so the `state` tool tracks tab opens and
+/// switches in real time (not just theme/view/vim changes). Called from
+/// `redrawTabs`, which fires on every tab mutation.
+function updatePathBar(): void {
+  renderPathBar(pathBarEl, state.activeTab());
+  publishState();
+}
+
+/// Export the active tab's current buffer to a Word (.docx) file. Prompts
+/// for a destination, then shells to `scrybe-docx` via the backend. The
+/// MCP `export` tool is the agent-side equivalent.
+async function exportActiveTabToWord(): Promise<void> {
+  const tab = state.activeTab();
+  if (!tab) { showToast("No tab to export", "info"); return; }
+  const base = tab.path
+    ? tab.path.replace(/\.[^/.]+$/, "").split("/").pop() ?? "document"
+    : "document";
+  const home = await homeDir();
+  const dest = await saveDialog({
+    defaultPath: `${home}/${base}.docx`,
+    filters: [{ name: "Word document", extensions: ["docx"] }],
+  });
+  if (!dest) return;
+  try {
+    await invoke("export_docx", { content: tab.content, output: dest, noDiagrams: false });
+    showToast(`Exported ${dest.split("/").pop()}`, "info");
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    showToast(`Export failed: ${msg}`);
+  }
+}
 
 // Keyboard shortcuts for save + reload (mirrors the toolbar buttons).
 window.addEventListener("keydown", (e) => {
@@ -284,6 +386,8 @@ const editorAndPreview = document.getElementById("editor-and-preview")!;
 function applyViewMode(mode: string): void {
   editorAndPreview.classList.remove("mode-both", "mode-edit", "mode-preview");
   editorAndPreview.classList.add(`mode-${mode}`);
+  setToolbarViewMode(toolbarEl, mode);
+  publishState();
 }
 
 function redrawTabs(): void {
@@ -293,6 +397,7 @@ function redrawTabs(): void {
     () => newTab(),
     id => { applyViewMode(state.cycleViewMode(id)); redrawTabs(); },
   );
+  updatePathBar();
 }
 
 function selectTab(id: string): void {
@@ -508,6 +613,10 @@ document.addEventListener("keydown", e => {
 // ─── P4.11 — terminal panel disabled (re-enable when MCP session control is wired) ───
 
 newTab();
+// Sync the toolbar widgets + MCP state mirror with the initial defaults.
+applyViewMode(state.activeTab()?.viewMode ?? "both");
+setToolbarTheme(toolbarEl, currentTheme);
+setToolbarVim(toolbarEl, vimEnabled);
 invoke<string | null>("get_initial_directory").then(dir =>
   dir ? sidebar.loadDirectory(dir) : homeDir().then(home => sidebar.loadDirectory(home))
 ).catch(console.error);
@@ -534,6 +643,24 @@ function closeTabByPath(path: string): void {
 setInterval(async () => {
   const path = await invoke<string | null>("poll_close_tab").catch(() => null);
   if (path !== null) closeTabByPath(path);
+}, 500);
+
+// ─── MCP control pollers (human ↔ MCP parity) ────────────────────────────────
+//
+// The MCP server writes a signal file for each UI control it drives; the
+// frontend polls and applies it through the same code path as the human
+// toolbar control. See `scrybe-mcp-server/src/tools.rs`.
+setInterval(async () => {
+  const theme = await invoke<string | null>("poll_set_theme").catch(() => null);
+  if (theme && (theme === "default" || theme === "dark" || theme === "solarized")) {
+    applyTheme(theme);
+  }
+  const mode = await invoke<string | null>("poll_view_mode").catch(() => null);
+  if (mode === "cycle") cyclePreviewMode();
+  else if (mode) setViewMode(mode);
+  const vim = await invoke<string | null>("poll_set_vim").catch(() => null);
+  if (vim === "on") setVimEnabled(true);
+  else if (vim === "off") setVimEnabled(false);
 }, 500);
 
 // ─── Reload: MCP-driven (poll) + OS file watcher (event) ─────────────────────

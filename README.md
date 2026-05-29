@@ -68,7 +68,7 @@ scrybe                  # open the welcome screen
 claude mcp add scrybe -- scrybe-mcp-server stdio
 ```
 
-MCP tools: `open` · `read` · `section` · `edit` · `find` · `render` · `embed` · `extract` · `lint` · `logs` · `close_tab` · `quit`
+MCP tools: `open` · `read` · `section` · `edit` · `find` · `render` · `embed` · `extract` · `lint` · `logs` · `reload` · `close_tab` · `quit` · `state` · `set_theme` · `view_mode` · `set_vim` · `export`
 
 ## Development
 

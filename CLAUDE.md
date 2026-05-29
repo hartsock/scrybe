@@ -21,7 +21,7 @@ not make the toolchain more impressive.
 |---|---|---|
 | `scrybe-core/` | Rust | AST, Document, ContentAddressable (BLAKE3+CBOR), Plugin trait, Workspace |
 | `scrybe-render/` | Rust | HTML pipeline, syntect highlighting, KaTeX/Mermaid |
-| `scrybe-mcp-server/` | Rust | Inbound MCP server — tools: open/read/section/edit/find/render/embed/extract/lint/logs/quit/close_tab |
+| `scrybe-mcp-server/` | Rust | Inbound MCP server — tools: open/read/section/edit/find/render/embed/extract/lint/logs/reload/quit/close_tab + UI-parity tools state/set_theme/view_mode/set_vim/export |
 | `scrybe-mcp-client/` | Rust | Outbound MCP — registers external agent servers |
 | `scrybe-mermaid/` | Rust | PNG iTXt codec (Mermaid source embedded in PNG metadata) |
 | `scrybe-panels/` | Rust | Bake-off orchestrator + SQLite calibration log |
@@ -159,7 +159,12 @@ claude mcp add scrybe -- scrybe-mcp-server stdio
 ```
 
 Available tools: `open`, `read`, `section`, `edit`, `find`, `render`,
-`embed`, `extract`, `lint`, `logs`, `quit`, `close_tab`
+`embed`, `extract`, `lint`, `logs`, `reload`, `quit`, `close_tab`,
+`state`, `set_theme`, `view_mode`, `set_vim`, `export`
+
+Every human control in scrybe-app has an MCP equivalent and vice versa
+(`state`/`set_theme`/`view_mode`/`set_vim`/`export` mirror the path bar,
+theme dropdown, View button, Vim toggle, and Export button).
 
 See `AGENTS.md` for full agent interaction guide.
 

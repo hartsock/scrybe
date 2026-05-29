@@ -47,6 +47,7 @@ class MarkdownToDocx:
 # Internal AST visitors
 # ---------------------------------------------------------------------------
 
+
 class _BlockVisitor:
     def __init__(self, doc: Document, *, render_diagrams: bool) -> None:
         self.doc = doc
@@ -166,6 +167,7 @@ class _BlockVisitor:
     def _render_mermaid(self, source: str) -> None:
         try:
             png = render_mermaid_to_png(source)
+            png = _embed_mermaid_source(png, source)
             self.doc.add_picture(io.BytesIO(png), width=Inches(5.5))
         except MermaidUnavailable:
             # Fall back to monospace block.
@@ -213,6 +215,20 @@ class _InlineVisitor:
         run.bold = bold
         run.italic = italic
         return run
+
+
+def _embed_mermaid_source(png: bytes, source: str) -> bytes:
+    """Embed the Mermaid source into the PNG's iTXt metadata, round-trippable
+    via `scrybe_mermaid.extract`. Falls back to the unmodified PNG if the
+    `scrybe_mermaid` binding (or its embed step) is unavailable, so export
+    never fails just because the codec is missing.
+    """
+    try:
+        import scrybe_mermaid
+
+        return scrybe_mermaid.embed(png, source)
+    except Exception:
+        return png
 
 
 def _inline_text(tokens: list[dict]) -> str:

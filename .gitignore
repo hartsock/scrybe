@@ -26,3 +26,6 @@ __pycache__/
 # autosaves. Cleared on explicit save (Ctrl+S) or tab close; should
 # never be committed.
 *.scrybe-buffer
+
+# Python editable-install artifacts
+*.egg-info/
