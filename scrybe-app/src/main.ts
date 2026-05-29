@@ -274,9 +274,13 @@ function publishState(): void {
   }).catch(() => { /* state mirror is best-effort */ });
 }
 
-/// Update the selectable path bar to show the active tab's full path.
+/// Update the selectable path bar to show the active tab's full path, and
+/// re-publish the MCP state mirror so the `state` tool tracks tab opens and
+/// switches in real time (not just theme/view/vim changes). Called from
+/// `redrawTabs`, which fires on every tab mutation.
 function updatePathBar(): void {
   renderPathBar(pathBarEl, state.activeTab());
+  publishState();
 }
 
 /// Export the active tab's current buffer to a Word (.docx) file. Prompts
