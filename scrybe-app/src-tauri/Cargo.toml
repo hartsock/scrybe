@@ -37,5 +37,8 @@ dirs = "5"
 which.workspace = true
 notify = "6"
 
+[dev-dependencies]
+tempfile = "3"
+
 [lints]
 workspace = true
