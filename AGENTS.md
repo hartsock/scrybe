@@ -27,8 +27,19 @@ scrybe-mcp-server tools
 | `extract` | Extract Mermaid source from a PNG | `png_path` |
 | `lint` | Word count, headings, code blocks, links | `id` |
 | `logs` | Read recent console log entries from the GUI | `tail?` |
+| `reload` | Re-read an open document from disk into the GUI | `id`, `force?` |
 | `close_tab` | Close a tab by path (omit path = close active tab) | `path?` |
 | `quit` | Gracefully close the Scrybe GUI window | — |
+| `state` | Report the GUI's active path, view mode, theme, and Vim state | — |
+| `set_theme` | Set editor + preview theme (human: theme dropdown) | `theme` |
+| `view_mode` | Set active tab view mode (human: View button) | `mode` |
+| `set_vim` | Toggle Vim keybindings (human: Vim toggle) | `enabled` |
+| `export` | Export Markdown to Word (.docx) with Mermaid PNGs | `input`, `output?`, `no_diagrams?` |
+
+> **Parity rule:** every human control in scrybe-app has an MCP equivalent
+> and vice versa. The `state`/`set_theme`/`view_mode`/`set_vim`/`export`
+> tools mirror the path bar, theme dropdown, View button, Vim toggle, and
+> Export button respectively.
 
 ### Document IDs
 

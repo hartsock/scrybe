@@ -1,10 +1,10 @@
 [build-system]
 requires = ["setuptools>=68", "wheel"]
-build-backend = "setuptools.backends.legacy:build"
+build-backend = "setuptools.build_meta"
 
 [project]
 name = "scrybe-plugin-docx"
-version = "0.1.0"
+version = "0.2.0"
 description = "Scrybe plugin — render Markdown to Word (.docx) with embedded Mermaid PNGs"
 license = {text = "AGPL-3.0-or-later"}
 requires-python = ">=3.9"
@@ -12,6 +12,9 @@ dependencies = [
     "python-docx>=1.1",
     "mistune>=3.0",
     "Pillow>=10.0",
+    # Embeds the Mermaid source into rendered diagram PNGs (iTXt), so the
+    # PNGs in the .docx round-trip back to source via `scrybe_mermaid.extract`.
+    "scrybe-mermaid>=0.2",
 ]
 
 [project.optional-dependencies]
