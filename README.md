@@ -78,7 +78,8 @@ git clone https://github.com/hartsock/scrybe
 cd scrybe
 just build          # all crates
 just dev            # Tauri dev server (requires Node)
-just install        # build + install to ~/Applications and ~/venv/bin
+just install        # build + install the app and runtime tools to ~/Applications and ~/venv/bin
+just install-app    # same app install path, including the Word exporter
 just check          # full lint + test suite
 ```
 

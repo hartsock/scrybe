@@ -24,16 +24,28 @@ clean:
     cargo clean
 
 # Full install: build app + all Python packages into ~/venv, bundle to ~/Applications
-install: app
-    rm -f ~/venv/bin/scrybe ~/venv/bin/scrybe-app ~/venv/bin/scrybe-mcp-server ~/venv/bin/scrybe-docx
+install: install-app
+
+# Install the desktop app plus its runtime Python tools.
+install-app: app install-python-toolkit
     rm -rf ~/Applications/Scrybe.app
+    rm -f ~/venv/bin/scrybe-app
+    mkdir -p ~/venv/bin
     cp target/release/bundle/macos/Scrybe.app/Contents/MacOS/scrybe-app ~/venv/bin/scrybe-app
     mkdir -p ~/Applications
     cp -R target/release/bundle/macos/Scrybe.app ~/Applications/
-    cd scrybe-py && ~/venv/bin/maturin develop --release
-    cd scrybe-mermaid && ~/venv/bin/maturin develop --release
-    cd scrybe-mcp-server && ~/venv/bin/maturin develop --release
-    cd scrybe-cli && ~/venv/bin/maturin develop --release
+
+# Alias for people looking for the app-specific install recipe.
+app-install: install-app
+
+# Install the Python toolkit entry points the app shells out to at runtime.
+install-python-toolkit:
+    mkdir -p ~/venv/bin
+    rm -f ~/venv/bin/scrybe ~/venv/bin/scrybe-mcp-server ~/venv/bin/scrybe-docx
+    cd scrybe-py && VIRTUAL_ENV="$HOME/venv" ~/venv/bin/maturin develop --release
+    cd scrybe-mermaid && VIRTUAL_ENV="$HOME/venv" ~/venv/bin/maturin develop --release
+    cd scrybe-mcp-server && VIRTUAL_ENV="$HOME/venv" ~/venv/bin/maturin develop --release
+    cd scrybe-cli && VIRTUAL_ENV="$HOME/venv" ~/venv/bin/maturin develop --release
     cd scrybe-plugin-docx && ~/venv/bin/python -m pip install -e .
 
 # Install all Python packages in editable/dev mode (compiles Rust binaries)

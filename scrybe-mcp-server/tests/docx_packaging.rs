@@ -49,7 +49,17 @@ fn local_install_wires_docx_exporter() {
     let justfile = read_repo_file("justfile");
 
     assert!(
-        justfile.contains("cd scrybe-mermaid && ~/venv/bin/maturin develop --release"),
+        justfile.contains("install: install-app"),
+        "the default install should route through the app install recipe"
+    );
+    assert!(
+        justfile.contains("install-app: app install-python-toolkit"),
+        "app install should include the Python runtime tools"
+    );
+    assert!(
+        justfile.contains(
+            "cd scrybe-mermaid && VIRTUAL_ENV=\"$HOME/venv\" ~/venv/bin/maturin develop --release"
+        ),
         "local install should install the local Mermaid Python binding before docx"
     );
     assert!(

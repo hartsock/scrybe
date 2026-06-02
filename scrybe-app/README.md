@@ -94,3 +94,7 @@ cargo test -p scrybe-app
 
 On macOS the production build produces `scrybe-app/target/release/bundle/macos/Scrybe.app`.
 Install to `~/Applications/Scrybe.app` for the CLI launcher to find it automatically.
+
+From the repository root, `just install-app` builds and installs the desktop app
+and the Python runtime tools it shells out to, including the Word (`.docx`)
+exporter.
