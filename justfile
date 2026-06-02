@@ -25,19 +25,24 @@ clean:
 
 # Full install: build app + all Python packages into ~/venv, bundle to ~/Applications
 install: app
-    rm -f ~/venv/bin/scrybe ~/venv/bin/scrybe-app ~/venv/bin/scrybe-mcp-server
+    rm -f ~/venv/bin/scrybe ~/venv/bin/scrybe-app ~/venv/bin/scrybe-mcp-server ~/venv/bin/scrybe-docx
     rm -rf ~/Applications/Scrybe.app
     cp target/release/bundle/macos/Scrybe.app/Contents/MacOS/scrybe-app ~/venv/bin/scrybe-app
     mkdir -p ~/Applications
     cp -R target/release/bundle/macos/Scrybe.app ~/Applications/
+    cd scrybe-py && ~/venv/bin/maturin develop --release
+    cd scrybe-mermaid && ~/venv/bin/maturin develop --release
     cd scrybe-mcp-server && ~/venv/bin/maturin develop --release
     cd scrybe-cli && ~/venv/bin/maturin develop --release
+    cd scrybe-plugin-docx && ~/venv/bin/python -m pip install -e .
 
 # Install all Python packages in editable/dev mode (compiles Rust binaries)
 editable:
-    pip install -e .
+    cd scrybe-py && maturin develop --release
+    cd scrybe-mermaid && maturin develop --release
     cd scrybe-mcp-server && maturin develop --release
     cd scrybe-cli && maturin develop --release
+    cd scrybe-plugin-docx && python -m pip install -e .
 
 # Build the Tauri desktop app (requires npm install first)
 app:

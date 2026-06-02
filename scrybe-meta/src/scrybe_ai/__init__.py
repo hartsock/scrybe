@@ -6,6 +6,7 @@
 - ``scrybe-cli`` — the ``scrybe`` command-line tool
 - ``scrybe-mcp-server`` — standalone MCP server binary
 - ``scrybe-mermaid`` — PNG iTXt codec for Mermaid source embedding
+- ``scrybe-plugin-docx`` — Word (.docx) export CLI
 
 The real APIs live in those packages; this module exists only as a
 distribution anchor so the metapackage has a valid wheel.

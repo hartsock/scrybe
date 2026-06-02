@@ -1,3 +1,4 @@
+# Hook parity counterpart: .githooks/pre-push
 name: Release
 
 on:
@@ -97,9 +98,9 @@ jobs:
 
             **Python (all platforms):**
             ```bash
-            pip install scrybe.ai          # full toolkit (library + CLI + MCP server + mermaid)
+            pip install scrybe.ai          # full toolkit (library + CLI + MCP server + mermaid + docx)
             # or pick individual pieces:
-            pip install scrybe-cli scrybe-mcp-server scrybe-py scrybe-mermaid
+            pip install scrybe-cli scrybe-mcp-server scrybe-py scrybe-mermaid scrybe-plugin-docx
             ```
 
             ### What's new
@@ -196,6 +197,29 @@ jobs:
           name: meta-scrybe-ai
           path: scrybe-meta/dist/*
 
+  # ── Pure-Python docx exporter package ────────────────────────────────────
+
+  build-docx:
+    name: Package (scrybe-plugin-docx)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install build tooling
+        run: python -m pip install --upgrade build
+
+      - name: Build sdist + wheel
+        working-directory: scrybe-plugin-docx
+        run: python -m build --outdir dist
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: package-scrybe-plugin-docx
+          path: scrybe-plugin-docx/dist/*
+
   # ── Publish to PyPI (trusted publishing — OIDC, per-package) ──────────────
   #
   # One job per PyPI project so a missing-publisher 403 on one doesn't abort
@@ -210,7 +234,7 @@ jobs:
 
   publish-pypi:
     name: Publish ${{ matrix.package.name }}
-    needs: [build-wheels, build-sdists, build-meta]
+    needs: [build-wheels, build-sdists, build-meta, build-docx]
     runs-on: ubuntu-latest
     environment: pypi
     permissions:
@@ -228,6 +252,7 @@ jobs:
           - { name: scrybe-py,         glob: scrybe_py-* }
           - { name: scrybe-mcp-server, glob: scrybe_mcp_server-* }
           - { name: scrybe-mermaid,    glob: scrybe_mermaid-* }
+          - { name: scrybe-plugin-docx, glob: scrybe_plugin_docx-* }
 
     steps:
       - name: Download all artifacts
@@ -285,7 +310,7 @@ jobs:
   publish-crates:
     name: Publish ${{ matrix.crate.name }} → crates.io
     if: startsWith(github.ref, 'refs/tags/')
-    needs: [build-wheels, build-sdists, build-meta]
+    needs: [build-wheels, build-sdists, build-meta, build-docx]
     runs-on: scrybe-k3s
     strategy:
       fail-fast: false   # let independent leaves keep going if one of them fails
