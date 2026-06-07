@@ -1,3 +1,4 @@
+# Hook parity counterpart: .githooks/pre-push
 name: CI
 
 # Runs on self-hosted ARC runners for fast feedback on lint and tests.

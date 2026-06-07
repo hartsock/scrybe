@@ -795,14 +795,52 @@ fn poll_set_vim() -> Option<String> {
     poll_signal("/tmp/scrybe-set-vim.txt")
 }
 
+fn executable_name(stem: &str) -> String {
+    if cfg!(windows) {
+        format!("{stem}.exe")
+    } else {
+        stem.to_string()
+    }
+}
+
+fn home_venv_bin(name: &str) -> Option<std::path::PathBuf> {
+    let bin_dir = if cfg!(windows) { "Scripts" } else { "bin" };
+    dirs::home_dir().map(|home| home.join("venv").join(bin_dir).join(name))
+}
+
+fn existing_file(path: std::path::PathBuf) -> Option<String> {
+    if path.is_file() {
+        Some(path.to_string_lossy().into_owned())
+    } else {
+        None
+    }
+}
+
 /// Locate the `scrybe-docx` CLI (from the `scrybe-plugin-docx` package).
 fn which_scrybe_docx() -> Result<String, String> {
-    which::which("scrybe-docx")
-        .map(|p| p.to_string_lossy().into_owned())
-        .map_err(|_| {
-            "scrybe-docx not found on PATH. Install with: pip install scrybe-plugin-docx"
-                .to_string()
-        })
+    if let Ok(path) = std::env::var("SCRYBE_DOCX_BIN") {
+        if let Some(path) = existing_file(std::path::PathBuf::from(path)) {
+            return Ok(path);
+        }
+    }
+
+    let name = executable_name("scrybe-docx");
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(path) = existing_file(exe.with_file_name(&name)) {
+            return Ok(path);
+        }
+    }
+    if let Ok(path) = which::which(&name) {
+        return Ok(path.to_string_lossy().into_owned());
+    }
+    if let Some(path) = home_venv_bin(&name).and_then(existing_file) {
+        return Ok(path);
+    }
+
+    Err(
+        "scrybe-docx not found. Reinstall the Scrybe Python toolkit with docx export support or set SCRYBE_DOCX_BIN to the exporter executable."
+            .to_string(),
+    )
 }
 
 /// Export Markdown `content` to a Word (.docx) file at `output` by shelling
@@ -1091,5 +1129,27 @@ mod tests {
 
         assert!(!bak.exists());
         assert!(!bp.exists());
+    }
+
+    #[test]
+    fn docx_binary_name_is_platform_specific() {
+        let name = executable_name("scrybe-docx");
+        if cfg!(windows) {
+            assert_eq!(name, "scrybe-docx.exe");
+        } else {
+            assert_eq!(name, "scrybe-docx");
+        }
+    }
+
+    #[test]
+    fn existing_file_returns_candidate_path() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join(executable_name("scrybe-docx"));
+        std::fs::write(&path, "#!/bin/sh\n").expect("seed exporter");
+
+        assert_eq!(
+            existing_file(path.clone()),
+            Some(path.to_string_lossy().into_owned())
+        );
     }
 }

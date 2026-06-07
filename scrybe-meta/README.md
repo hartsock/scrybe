@@ -14,6 +14,7 @@ This pulls in:
 | [`scrybe-cli`](https://pypi.org/project/scrybe-cli/) | `scrybe` command-line tool — render / lint / mermaid |
 | [`scrybe-mcp-server`](https://pypi.org/project/scrybe-mcp-server/) | Standalone MCP server binary |
 | [`scrybe-mermaid`](https://pypi.org/project/scrybe-mermaid/) | PNG iTXt codec — embeds Mermaid source in PNG metadata |
+| [`scrybe-plugin-docx`](https://pypi.org/project/scrybe-plugin-docx/) | Word (.docx) exporter used by the desktop Export button and MCP `export` tool |
 
 Each component is also installable on its own if you only need one. This metapackage exists so `pip install scrybe.ai` Just Works for users who want the whole kit.
 

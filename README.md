@@ -14,7 +14,7 @@ as MCP peers. Scrybe is itself an MCP server, drivable by external agents.
 ### Python (PyPI)
 
 ```bash
-pip install scrybe.ai          # full Python toolkit (library + CLI + MCP server + mermaid)
+pip install scrybe.ai          # full Python toolkit (library + CLI + MCP server + mermaid + docx)
 ```
 
 Or pick individual components:
@@ -24,6 +24,7 @@ pip install scrybe-py          # PyO3 library — exposes `import scrybe`
 pip install scrybe-cli         # `scrybe` command-line tool
 pip install scrybe-mcp-server  # standalone MCP server binary
 pip install scrybe-mermaid     # PNG iTXt codec for embedded Mermaid sources
+pip install scrybe-plugin-docx # Word (.docx) exporter
 ```
 
 ### Rust (crates.io)
@@ -77,7 +78,8 @@ git clone https://github.com/hartsock/scrybe
 cd scrybe
 just build          # all crates
 just dev            # Tauri dev server (requires Node)
-just install        # build + install to ~/Applications and ~/venv/bin
+just install        # build + install the app and runtime tools to ~/Applications and ~/venv/bin
+just install-app    # same app install path, including the Word exporter
 just check          # full lint + test suite
 ```
 
@@ -104,11 +106,12 @@ Python on the outside, Rust on the inside.
 
 | Package | Install | What |
 |---|---|---|
-| `scrybe.ai` | `pip install scrybe.ai` | Metapackage — pulls in the four wheels below |
+| `scrybe.ai` | `pip install scrybe.ai` | Metapackage — pulls in the packages below |
 | `scrybe-py` | `pip install scrybe-py` | PyO3 library — `import scrybe` |
 | `scrybe-cli` | `pip install scrybe-cli` | `scrybe` CLI binary |
 | `scrybe-mcp-server` | `pip install scrybe-mcp-server` | `scrybe-mcp-server` binary |
 | `scrybe-mermaid` | `pip install scrybe-mermaid` | PNG iTXt codec |
+| `scrybe-plugin-docx` | `pip install scrybe-plugin-docx` | Word (.docx) exporter |
 
 ### crates.io
 

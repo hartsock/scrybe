@@ -38,6 +38,59 @@ pub const TOOL_NAMES: &[&str] = &[
 /// Path shared between the Tauri app's `log_append` command and this tool.
 const LOG_FILE: &str = "/tmp/scrybe-debug.log";
 
+fn executable_name(stem: &str) -> String {
+    if cfg!(windows) {
+        format!("{stem}.exe")
+    } else {
+        stem.to_string()
+    }
+}
+
+fn home_dir() -> Option<std::path::PathBuf> {
+    std::env::var_os("HOME")
+        .map(std::path::PathBuf::from)
+        .or_else(|| std::env::var_os("USERPROFILE").map(std::path::PathBuf::from))
+}
+
+fn home_venv_bin(name: &str) -> Option<std::path::PathBuf> {
+    let bin_dir = if cfg!(windows) { "Scripts" } else { "bin" };
+    home_dir().map(|home| home.join("venv").join(bin_dir).join(name))
+}
+
+fn existing_file(path: std::path::PathBuf) -> Option<String> {
+    if path.is_file() {
+        Some(path.to_string_lossy().into_owned())
+    } else {
+        None
+    }
+}
+
+fn which_scrybe_docx() -> Result<String, String> {
+    if let Ok(path) = std::env::var("SCRYBE_DOCX_BIN") {
+        if let Some(path) = existing_file(std::path::PathBuf::from(path)) {
+            return Ok(path);
+        }
+    }
+
+    let name = executable_name("scrybe-docx");
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(path) = existing_file(exe.with_file_name(&name)) {
+            return Ok(path);
+        }
+    }
+    if let Ok(path) = which::which(&name) {
+        return Ok(path.to_string_lossy().into_owned());
+    }
+    if let Some(path) = home_venv_bin(&name).and_then(existing_file) {
+        return Ok(path);
+    }
+
+    Err(
+        "scrybe-docx not found. Reinstall the Scrybe Python toolkit with docx export support or set SCRYBE_DOCX_BIN to the exporter executable."
+            .to_string(),
+    )
+}
+
 /// Registry of all scrybe MCP tools plus the open-document workspace.
 pub struct ToolRegistry {
     workspace: Workspace,
@@ -698,7 +751,12 @@ impl ToolRegistry {
         };
         let no_diagrams = args["no_diagrams"].as_bool().unwrap_or(false);
 
-        let mut cmd = std::process::Command::new("scrybe-docx");
+        let bin = match which_scrybe_docx() {
+            Ok(bin) => bin,
+            Err(e) => return json!({"error": e}),
+        };
+
+        let mut cmd = std::process::Command::new(bin);
         cmd.arg(&input).arg("-o").arg(&output);
         if no_diagrams {
             cmd.arg("--no-diagrams");
@@ -709,7 +767,7 @@ impl ToolRegistry {
                 "error": String::from_utf8_lossy(&out.stderr).trim().to_string()
             }),
             Err(e) => json!({
-                "error": format!("failed to run scrybe-docx ({e}). Install: pip install scrybe-plugin-docx")
+                "error": format!("failed to run scrybe-docx ({e})")
             }),
         }
     }
@@ -845,6 +903,28 @@ mod tests {
         let mut reg = ToolRegistry::new();
         let result = reg.call_tool("export", &json!({}));
         assert!(result["error"].as_str().unwrap().contains("input required"));
+    }
+
+    #[test]
+    fn test_docx_binary_name_is_platform_specific() {
+        let name = executable_name("scrybe-docx");
+        if cfg!(windows) {
+            assert_eq!(name, "scrybe-docx.exe");
+        } else {
+            assert_eq!(name, "scrybe-docx");
+        }
+    }
+
+    #[test]
+    fn test_existing_file_returns_candidate_path() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join(executable_name("scrybe-docx"));
+        std::fs::write(&path, "#!/bin/sh\n").expect("seed exporter");
+
+        assert_eq!(
+            existing_file(path.clone()),
+            Some(path.to_string_lossy().into_owned())
+        );
     }
 
     #[test]

@@ -1,0 +1,13 @@
+#!/bin/sh
+# Workflow counterparts: .github/workflows/ci.yml and .github/workflows/release.yml
+
+set -eu
+
+just check
+just test
+
+if command -v npm >/dev/null 2>&1; then
+    (cd scrybe-app && npm ci && npm run build)
+else
+    echo "npm not found; skipping TypeScript build"
+fi
