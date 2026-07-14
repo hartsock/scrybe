@@ -40,7 +40,7 @@ This roadmap *sequences* existing plans; it does not replace them.
 - [`docs/design/mcp-rebuild.md`](docs/design/mcp-rebuild.md) — the native-modulex MCP rebuild (epic **#122**).
 - [`docs/design/cli-rpc.md`](docs/design/cli-rpc.md) — the CLI↔GUI socket protocol the rebuild unifies onto.
 - [`docs/adr/0001-python-outside-rust-inside.md`](docs/adr/0001-python-outside-rust-inside.md) — the distribution philosophy.
-- `scrybe-mermaid-render/PLAN.md` + `COMPATIBILITY.md` — the pure-Rust renderer epic (**#37**).
+- **#37** epic — `PLAN.md` + `COMPATIBILITY.md` live on the `feat/scrybe-mermaid-render` branch. The `scrybe-mermaid-render` crate does **not** exist on `main` yet; this roadmap builds it (v0.6–v0.11). Today only `scrybe-mermaid` (the iTXt PNG codec) ships. Note: `scrybe-swarm` / `scrybe-panels` are in `experimental/`, not shipped workspace members.
 
 ## Epics at a glance
 
