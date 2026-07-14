@@ -4,10 +4,12 @@
 //! and accepts JSON-RPC 2.0 requests. Each request is dispatched onto a
 //! Tauri event broadcast to the frontend, which already owns tab state.
 //!
-//! Phase 1 methods (fire-and-forget): `open`, `save`, `close`, `quit`.
+//! Phase 1 methods (fire-and-forget): `save`, `close`, `quit`.
 //! Each emits a typed event to the frontend and acks the caller.
 //!
-//! Phase 2 methods (request-with-reply): `read`, `find`, `section`, `edit`.
+//! Phase 2 methods (request-with-reply): `open`, `read`, `find`, `section`,
+//! `edit`. (`open` moved here so the caller blocks until the tab is actually
+//! created — removing the open→edit race, #141.)
 //! These need data BACK from the frontend (buffer content, search hits,
 //! etc.). Pattern:
 //!   1. Server registers a oneshot channel keyed by request id in
@@ -29,9 +31,8 @@
 
 use scrybe_rpc::{
     default_socket_path, AckResult, CloseParams, EditParams, EventEnvelope, FindParams,
-    JsonRpcVersion, OpenParams, OpenResult, QuitParams, ReadParams, Reply, Request, Response,
-    SaveParams, SectionParams, ERR_INTERNAL, ERR_INVALID_PARAMS, ERR_METHOD_NOT_FOUND,
-    ERR_REPLY_TIMEOUT,
+    JsonRpcVersion, OpenParams, QuitParams, ReadParams, Reply, Request, Response, SaveParams,
+    SectionParams, ERR_INTERNAL, ERR_INVALID_PARAMS, ERR_METHOD_NOT_FOUND, ERR_REPLY_TIMEOUT,
 };
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Write};
@@ -248,21 +249,12 @@ fn handle_open(app: &AppHandle, req: &Request) -> Response {
         Ok(p) => p,
         Err(r) => return Response::err(req.id, ERR_INVALID_PARAMS, r),
     };
-    if let Err(e) = app.emit("scrybe://cli-open", path.clone()) {
-        return Response::err(req.id, ERR_INTERNAL, format!("emit failed: {e}"));
-    }
-    // We don't yet round-trip the tab_id back from the frontend; Phase 2
-    // will add that via a reply event. For now, return the canonical path
-    // as a stable handle and `reloaded: false` (the frontend decides which
-    // codepath to take internally).
-    Response::ok(
-        req.id,
-        serde_json::to_value(OpenResult {
-            tab_id: path,
-            reloaded: false,
-        })
-        .unwrap(),
-    )
+    // Request-with-reply: block until the frontend has actually opened (or
+    // refreshed) the tab and returns the real `{tab_id, reloaded}`. This
+    // removes the open→edit race where a fire-and-forget open let a follow-up
+    // read/edit hit "not open" (#141). The frontend's `scrybe://cli-open`
+    // handler calls `cli_rpc_reply` when the tab is ready.
+    dispatch_with_reply(app, req, "scrybe://cli-open", path)
 }
 
 fn handle_save(app: &AppHandle, req: &Request) -> Response {

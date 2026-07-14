@@ -686,6 +686,11 @@ async function reloadTabFromDisk(path: string): Promise<void> {
   if (!tab) return;
   const content = await invoke<string>("read_file", { path }).catch(() => "");
   if (!content) return;
+  // Nothing to do when disk already matches the buffer. Guards against
+  // spurious/coalesced fs-watch events and MCP `open`-refresh of an
+  // already-open tab from silently clobbering an in-flight MCP `edit`
+  // (whose in-memory change hasn't been written to disk). See #140.
+  if (content === tab.content) return;
   if (tab.isDirty) {
     // Dirty buffer — show conflict bar instead of silently clobbering
     showConflict(path, content);
@@ -757,17 +762,28 @@ listen<string>("scrybe://file-changed", async event => {
 
 // `scrybe foo.md` (or `scrybe open foo.md`) — open or refresh.
 // "One tab, one file": if the path is already open, refresh from disk
-// instead of duplicating. Reuses the same code path as the file watcher
-// for consistency.
-listen<string>("scrybe://cli-open", async event => {
-  const path = event.payload;
-  const existing = state.tabs.find(t => t.path === path);
-  if (existing) {
-    state.activeTabId = existing.id;
-    await reloadTabFromDisk(path);
-    redrawTabs();
-  } else {
-    openFileByPath(path);
+// instead of duplicating. Request-with-reply so the caller (CLI/MCP) blocks
+// until the tab is actually open and gets the real tab_id — this removes the
+// open→edit race where a fire-and-forget open let a follow-up hit "not open"
+// (#141). The `reply` id is only present on the reply-based (Phase 2) path.
+listen<{ id: number; data: string }>("scrybe://cli-open", async event => {
+  const { id, data: path } = event.payload;
+  try {
+    const existing = state.tabs.find(t => t.path === path);
+    let reloaded = false;
+    if (existing) {
+      state.activeTabId = existing.id;
+      await reloadTabFromDisk(path);
+      redrawTabs();
+      reloaded = true;
+    } else {
+      await openFileByPath(path);
+    }
+    await reply(id, { result: { tab_id: path, reloaded } });
+  } catch (err) {
+    await reply(id, {
+      error: { code: -32603, message: `open failed: ${err instanceof Error ? err.message : err}` },
+    });
   }
 }).catch(console.error);
 
@@ -990,7 +1006,10 @@ listen<{ id: number; data: { path: string; start_line: number; end_line: number;
     const merged = [...before, ...newLines, ...after].join("\n");
 
     state.updateContent(tab.id, merged);
-    if (state.activeTabId === tab.id) swapDocument(view, merged);
+    if (state.activeTabId === tab.id) {
+      swapDocument(view, merged);
+      preview.render(merged);
+    }
     redrawTabs();
     await reply(id, { result: { applied: true, size_after: merged.length } });
   },

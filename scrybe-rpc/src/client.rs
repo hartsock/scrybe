@@ -24,9 +24,10 @@ use std::io::{BufRead, BufReader, Write};
 #[cfg(unix)]
 use std::os::unix::net::UnixStream;
 
-/// Per-request read timeout. Phase 1 commands return immediately
-/// (fire-and-forget on the GUI side); 2 s is generous.
-const READ_TIMEOUT: Duration = Duration::from_secs(2);
+/// Per-request read timeout. Reply-based commands (open/read/find/section/edit)
+/// block until the GUI frontend replies; the app's own reply timeout is 5 s, so
+/// the client waits at least that long before giving up.
+const READ_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Resolved socket path the client uses by default (used for diagnostics).
 pub fn socket_path() -> PathBuf {
