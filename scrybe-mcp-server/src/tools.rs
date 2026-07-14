@@ -344,10 +344,8 @@ impl ToolRegistry {
         if path.is_dir() {
             return self.launch_app(&path);
         }
-        // Launch the GUI with the file path (best-effort; don't fail the MCP call if GUI unavailable).
-        if let Ok(binary) = which_scrybe_app() {
-            let _ = std::process::Command::new(&binary).arg(&path).spawn();
-        }
+        // Read the file into the MCP workspace so read/find/section/edit have a
+        // buffer to work against regardless of GUI state.
         let source = match std::fs::read_to_string(&path) {
             Ok(s) => s,
             Err(e) => return json!({"error": e.to_string()}),
@@ -356,7 +354,41 @@ impl ToolRegistry {
         let doc_id = self.workspace.open(doc);
         let id_str = format!("{doc_id:?}");
         self.id_map.insert(id_str.clone(), doc_id);
-        json!({"id": id_str, "path": path.display().to_string()})
+        let path_str = path.display().to_string();
+
+        // Surface the tab in the live editor. When an app is already running we
+        // MUST dial it over scrybe-rpc (emitting `scrybe://cli-open`, exactly as
+        // the CLI does) — spawning a second process is swallowed by the
+        // single-instance guard, which is the root cause of #108 ("open returns
+        // success but no tab appears"). Only when nothing is running do we
+        // launch a fresh app with the path.
+        if scrybe_rpc::client::is_live() {
+            match scrybe_rpc::client::send("open", json!({ "path": path_str })) {
+                Ok(resp) if resp.error.is_none() => {
+                    let tab_id = resp
+                        .result
+                        .as_ref()
+                        .and_then(|r| r.get("tab_id"))
+                        .and_then(|v| v.as_str())
+                        .unwrap_or(&path_str)
+                        .to_string();
+                    json!({"id": id_str, "path": path_str, "live": true, "tab_id": tab_id})
+                }
+                Ok(resp) => {
+                    let msg = resp.error.map(|e| e.message).unwrap_or_default();
+                    json!({"error": format!("live app rejected open: {msg}"), "path": path_str})
+                }
+                Err(e) => {
+                    json!({"error": format!("failed to reach live app: {e}"), "path": path_str})
+                }
+            }
+        } else if let Ok(binary) = which_scrybe_app() {
+            let _ = std::process::Command::new(&binary).arg(&path).spawn();
+            json!({"id": id_str, "path": path_str, "live": false, "launched": true})
+        } else {
+            json!({"id": id_str, "path": path_str, "live": false,
+                "note": "no running app and scrybe-app not found; buffer loaded headlessly"})
+        }
     }
 
     fn launch_app(&self, path: &std::path::Path) -> Value {
@@ -597,25 +629,56 @@ impl ToolRegistry {
     }
 
     fn tool_close_tab(&self, args: &Value) -> Value {
-        let payload = args["path"].as_str().unwrap_or("").to_string();
-        // Signal the running app via a temporary file that the frontend polls,
-        // reusing the same pkill+signal pattern used by quit but for a tab event.
-        // Write the path to a well-known file; main.ts polls it via scrybe://close.
+        let path = args["path"].as_str().unwrap_or("").to_string();
+        // With a concrete path and a live app, close the tab over the socket
+        // (retires the /tmp/scrybe-close-tab.txt poll for the common case).
+        if !path.is_empty() && scrybe_rpc::client::is_live() {
+            match scrybe_rpc::client::send("close", json!({ "path": path })) {
+                Ok(resp) if resp.error.is_none() => {
+                    let applied = resp
+                        .result
+                        .as_ref()
+                        .and_then(|r| r.get("applied"))
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(true);
+                    return json!({"ok": true, "path": path, "applied": applied, "via": "rpc"});
+                }
+                Ok(resp) => {
+                    let msg = resp.error.map(|e| e.message).unwrap_or_default();
+                    return json!({"error": msg, "path": path});
+                }
+                Err(_) => { /* fall through to the file signal */ }
+            }
+        }
+        // No path (active tab) or no live socket — keep the file-signal path the
+        // frontend polls. (Active-tab close over the socket lands with #46/#123.)
         let signal_path = "/tmp/scrybe-close-tab.txt";
-        match std::fs::write(signal_path, &payload) {
-            Ok(_) => json!({"ok": true, "path": payload}),
+        match std::fs::write(signal_path, &path) {
+            Ok(_) => json!({"ok": true, "path": path, "via": "signal"}),
             Err(e) => json!({"error": e.to_string()}),
         }
     }
 
     fn tool_quit(&self) -> Value {
+        // Prefer a graceful quit over the live socket; the app can then run its
+        // dirty-buffer checks. Fall back to a signal when no app is reachable.
+        if scrybe_rpc::client::is_live() {
+            match scrybe_rpc::client::send("quit", json!({ "force": false })) {
+                Ok(resp) if resp.error.is_none() => return json!({"ok": true, "via": "rpc"}),
+                Ok(resp) => {
+                    let msg = resp.error.map(|e| e.message).unwrap_or_default();
+                    return json!({"ok": false, "error": msg, "via": "rpc"});
+                }
+                Err(_) => { /* fall through to pkill */ }
+            }
+        }
         let result = std::process::Command::new("pkill")
             .args(["-TERM", "-f", "scrybe-app"])
             .output();
         match result {
             Ok(out) if out.status.success() || out.status.code() == Some(1) => {
                 // pkill exits 1 when no process matched (already closed) — treat as ok
-                json!({"ok": true})
+                json!({"ok": true, "via": "signal"})
             }
             Ok(out) => {
                 json!({"ok": false, "error": String::from_utf8_lossy(&out.stderr).trim().to_string()})

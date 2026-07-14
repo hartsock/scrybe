@@ -24,6 +24,10 @@
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
+/// JSON-RPC client dialer — shared by the CLI and the MCP server so both talk
+/// to the live app through one implementation.
+pub mod client;
+
 /// JSON-RPC 2.0 request envelope.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Request {
