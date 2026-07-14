@@ -7,7 +7,9 @@ Copyright 2026 Shawn Hartsock and contributors
 
 **Current:** `v0.2.0` (last pushed tag) · `0.2.1-dev` (working tree) — see
 [Version reconciliation](docs/TRIAGE.md#version-reconciliation-read-this-first).
-**Target:** `v1.0.0`, delivered across milestones **v0.4.0 → v0.12.0**.
+**Target:** `v1.0.0`, delivered across milestones **v0.4.0 → v0.12.0** (the
+renderer epic now **adopts** an upstream crate — see below — so the back half
+compresses; 1.0 arrives sooner than the milestone count implies).
 **Created:** 2026-07-13 · **Maintained per:** [`.claude/skills/repository-roadmap/SKILL.md`](.claude/skills/repository-roadmap/SKILL.md)
 
 > **GitHub issues are the state; this document is the map.** Every work item
@@ -19,7 +21,7 @@ Copyright 2026 Shawn Hartsock and contributors
 ```bash
 # live state of any milestone's issues (never trust the doc's checkboxes)
 gh issue list --repo hartsock/scrybe --state all \
-  --search "119 108 32 116 114 115 122 128" \
+  --search "119 108 37 132 121 126 28 122" \
   --json number,title,state,closedAt
 
 # a single issue
@@ -32,6 +34,64 @@ flag any issue whose GitHub state contradicts this document for a roadmap-update
 PR. Edit this file only for **structural** change (items added/removed/re-phased,
 exit criteria changed) — issue *state* lives in GitHub, not here.
 
+---
+
+## ★ Headline result: Mermaid provenance (the source lives inside the image)
+
+Scrybe's signature, differentiating result — the one capability no editor or
+renderer we surveyed provides, and the one we keep **100% in-house** even as we
+adopt an external renderer (next section): **every diagram Scrybe emits carries
+its own Mermaid source, losslessly, inside the image file.**
+
+| Surface | How | Tracking |
+|---|---|---|
+| **PNG → iTXt** | `scrybe-mermaid` embeds Mermaid source + UUID + SHA256 in a PNG `iTXt` chunk; `extract` recovers it. A rendered PNG is fully round-trippable — edit the diagram later without hunting for the `.md`. | shipped codec + #119 #121 #126 #28 |
+| **SVG → `<metadata>`** | the re-scoped renderer wrapper injects source + SHA256 into an SVG `<metadata>` element (namespace `https://scrybe.ai/ns/mermaid`) **after** the adopted engine renders — so provenance is Scrybe's, not the dependency's. | #37 (v0.6) |
+| **Agent surface** | `mermaid_to_png` (#121), `markdown_extract_and_render` (#126, `## Fig NN:` → named PNGs), inline render of embedded-source PNGs (#28), `mermaid-png` skill (#119). | v0.4–v0.5 |
+
+This is the **ContentAddressable** philosophy applied to diagrams: the artifact
+carries its own proof of what it is. **Adopting a third-party renderer does not
+touch it** — we post-process the renderer's output to add the metadata. The
+provenance layer is delivered across v0.4 (#119), v0.5 (#28 / #121 / #126), and
+the v0.6 SVG wrapper (#37), and is a hard requirement of every renderer option.
+
+---
+
+## The renderer epic (#37): adopted, not built
+
+**Decision (2026-07-13, adversarially verified — [#37 comment](https://github.com/hartsock/scrybe/issues/37) · gate [#132]):**
+the pure-Rust Mermaid→SVG problem #37 was scoped to build **has been solved
+upstream.** We **adopt** [`mermaid-rs-renderer`](https://crates.io/crates/mermaid-rs-renderer)
+(MIT, `render(&str) -> Result<String>` → SVG, PNG via resvg; fallback
+[`merman`](https://crates.io/crates/merman), MIT/Apache) and collapse
+`scrybe-mermaid-render` from a 34-issue from-scratch renderer into a **thin
+wrapper**:
+
+```
+source → mermaid-rs-renderer::render → inject Scrybe <metadata> (sha256+source) → resvg → PNG
+```
+
+**Gated on the [#132] fidelity spike** (bake-off vs `mmdc` on the MVP
+flowchart+sequence corpus using `scrybe-panels`; pin a version). Issue disposition:
+
+- **Close on #132-Pass — provided by the dependency:** #52–#75 (lexer, flowchart
+  + sequence parsers, Sugiyama/layout, SVG element emit) and **draft PR #99**.
+- **Keep, re-scoped to wrapper bits:** the `<metadata>` provenance injection
+  (Scrybe's value-add, above), PNG-via-resvg (#76–#78), PyO3 packaging
+  (#79–#82), and conformance (#83–#85) — the last **re-scoped** from "test our
+  parser" to "**pin + golden-SVG snapshots + upgrade gate + mmdc-parity
+  tracking**" of the dependency.
+
+**Schedule impact:** the MVP renderer lands in **v0.6** (a wrapper, not a
+grammar), and the #52–#75 build issues close as the crate provides them rather
+than being implemented one milestone at a time. The kept bits (#76–#85) stay in
+their milestones, re-framed. Net: the renderer stops being the v0.6–v0.11 long
+pole. **The GitHub milestone assignments below are unchanged** — the renderer
+issues sit where they are until #132 lands and closes/re-scopes them (that is
+#132's job), so the doc and GitHub stay reconcilable.
+
+[#132]: https://github.com/hartsock/scrybe/issues/132
+
 ## Source plans
 
 This roadmap *sequences* existing plans; it does not replace them.
@@ -40,45 +100,45 @@ This roadmap *sequences* existing plans; it does not replace them.
 - [`docs/design/mcp-rebuild.md`](docs/design/mcp-rebuild.md) — the native-modulex MCP rebuild (epic **#122**).
 - [`docs/design/cli-rpc.md`](docs/design/cli-rpc.md) — the CLI↔GUI socket protocol the rebuild unifies onto.
 - [`docs/adr/0001-python-outside-rust-inside.md`](docs/adr/0001-python-outside-rust-inside.md) — the distribution philosophy.
-- **#37** epic — `PLAN.md` + `COMPATIBILITY.md` live on the `feat/scrybe-mermaid-render` branch. The `scrybe-mermaid-render` crate does **not** exist on `main` yet; this roadmap builds it (v0.6–v0.11). Today only `scrybe-mermaid` (the iTXt PNG codec) ships. Note: `scrybe-swarm` / `scrybe-panels` are in `experimental/`, not shipped workspace members.
+- **#132** — the crate-adoption spike + re-scope for the renderer epic (**#37**). Supersedes the from-scratch `PLAN.md` on the `feat/scrybe-mermaid-render` branch. Today only `scrybe-mermaid` (the iTXt PNG codec) ships; `scrybe-swarm` / `scrybe-panels` are in `experimental/`, not shipped members.
 
 ## Epics at a glance
 
 | Epic | Milestones | Tracking |
 |---|---|---|
 | MCP rebuild / CLI↔MCP parity (native-modulex) | v0.4–v0.7 | **#122** (epic), #108 #46 #121 #28 #15 #123 #124 #125 #126 #127 |
-| Mermaid-PNG round-trip + agent skills | v0.4–v0.5 | #119 #28 #121 #126 |
-| scrybe-mermaid-render (pure Rust) | v0.6–v0.11 | **#37** (umbrella), #52–#85 |
+| **Mermaid provenance** (source in PNG/SVG metadata) ★ | v0.4–v0.6 | #119 #28 #121 #126 + #37 wrapper |
+| Mermaid renderer — **adopt** `mermaid-rs-renderer` | v0.6–v0.7 (+ gate #132) | **#37**, #132; #52–#75 close on pass, #76–#85 re-scoped |
 | Human editor UX | v0.4–v0.7 | #32 #15 #109 #45 #111 #120 #44 |
 | scrybe-py library | v0.7–v0.8 | #6 #7 #8 |
 | Packaging / distribution / CI guardrails | v0.4, v0.11 | #116 #1 #2 #128 |
 | New feature plugins (v0) | v0.9, v0.12 | #31 #33 #34 |
-| Strategic explores (decision spikes) | v0.4 | #114 #115 |
+| Strategic explores (resolved) | v0.4 | #114 #115 → both **build-ours** |
 
 ---
 
 ## v0.4.0 — "Keystone" (the next release)
 
-**Theme:** Make the MCP actually work and ship the priority Mermaid-PNG skill,
-behind privacy guardrails, with the strategic spikes resolved up front so later
-epics can pivot before heavy investment.
+**Theme:** Make the MCP actually work and ship the priority Mermaid-PNG
+provenance skill (★), behind privacy guardrails, with the strategic spikes
+resolved up front so later epics can pivot before heavy investment.
 
 | Item | Issue | Blocked by | Notes |
 |---|---|---|---|
-| Mermaid→PNG skill (iTXt source+uuid+sha256) | **#119** | — | **PRIORITY.** `/mermaid-png` skill largely exists; deliver the `mermaid_to_png` foundation + `mermaid-png` SKILL.md. |
+| Mermaid→PNG skill (iTXt source+uuid+sha256) ★ | **#119** | — | **PRIORITY.** `/mermaid-png` skill largely exists; deliver the `mermaid_to_png` foundation + `mermaid-png` SKILL.md. |
 | MCP rebuild epic opened | #122 | — | Umbrella; create `scrybe-tools`, `ToolSpec`/`Facet`/`Transport` (Headless first); port pure tools. |
 | Fix `open` → dispatch via `scrybe-rpc` (root cause) | #108 | — | `open` emits `scrybe://cli-open` to the live app; delete the MCP-private `Workspace`. Fix JSON-RPC top-level `error` + `tools/call` `isError`. Add `--tools`/`--probe`. |
 | Path-bar copy affordance | #32 | — | *verify-may-be-done* — verify full-path vs relative-to-content-root copy; close remainder. |
 | Secret-scan CI guardrail | #116 | — | gitleaks (free binary) + internal-specifics linter on GitHub-hosted runners. |
 | Release hygiene: lock-step version + v0.3.0 | #128 | — | `[workspace.package]` version; tag or fold v0.3.0 before the next release. |
-| Spike: wrap Ferrite? | #114 | — | *explore-spike* — written wrap-vs-build recommendation. |
-| Spike: wrap markdown-tui-explorer? | #115 | — | *explore-spike* — may re-scope v0.6+. |
+| Spike: wrap Ferrite? | #114 | — | **Resolved: build-ours.** No MCP/IPC surface to host our thesis. Idea bank only. |
+| Spike: wrap markdown-tui-explorer? | #115 | — | **Resolved: build-ours** (editor); its renderer angle → adopt `mermaid-rs-renderer` (see #37/#132). |
 
 **Exit:**
 - `mcp open <file>` makes a tab **actually appear** in the running app (headless fallback when no app); an agent can distinguish success from failure via `isError`. (#108)
-- #119 skill renders Mermaid→PNG with embedded source+uuid+sha256, round-trips via `extract`.
+- #119 skill renders Mermaid→PNG with embedded source+uuid+sha256, round-trips via `extract`. ★
 - Secret-scan CI is green on every PR. (#116)
-- #114/#115 spikes resolved with a recommendation that scopes the editor/renderer epics.
+- #114/#115 spikes resolved (both build-ours; renderer → adopt). (#114, #115)
 - A written decision on the v0.3.0 tag + `[workspace.package]` landed. (#128)
 
 ---
@@ -86,15 +146,15 @@ epics can pivot before heavy investment.
 ## v0.5.0 — "Parity"
 
 **Theme:** Build out true CLI↔MCP parity on the unified `scrybe-rpc` foundation
-(data contract + the mermaid tools), and land the first batch of independent
-editor quality-of-life increments.
+(data contract + the Mermaid provenance tools ★), and land the first batch of
+independent editor quality-of-life increments.
 
 | Item | Issue | Blocked by | Notes |
 |---|---|---|---|
-| Atomic `mermaid_to_png` MCP tool | #121 | #108 | Description doubles as an embedded agent prompt ("never raw mmdc"). |
-| `markdown_extract_and_render` tool | #126 | #108, #121 | `## Fig NN: Title` → `YYYY-MM-DD_Doc_Fig-NN_Title.png`, all embedded. |
+| Atomic `mermaid_to_png` MCP tool ★ | #121 | #108 | Description doubles as an embedded agent prompt ("never raw mmdc"). Embeds source+uuid+sha256. |
+| `markdown_extract_and_render` tool ★ | #126 | #108, #121 | `## Fig NN: Title` → `YYYY-MM-DD_Doc_Fig-NN_Title.png`, all embedded. |
 | `list_tabs` over the live socket | #46 | #108 | Agent sees the real tab set. |
-| Inline render of embedded-source PNGs | #28 | — | `![alt](x.png)` with iTXt `mermaid-source` renders like a fenced block (rides live `reload`). |
+| Inline render of embedded-source PNGs ★ | #28 | — | `![alt](x.png)` with iTXt `mermaid-source` renders like a fenced block (rides live `reload`). |
 | Versioned typed data contract | #123 | #108 | Every tool emits a stable `data` payload; `--format data`. Agents never parse prose. |
 | `mcp-editing` agent skill | #127 | — | The safe `open→read→find→edit→render/lint` loop + reload discipline. |
 | fs-watcher reload | #15 | — | Clean = silent reload; dirty = prompt. |
@@ -102,7 +162,7 @@ editor quality-of-life increments.
 | Vim keybinding depth | #45 | — | *verify-may-be-done* — verify search/regex-replace; close remainder. |
 
 **Exit:**
-- Agents call `mermaid_to_png` / `markdown_extract_and_render` from the MCP surface (no bare `mmdc`). (#121, #126)
+- Agents call `mermaid_to_png` / `markdown_extract_and_render` from the MCP surface (no bare `mmdc`); every PNG carries embedded source. ★ (#121, #126)
 - `list_tabs` returns the live tab set with paths + dirty flags. (#46)
 - Every tool returns a versioned `data` payload on both CLI and MCP; golden `--tools` snapshot test passes. (#123)
 - Each MCP tool built this milestone ships **with** its CLI subcommand (parity-by-construction; the CI *gate* lands v0.7/#125).
@@ -110,113 +170,114 @@ editor quality-of-life increments.
 
 ---
 
-## v0.6.0 — "Grammar"
+## v0.6.0 — "Grammar → Adopt"
 
-**Theme:** Open the pure-Rust `scrybe-mermaid-render` epic (Phase 1 parsers) and
-finish MCP progressive disclosure, plus two editor increments.
+**Theme:** Deliver the Mermaid renderer by **adopting** a pure-Rust crate (not
+building it), inject Scrybe's SVG provenance ★, finish MCP progressive
+disclosure, and two editor increments.
 
 | Item | Issue | Blocked by | Notes |
 |---|---|---|---|
-| Progressive disclosure (≤12 tools + trio + facets) | #124 | #123 | `tool_search`/`tool_describe`/`tool_invoke`; CI budget test. Advances #45/#32 discoverability. |
-| Renderer umbrella | #37 | — | Phase 1→6 gating checklist; stays open through v0.11. |
-| P1 sequence parser | #52→#53→#54→#55→#56 | chain | participants → arrows → cancel+Note → loop/alt/opt/par → activate/deactivate. |
-| P1 flowchart parser | #57→#58→#59→#60 | chain | direction+node/edge → shapes → edge variants → subgraphs. |
+| Fidelity spike + adopt decision | **#132** | — | Bake-off `mermaid-rs-renderer` vs `merman` on the MVP corpus (scrybe-panels); pin a version. **Gate for the whole renderer epic.** |
+| `scrybe-mermaid-render` thin wrapper (MVP) + SVG `<metadata>` ★ | #37 | #132 | `source → render() → inject <metadata> sha256+source → resvg→PNG`. Delivers flowchart + sequence. |
+| Close build issues (provided by dependency) | #52–#60 | #132 | On spike-Pass: parsers are the crate's job — close. (Also #61–#75 as they come up in v0.7–v0.9.) **Closes PR #99.** |
+| Progressive disclosure (≤12 tools + trio + facets) | #124 | #123 | `tool_search`/`tool_describe`/`tool_invoke`; CI budget test. |
 | Split-pane scroll-sync toggle | #111 | — | Fuzzy match acceptable; split view only. |
 | Print / print-to-PDF | #120 | — | Cmd/Ctrl+P + print CSS. Optional `export_pdf` MCP tool rides the parity surface. |
 
 **Exit:**
-- `tools/list` is pinned to ≤12; the long tail is reachable only via the discovery trio; the CI budget test blocks growth. (#124)
-- Both parser chains produce ASTs for their Tier-0/1 fixtures. (#52–#60)
+- #132 concluded; the `scrybe-mermaid-render` wrapper renders MVP flowchart+sequence via the adopted crate, with Scrybe's `<metadata>` provenance injected. ★ (#37, #132)
+- On spike-Pass, #52–#60 and **PR #99** are closed as provided-by-dependency.
+- `tools/list` pinned ≤12 via the discovery trio; CI budget test blocks growth. (#124)
 - Scroll-sync toggle and Cmd/Ctrl+P print work. (#111, #120)
 
 ---
 
-## v0.7.0 — "Geometry"
+## v0.7.0 — "Geometry → Wrapper completion"
 
-**Theme:** Renderer Phase 2 (sequence layout + SVG with metadata round-trip),
-the CLI↔MCP parity CI gate, non-Markdown viewing, and the scrybe-py foundation.
+**Theme:** Complete the renderer wrapper (PNG + the remaining parity closes), the
+CLI↔MCP parity gate, non-Markdown viewing, and the scrybe-py foundation.
 
 | Item | Issue | Blocked by | Notes |
 |---|---|---|---|
 | CLI↔MCP parity gate (CI) | #125 | #123, #124 | Test: CLI subcommand set == MCP `tools/list` set; fill remaining CLI gaps. |
-| P2 sequence layout | #61→#62→#63 | #56 | participant-x/statement-walk-y → activation stacks → notes/group-block. |
-| P2 shared SVG metadata primitive | #64 | #61 | `<metadata>` root + sha256 (used by both builders). |
-| P2 sequence SVG | #65→#66→#67 | #64, #63 | lifeline/header → arrow/activation → assemble (flips 10 seq trace tests). |
+| Close build issues (provided by dependency) | #61–#67 | #132 | Sequence layout + SVG assembly are the crate's job — close on spike-Pass. |
 | Non-Markdown / git-diff viewing | #44 | — | All text types + git diffs, preview off; agents can open non-md. |
 | scrybe-py Phase 1 | #6 | — | Usable library (Document, render, AST, content_id); thin PyO3. |
 
 **Exit:**
 - CI fails on any CLI↔MCP parity drift; every MCP tool has a CLI subcommand. (#125)
-- The 10 sequence trace tests PASS at Tier 0+1. (#67)
+- #61–#67 closed as provided-by-dependency (spike-Pass). (#132)
 - `import scrybe` gives Document/render/AST/content_id. (#6)
 
 ---
 
-## v0.8.0 — "Sugiyama"
+## v0.8.0 — "Bindings & plugins (py)"
 
-**Theme:** Renderer Phase 3 (full flowchart layout) + the scrybe-py plugin
-protocol and reference plugins.
+**Theme:** The scrybe-py plugin protocol and reference plugins. (Former renderer
+Phase 3 layout issues #68–#73 close here as provided-by-dependency, spike-Pass.)
 
 | Item | Issue | Blocked by | Notes |
 |---|---|---|---|
-| P3 Sugiyama pipeline | #68→#69→#70→#71→#72→#73 | #60 | cycle removal → layer assignment → dummy nodes → barycenter → converge → coordinates. |
+| Close build issues (provided by dependency) | #68–#73 | #132 | Sugiyama layout is internal to the adopted crate — close on spike-Pass. |
 | scrybe-py Phase 2 plugin protocol | #7 | #6 | stdin/stdout tier + class-based tier. |
 | scrybe-py Phase 3 reference plugins | #8 | #7 | word-count, docx (align with `scrybe-plugin-docx`). |
 
 **Exit:**
-- Flowchart layout produces stable coordinates for fixtures; gates Phase 4. (#73)
+- #68–#73 closed as provided-by-dependency. (#132)
 - Plugin protocol + two reference plugins run end-to-end. (#7, #8)
 
 ---
 
-## v0.9.0 — "Raster"
+## v0.9.0 — "Raster & authoring"
 
-**Theme:** Renderer Phase 4 (flowchart SVG, PNG rasterization, SSIM gate) + the
+**Theme:** The renderer wrapper's **PNG** path (kept, re-scoped) + the
 highest-value new plugin.
 
 | Item | Issue | Blocked by | Notes |
 |---|---|---|---|
-| P4 flowchart SVG | #74→#75 | #64, #73 | shape primitives → assemble (flips 10 flowchart trace tests). |
-| P4 PNG rasterization | #76 | #75 | resvg/tiny-skia behind the `png` feature. |
-| P4 SSIM grader + gate | #77→#78 | #76 | image-compare grader → enforce SSIM ≥ 0.92. |
+| Close build issues (provided by dependency) | #74, #75 | #132 | Flowchart SVG assembly is the crate's job — close on spike-Pass. |
+| Renderer PNG via resvg (kept, re-scoped) | #76–#78 | #37 | Rasterize the **metadata-bearing** SVG via Scrybe's resvg/tiny-skia; SSIM sanity vs `mmdc`. |
 | scrybe-quill inline AI authoring | #31 | — | Cmd+K, BYO OpenAI-compatible/Ollama, offline, no telemetry. |
 
 **Exit:**
-- Flowchart fixtures render to PNG and pass SSIM ≥ 0.92. (#78)
+- Wrapper rasterizes provenance-bearing SVG → PNG; SSIM sanity holds. ★ (#76–#78)
+- #74/#75 closed as provided-by-dependency. (#132)
 - Quill drafts/edits text against a local endpoint with no telemetry. (#31)
 
 ---
 
-## v0.10.0 — "Bindings"
+## v0.10.0 — "Python surface"
 
-**Theme:** The renderer's PyO3 Python surface (Phase 5).
+**Theme:** The renderer wrapper's **PyO3** surface (kept, re-scoped) — wrap the
+adopted crate for Python.
 
 | Item | Issue | Blocked by | Notes |
 |---|---|---|---|
-| `render_to_svg` PyO3 | #79 | #67 | |
+| `render_to_svg` PyO3 (wraps the crate) | #79 | #37 | Python calls through the wrapper (adopted crate + provenance). |
 | `render_to_png` PyO3 (gated) | #80 | #76 | |
 | Package surface | #81 | #79 | `__init__` / `py.typed` / `pyproject`. |
 | pytest suite | #82 | #81 | `_RUST_AVAILABLE` guard. |
 
-**Exit:** `pip install scrybe-mermaid-render` renders SVG (and PNG when the feature is on) from Python, tests green. (#82)
+**Exit:** `pip install scrybe-mermaid-render` renders SVG (and PNG when the feature is on) from Python via the adopted crate + provenance, tests green. ★ (#82)
 
 ---
 
-## v0.11.0 — "Conformance"
+## v0.11.0 — "Conformance & distribution"
 
-**Theme:** Renderer Phase 6 (upstream conformance, licensing, release flip) +
-near-1.0 native install channels.
+**Theme:** Renderer **conformance = pin & gate the dependency** (kept,
+re-scoped) + near-1.0 native install channels.
 
 | Item | Issue | Blocked by | Notes |
 |---|---|---|---|
-| Upstream conformance fixtures | #83 | #78 | `gen_oracle.sh --with-upstream` + Tier-1 fixtures. |
-| MPL-2.0 licensing | #84 | #76 | LICENSE-MPL-2.0 for resvg/usvg distribution. |
-| Renderer release (closes umbrella) | #85 | #82, #83, #84 | publish=true + bump + tick #37 checklist. |
+| Pin + golden-SVG snapshots vs upstream | #83 | #78 | **Re-scoped:** snapshot the adopted crate's output; track `mmdc`-parity per type. |
+| MPL-2.0 licensing (resvg/usvg + deps) | #84 | #76 | LICENSE-MPL-2.0 for the resvg/usvg distribution surface. |
+| Dependency upgrade gate + release (closes #37) | #85 | #82, #83, #84 | **Re-scoped:** pin `mermaid-rs-renderer` version + upgrade gate; publish the wrapper; tick #37 checklist. |
 | Homebrew formula | #1 | — | macOS install. |
 | Chocolatey package | #2 | — | Windows install. |
 
 **Exit:**
-- `scrybe-mermaid-render` published; **#37 umbrella closes** with its last child. (#85)
+- `scrybe-mermaid-render` wrapper published; dependency pinned + upgrade-gated; **#37 umbrella closes**. (#85)
 - `brew install` and `choco install` work against release artifacts. (#1, #2)
 
 ---
@@ -233,6 +294,13 @@ editing mission, riding the now-mature plugin protocol.
 
 **Exit:** both plugins load via the plugin protocol and demo their v0 capability; 1.0 hardening has room. (#33, #34)
 
+> **Adoption dividend:** because #52–#75 close as the dependency provides them
+> (rather than being built one milestone at a time), the renderer stops gating
+> v0.8–v0.11. Once #132 passes, expect the tail (scrybe-py, quill, packaging,
+> plugins) to pull forward and **1.0 to arrive ahead of the v0.12 milestone
+> count.** That re-compaction is a follow-up roadmap PR executed *after* #132,
+> so the doc and GitHub milestones stay in lock-step until then.
+
 ---
 
 ## Release criteria (every milestone)
@@ -247,6 +315,10 @@ Per `CLAUDE.md`'s zero-warning policy and `AGENTS.md`'s autonomy rules:
 
 ## Deliberately out (re-entry conditions)
 
+- **Build the Mermaid renderer from scratch.** Superseded by adopting
+  `mermaid-rs-renderer` (#37 / #132). Re-enters only if the #132 fidelity spike
+  shows both `mermaid-rs-renderer` and `merman` are unusable — then #52–#85
+  revert to build-ours.
 - **Depend on modulex as an external crate.** We adopt its patterns natively
   (#122). Re-enters only if `scrybe-tools` is extracted as `modulex-plugin-scrybe`
   after modulex stabilizes (design §9).
@@ -256,5 +328,6 @@ Per `CLAUDE.md`'s zero-warning policy and `AGENTS.md`'s autonomy rules:
 - **Windows named-pipe transport.** `cli_rpc.rs` is unix-only; `Transport` is the
   clean seam. Re-enters when a Windows user files the need (tracked as a follow-up
   to #108).
-- **Deprecating Scrybe in favor of Ferrite / markdown-tui-explorer.** Gated by the
-  #114/#115 spikes; re-enters only if a spike recommends wrapping over building.
+- **Deprecating Scrybe in favor of Ferrite / markdown-tui-explorer.** Both
+  #114/#115 spikes resolved **build-ours** — neither exposes an MCP/IPC surface
+  to host Scrybe's live-buffer co-editing thesis. Re-enters only on a new spike.

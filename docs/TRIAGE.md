@@ -42,7 +42,7 @@ to add a `[workspace.package]` lock-step version and reconcile the missing
 |---|---|---|
 | **MCP rebuild / CLI↔MCP parity** (native-modulex) | #108, #46, #121 | Unify the two diverged IPC paths behind one `ToolSpec` registry over `scrybe-rpc`; adopt modulex's data-contract + progressive-disclosure + feature-gated seam. **Keystone.** |
 | **Mermaid-PNG round-trip + agent skills** | #119, #28 | Lossless Mermaid↔PNG (iTXt source+uuid+sha256), LLM-callable skill, inline render of embedded-source PNGs. #119 is the **v0.4 priority**. |
-| **scrybe-mermaid-render** (pure-Rust renderer) | #37 + #52–#85 (34) | Reimplement `mmdc` in pure Rust: parsers → layout → SVG (with `<metadata>` round-trip) → PNG → Python → conformance/release. Strictly phase-ordered 1→6. |
+| **Mermaid renderer** (#37) — **ADOPT, don't build** | #37 + #52–#85 (34) + #132 | **Re-scoped 2026-07-13:** adopt the pure-Rust crate `mermaid-rs-renderer` (MIT) instead of building `mmdc` from scratch. `scrybe-mermaid-render` becomes a thin wrapper (`render → inject `<metadata>` → resvg→PNG`). #52–#75 + PR #99 **close on the #132 spike-Pass**; #76–#85 kept, re-scoped to wrapper bits. See #37 decision + #132. |
 | **Human editor UX** | #15, #111, #109, #120, #44, #45, #32 | fs-watch reload, scroll-sync toggle, tab bulk-close menu, print/PDF, non-Markdown viewing, vim/themes, file-location affordances. |
 | **scrybe-py library** | #6, #7, #8 | `pip install scrybe`: usable library → plugin protocol → reference plugins. Strictly sequential. |
 | **Packaging, distribution & CI guardrails** | #1, #2, #116 | Homebrew, Chocolatey, and a gitleaks + internal-specifics secret-scan CI privacy guardrail. |
@@ -79,7 +79,15 @@ remainder · `explore-spike` = time-boxed decision, not build work.
 | 119 | keep | **v0.4** | — | **PRIORITY.** LLM-callable Mermaid→PNG skill (iTXt source+uuid+sha256). The `/mermaid-png` skill already exists; gap is the MCP-native surface + `mermaid_to_png` tool. |
 | 28 | keep | v0.5 | — | Render inline `![alt](diagram.png)` PNGs carrying iTXt `mermaid-source`. Rides `reload`'s live re-render pass. |
 
-### scrybe-mermaid-render (strictly phase-ordered 1→6)
+### Mermaid renderer — ADOPT `mermaid-rs-renderer` (#37, gated on #132)
+
+> **Re-scope (2026-07-13):** the milestones below reflect the *original* build
+> plan and match the current GitHub milestone assignments. Per the #37 decision,
+> on the **#132** spike-Pass the build issues **#52–#75 close** as
+> provided-by-dependency (and PR #99 closes); **#76–#85 stay, re-scoped** to
+> wrapper bits (PNG-via-resvg, PyO3, pin-and-gate conformance). The renderer's
+> Scrybe-only value-add — embedding source in SVG `<metadata>` / PNG iTXt — is
+> **kept in-house**. See `ROADMAP.md` → "The renderer epic (#37): adopted, not built".
 | # | Disp. | Milestone | Blocked by | Note |
 |---|---|---|---|---|
 | 37 | keep | v0.6→v0.11 | — | Umbrella; closes with its last child #85. |
@@ -171,3 +179,4 @@ filed as tracking issues on 2026-07-13:
 | **#126** | feat(mcp): `markdown_extract_and_render` — `## Fig NN:` → per-figure PNGs | v0.5 |
 | **#127** | agent skill: `mcp-editing` SKILL.md (safe edit loop over MCP) | v0.5 |
 | **#128** | release hygiene: `[workspace.package]` lock-step version + reconcile v0.3.0 tag | v0.4 |
+| **#132** | spike: adopt pure-Rust Mermaid→SVG crate for #37 (fidelity bake-off + re-scope) | v0.6 |
