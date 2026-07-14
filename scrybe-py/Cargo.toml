@@ -34,7 +34,7 @@ tracing.workspace = true
 # this, maturin produces version-specific wheels (cp39, cp311, …) and
 # users on other Python versions can't install. Stable ABI = single wheel
 # per platform covers all versions ≥ 3.9.
-pyo3 = { version = "0.28", features = ["abi3-py39"], optional = true }
+pyo3 = { version = "0.29", features = ["abi3-py39"], optional = true }
 
 [lints]
 workspace = true

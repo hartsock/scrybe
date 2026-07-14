@@ -29,7 +29,7 @@ hex.workspace = true
 # an extension module that Python loads. The flag breaks manylinux's
 # static-linked Python builds. Only the `extension-module` feature is
 # wanted here, gated through the workspace `extension-module` feature.
-pyo3 = { version = "0.28", features = ["abi3-py39"], optional = true }
+pyo3 = { version = "0.29", features = ["abi3-py39"], optional = true }
 
 [lints]
 workspace = true
