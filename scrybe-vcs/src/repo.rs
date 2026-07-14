@@ -413,7 +413,7 @@ mod tests {
     #[test]
     fn test_remote_role_inference() {
         assert_eq!(
-            RemoteRole::from_url("ssh://git@gitea.home.lan:30222/user/repo.git"),
+            RemoteRole::from_url("ssh://git@gitea.example.lan:30222/user/repo.git"),
             RemoteRole::Origin
         );
         assert_eq!(

@@ -1,8 +1,28 @@
 #!/bin/sh
-# Workflow counterparts: .github/workflows/ci.yml and .github/workflows/release.yml
+# Workflow counterparts: .github/workflows/ci.yml, .github/workflows/release.yml,
+# and .github/workflows/security-audit.yml.
+# CI / Hook Parity: when editing any of those workflows, update this hook to
+# match, and vice versa (see AGENTS.md "CI / Hook Parity").
 
 set -eu
 
+# ── security-audit parity (.github/workflows/security-audit.yml) ──────────────
+# Privacy + secret-leak guardrails. Run the cheap checks first so a leak fails
+# fast, before the long Rust/TypeScript build below.
+
+# internal-specifics linter — needs only git + bash, so always enforced.
+bash scripts/check-internal-specifics.sh
+
+# gitleaks secret scan — enforced when the binary is installed locally
+# (see .pre-commit-config.yaml to install it via pre-commit). CI is the
+# authoritative gate, so a missing local binary warns rather than blocks.
+if command -v gitleaks >/dev/null 2>&1; then
+    gitleaks dir . --config .gitleaks.toml --redact --no-banner
+else
+    echo "gitleaks not found; skipping local secret scan (CI still enforces it)"
+fi
+
+# ── ci.yml / release.yml parity ───────────────────────────────────────────────
 just check
 just test
 
