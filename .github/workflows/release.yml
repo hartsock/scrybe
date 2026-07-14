@@ -58,7 +58,8 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          # Vite 8 requires Node >=20.19 / >=22.12; use 22 to match ci.yml.
+          node-version: "22"
           cache: "npm"
           cache-dependency-path: scrybe-app/package-lock.json
 

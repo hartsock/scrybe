@@ -15,7 +15,10 @@ export default defineConfig({
   build: {
     target:
       process.env.TAURI_ENV_PLATFORM === "windows" ? "chrome105" : "safari13",
-    minify: !process.env.TAURI_ENV_DEBUG ? "esbuild" : false,
+    // Vite 8 (Rolldown) uses Oxc natively; forcing "esbuild" here re-runs the
+    // esbuild transpile plugin, which cannot downlevel destructuring to the
+    // Tauri "safari13" target. Oxc handles the target lowering correctly.
+    minify: !process.env.TAURI_ENV_DEBUG ? "oxc" : false,
     sourcemap: !!process.env.TAURI_ENV_DEBUG,
   },
 });
