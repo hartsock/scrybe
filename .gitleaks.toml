@@ -1,0 +1,33 @@
+# gitleaks configuration for scrybe (public repo).
+# Extends the default ruleset and allowlists documentation placeholders so the
+# RFC 5737 / example.* values used in docs do not trip secret rules.
+#
+# Consumed by:
+#   - .github/workflows/security-audit.yml (gitleaks dir . --config .gitleaks.toml)
+#   - .pre-commit-config.yaml (local gitleaks hook)
+
+title = "scrybe gitleaks config"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Documentation placeholders (RFC 5737 TEST-NET, example.* domains) and generated build artifacts."
+regexes = [
+  '''example\.(com|lan|org)''',
+  '''(^|[^0-9])192\.0\.2\.''',
+  '''(^|[^0-9])198\.51\.100\.''',
+  '''(^|[^0-9])203\.0\.113\.''',
+  '''EXAMPLE\.LAN''',
+  '''dc=example,dc=lan''',
+  '''user@example\.com''',
+  '''secret/path/to/value''',
+]
+paths = [
+  '''LICENSE''',
+  # Generated, minified frontend bundle (gitignored, never in CI checkout, but
+  # present in local `gitleaks dir .` runs). High-entropy identifiers in vendored
+  # JS trip the generic-api-key rule. Hand-authored secrets would still be caught
+  # in the TypeScript source under scrybe-app/src/, which is NOT allowlisted.
+  '''scrybe-app/dist/''',
+]
