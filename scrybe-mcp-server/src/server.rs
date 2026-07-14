@@ -89,16 +89,29 @@ impl McpServer {
                 let name = params["name"].as_str()?;
                 let args = params.get("arguments").unwrap_or(&Value::Null);
                 let content = self.registry.call_tool(name, args);
+                // A tool result carrying an `error` field is a failed call; set
+                // `isError` so agents can tell success from failure structurally
+                // instead of parsing the text payload.
+                let is_error = content.get("error").is_some();
                 serde_json::json!({
-                    "content": [{"type": "text", "text": content.to_string()}]
+                    "content": [{"type": "text", "text": content.to_string()}],
+                    "isError": is_error,
                 })
             }
-            other => serde_json::json!({
-                "error": {
-                    "code": -32601,
-                    "message": format!("method not found: {other}")
-                }
-            }),
+            other => {
+                // Unknown method → a real top-level JSON-RPC error object,
+                // sibling to `id` (never nested under `result`).
+                return id.map(|i| {
+                    serde_json::json!({
+                        "jsonrpc": "2.0",
+                        "id": i,
+                        "error": {
+                            "code": -32601,
+                            "message": format!("method not found: {other}")
+                        }
+                    })
+                });
+            }
         };
 
         id.map(|i| {
@@ -207,14 +220,40 @@ mod tests {
     }
 
     #[test]
-    fn test_unknown_method_with_id_returns_error_result() {
+    fn test_unknown_method_returns_top_level_error() {
         let mut s = server();
         let req = json!({"jsonrpc": "2.0", "id": 7, "method": "nonexistent"});
         let resp = s.handle(&req).unwrap();
+        // JSON-RPC error MUST be top-level, not nested under `result`.
+        assert_eq!(resp["error"]["code"], -32601);
         assert!(
-            resp["result"]["error"].is_object() || resp.get("error").is_some(),
-            "expected error in response: {resp}"
+            resp.get("result").is_none(),
+            "error response must not carry a result: {resp}"
         );
+    }
+
+    #[test]
+    fn test_tools_call_failure_sets_is_error() {
+        // `read` with an unknown id returns an error payload → isError: true.
+        let mut s = server();
+        let req = json!({
+            "jsonrpc": "2.0", "id": 9, "method": "tools/call",
+            "params": {"name": "read", "arguments": {"id": "bogus-id"}}
+        });
+        let resp = s.handle(&req).unwrap();
+        assert_eq!(resp["result"]["isError"], true);
+    }
+
+    #[test]
+    fn test_tools_call_success_is_not_error() {
+        // A successful render carries no error field → isError: false.
+        let mut s = server();
+        let req = json!({
+            "jsonrpc": "2.0", "id": 10, "method": "tools/call",
+            "params": {"name": "render", "arguments": {"source": "# Hi"}}
+        });
+        let resp = s.handle(&req).unwrap();
+        assert_eq!(resp["result"]["isError"], false);
     }
 
     #[test]
