@@ -795,6 +795,12 @@ fn poll_set_vim() -> Option<String> {
     poll_signal("/tmp/scrybe-set-vim.txt")
 }
 
+/// Poll for an MCP `set_wrap` signal (`on` | `off`).
+#[tauri::command]
+fn poll_set_wrap() -> Option<String> {
+    poll_signal("/tmp/scrybe-set-wrap.txt")
+}
+
 fn executable_name(stem: &str) -> String {
     if cfg!(windows) {
         format!("{stem}.exe")
@@ -903,6 +909,7 @@ pub fn run() {
             poll_set_theme,
             poll_view_mode,
             poll_set_vim,
+            poll_set_wrap,
             export_docx,
             watch_file,
             unwatch_file,
