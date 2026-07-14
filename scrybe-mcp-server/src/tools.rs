@@ -138,28 +138,28 @@ impl ToolRegistry {
             },
             {
                 "name": "section",
-                "description": "Return a heading section by H-level and 0-based index.",
+                "description": "Return a heading section by heading text (case-insensitive substring). Returns {heading, level, content}. Reflects the LIVE editor buffer when the app is running.",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
                         "id": {"type": "string"},
-                        "level": {"type": "integer", "minimum": 1, "maximum": 6},
-                        "index": {"type": "integer", "minimum": 0}
+                        "heading": {"type": "string", "description": "Heading text to find (case-insensitive substring)"}
                     },
-                    "required": ["id", "level", "index"]
+                    "required": ["id", "heading"]
                 }
             },
             {
                 "name": "edit",
-                "description": "Replace first occurrence of old_text with new_text in a document.",
+                "description": "Replace an inclusive 1-indexed LINE RANGE with new content (same as the scrybe CLI and the app). Use start_line == end_line to replace one line, or start_line == end_line + 1 to insert without replacing. Applies to the LIVE editor buffer when the app is running.",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
                         "id": {"type": "string"},
-                        "old": {"type": "string"},
-                        "new": {"type": "string"}
+                        "start_line": {"type": "integer", "minimum": 1, "description": "1-indexed first line to replace"},
+                        "end_line": {"type": "integer", "minimum": 0, "description": "1-indexed last line to replace (inclusive)"},
+                        "content": {"type": "string", "description": "Replacement text for the range"}
                     },
-                    "required": ["id", "old", "new"]
+                    "required": ["id", "start_line", "end_line", "content"]
                 }
             },
             {
@@ -402,73 +402,142 @@ impl ToolRegistry {
         }
     }
 
+    /// Resolve an open-document id to its canonical file path (the handle the
+    /// live app and scrybe-rpc address documents by). Errors as a JSON value.
+    fn resolve_path(&self, id_str: &str) -> Result<String, Value> {
+        let doc_id = self
+            .id_map
+            .get(id_str)
+            .ok_or_else(|| json!({"error": format!("unknown id: {id_str}")}))?;
+        let doc = self
+            .workspace
+            .get(doc_id)
+            .ok_or_else(|| json!({"error": "document not found"}))?;
+        doc.path
+            .as_ref()
+            .map(|p| p.display().to_string())
+            .ok_or_else(|| json!({"error": "document has no file path"}))
+    }
+
+    /// Read the document. When the app is live, this returns the LIVE buffer
+    /// (including the human's unsaved edits) via scrybe-rpc; otherwise it falls
+    /// back to the in-memory workspace copy loaded at `open`.
     fn tool_read(&self, args: &Value) -> Value {
         let id_str = match args["id"].as_str() {
             Some(s) => s,
             None => return json!({"error": "id required"}),
         };
-        match self.id_map.get(id_str) {
-            Some(doc_id) => match self.workspace.get(doc_id) {
-                Some(doc) => json!({"source": doc.source}),
-                None => json!({"error": "document not found"}),
-            },
-            None => json!({"error": format!("unknown id: {id_str}")}),
+        let path = match self.resolve_path(id_str) {
+            Ok(p) => p,
+            Err(e) => return e,
+        };
+        if scrybe_rpc::client::is_live() {
+            if let Ok(resp) = scrybe_rpc::client::send("read", json!({ "path": path })) {
+                if resp.error.is_none() {
+                    let r = resp.result.unwrap_or_default();
+                    return json!({
+                        "source": r.get("content").and_then(|v| v.as_str()).unwrap_or(""),
+                        "is_dirty": r.get("is_dirty").and_then(|v| v.as_bool()).unwrap_or(false),
+                        "live": true,
+                    });
+                }
+            }
+            // rpc failed — fall through to the workspace copy below.
+        }
+        match self.id_map.get(id_str).and_then(|d| self.workspace.get(d)) {
+            Some(doc) => json!({"source": doc.source, "live": false}),
+            None => json!({"error": "document not found"}),
         }
     }
 
+    /// Return a heading section by heading text (case-insensitive substring).
+    /// Live app returns the current buffer's section via scrybe-rpc; headless
+    /// falls back to slicing the in-memory copy.
     fn tool_section(&self, args: &Value) -> Value {
         let id_str = match args["id"].as_str() {
             Some(s) => s,
             None => return json!({"error": "id required"}),
         };
-        let level = match args["level"].as_u64() {
-            Some(l) if (1..=6).contains(&l) => l as u8,
-            _ => return json!({"error": "level must be 1-6"}),
+        let heading = match args["heading"].as_str() {
+            Some(h) if !h.is_empty() => h,
+            _ => return json!({"error": "heading required and must be non-empty"}),
         };
-        let index = match args["index"].as_u64() {
-            Some(i) => i as usize,
-            None => return json!({"error": "index required"}),
+        let path = match self.resolve_path(id_str) {
+            Ok(p) => p,
+            Err(e) => return e,
         };
-
-        let doc_id = match self.id_map.get(id_str) {
-            Some(id) => id,
-            None => return json!({"error": format!("unknown id: {id_str}")}),
-        };
-        let doc = match self.workspace.get(doc_id) {
-            Some(d) => d,
-            None => return json!({"error": "document not found"}),
-        };
-
-        let ast = doc.ast();
-        let mut count = 0usize;
-        for node in &ast.nodes {
-            if let Node::Heading { level: l, children } = node {
-                if *l == level {
-                    if count == index {
-                        let title = children_text(children);
-                        return json!({"level": level, "index": index, "title": title});
+        if scrybe_rpc::client::is_live() {
+            if let Ok(resp) =
+                scrybe_rpc::client::send("section", json!({ "path": path, "heading": heading }))
+            {
+                match resp.error {
+                    None => {
+                        let mut r = resp.result.unwrap_or_default();
+                        if let Some(o) = r.as_object_mut() {
+                            o.insert("live".into(), json!(true));
+                        }
+                        return r;
                     }
-                    count += 1;
+                    Some(e) => return json!({"error": e.message}),
                 }
             }
         }
-        json!({"error": format!("no H{level} at index {index}")})
+        // Headless: slice the workspace copy by heading.
+        let doc = match self.id_map.get(id_str).and_then(|d| self.workspace.get(d)) {
+            Some(d) => d,
+            None => return json!({"error": "document not found"}),
+        };
+        match section_by_heading(&doc.source, heading) {
+            Some((h, level, content)) => {
+                json!({"heading": h, "level": level, "content": content, "live": false})
+            }
+            None => json!({"error": format!("no heading matching '{heading}'")}),
+        }
     }
 
+    /// Replace the inclusive 1-indexed line range with `content` (matching the
+    /// live app and `scrybe` CLI edit semantics; `start == end + 1` inserts).
+    /// Live app edits the running buffer via scrybe-rpc; headless applies to
+    /// the in-memory copy.
     fn tool_edit(&mut self, args: &Value) -> Value {
         let id_str = match args["id"].as_str() {
             Some(s) => s,
             None => return json!({"error": "id required"}),
         };
-        let old = match args["old"].as_str() {
-            Some(s) if !s.is_empty() => s,
-            _ => return json!({"error": "old required and must be non-empty"}),
+        let start_line = match args["start_line"].as_u64() {
+            Some(n) if n >= 1 => n,
+            _ => return json!({"error": "start_line required (1-indexed, >= 1)"}),
         };
-        let new_text = match args["new"].as_str() {
-            Some(s) => s,
-            None => return json!({"error": "new required"}),
+        let end_line = match args["end_line"].as_u64() {
+            Some(n) => n,
+            None => return json!({"error": "end_line required"}),
         };
-
+        let content = match args["content"].as_str() {
+            Some(c) => c,
+            None => return json!({"error": "content required"}),
+        };
+        let path = match self.resolve_path(id_str) {
+            Ok(p) => p,
+            Err(e) => return e,
+        };
+        if scrybe_rpc::client::is_live() {
+            if let Ok(resp) = scrybe_rpc::client::send(
+                "edit",
+                json!({ "path": path, "start_line": start_line, "end_line": end_line, "content": content }),
+            ) {
+                match resp.error {
+                    None => {
+                        let mut r = resp.result.unwrap_or_default();
+                        if let Some(o) = r.as_object_mut() {
+                            o.insert("live".into(), json!(true));
+                        }
+                        return r;
+                    }
+                    Some(e) => return json!({"error": e.message}),
+                }
+            }
+        }
+        // Headless: splice the workspace copy.
         let doc_id = match self.id_map.get(id_str) {
             Some(id) => *id,
             None => return json!({"error": format!("unknown id: {id_str}")}),
@@ -477,15 +546,18 @@ impl ToolRegistry {
             Some(d) => d,
             None => return json!({"error": "document not found"}),
         };
-
-        if doc.source.contains(old) {
-            doc.source = doc.source.replacen(old, new_text, 1);
-            json!({"replaced": true, "old": old, "new": new_text})
-        } else {
-            json!({"replaced": false, "old": old, "new": new_text, "note": "old_text not found"})
+        match splice_lines(&doc.source, start_line as usize, end_line as usize, content) {
+            Ok(new_source) => {
+                let size = new_source.len();
+                doc.source = new_source;
+                json!({"applied": true, "size_after": size, "live": false})
+            }
+            Err(e) => json!({"error": e}),
         }
     }
 
+    /// Search the document. Live app searches the running buffer via scrybe-rpc;
+    /// headless searches the in-memory copy.
     fn tool_find(&self, args: &Value) -> Value {
         let id_str = match args["id"].as_str() {
             Some(s) => s,
@@ -495,16 +567,41 @@ impl ToolRegistry {
             Some(q) if !q.is_empty() => q,
             _ => return json!({"error": "query required and must be non-empty"}),
         };
-
-        let doc_id = match self.id_map.get(id_str) {
-            Some(id) => id,
-            None => return json!({"error": format!("unknown id: {id_str}")}),
+        let path = match self.resolve_path(id_str) {
+            Ok(p) => p,
+            Err(e) => return e,
         };
-        let doc = match self.workspace.get(doc_id) {
+        if scrybe_rpc::client::is_live() {
+            if let Ok(resp) = scrybe_rpc::client::send(
+                "find",
+                json!({ "pattern": query, "paths": [path], "literal": true }),
+            ) {
+                if resp.error.is_none() {
+                    let hits = resp
+                        .result
+                        .as_ref()
+                        .and_then(|r| r.get("hits"))
+                        .and_then(|h| h.as_array())
+                        .cloned()
+                        .unwrap_or_default();
+                    let matches: Vec<Value> = hits
+                        .iter()
+                        .map(|h| {
+                            json!({
+                                "line": h.get("line").cloned().unwrap_or(json!(0)),
+                                "text": h.get("text").and_then(|v| v.as_str()).unwrap_or(""),
+                            })
+                        })
+                        .collect();
+                    return json!({"query": query, "matches": matches, "live": true});
+                }
+            }
+        }
+        // Headless: search the workspace copy.
+        let doc = match self.id_map.get(id_str).and_then(|d| self.workspace.get(d)) {
             Some(d) => d,
             None => return json!({"error": "document not found"}),
         };
-
         let matches: Vec<Value> = doc
             .source
             .lines()
@@ -512,8 +609,7 @@ impl ToolRegistry {
             .filter(|(_, line)| line.contains(query))
             .map(|(i, line)| json!({"line": i + 1, "text": line}))
             .collect();
-
-        json!({"query": query, "matches": matches})
+        json!({"query": query, "matches": matches, "live": false})
     }
 
     fn tool_render(&self, args: &Value) -> Value {
@@ -878,19 +974,72 @@ fn which_scrybe_app() -> Result<String, String> {
     Err("scrybe-app not found. Build with: cd scrybe-app && cargo tauri build".to_string())
 }
 
-fn children_text(nodes: &[Node]) -> String {
-    let mut out = String::new();
-    for node in nodes {
-        match node {
-            Node::Text(s) => out.push_str(s),
-            Node::InlineCode { content } => out.push_str(content),
-            Node::Emphasis { children }
-            | Node::Strong { children }
-            | Node::Link { children, .. } => out.push_str(&children_text(children)),
-            _ => {}
+/// Markdown ATX heading level (1-6) if `line` is a heading, else `None`.
+fn heading_level(line: &str) -> Option<u8> {
+    let t = line.trim_start();
+    let hashes = t.chars().take_while(|c| *c == '#').count();
+    if (1..=6).contains(&hashes) && t[hashes..].starts_with(' ') {
+        Some(hashes as u8)
+    } else {
+        None
+    }
+}
+
+/// Find a Markdown section by heading (case-insensitive substring match) and
+/// return (full heading text, level, body up to the next same-or-higher
+/// heading). Headless fallback for the `section` tool.
+fn section_by_heading(source: &str, query: &str) -> Option<(String, u8, String)> {
+    let q = query.to_lowercase();
+    let lines: Vec<&str> = source.lines().collect();
+    for (i, line) in lines.iter().enumerate() {
+        if let Some(level) = heading_level(line) {
+            let title = line.trim_start().trim_start_matches('#').trim().to_string();
+            if title.to_lowercase().contains(&q) {
+                let mut body: Vec<&str> = Vec::new();
+                for next in &lines[i + 1..] {
+                    if let Some(nl) = heading_level(next) {
+                        if nl <= level {
+                            break;
+                        }
+                    }
+                    body.push(next);
+                }
+                return Some((title, level, body.join("\n")));
+            }
         }
     }
-    out
+    None
+}
+
+/// Replace the inclusive 1-indexed line range `[start, end]` of `source` with
+/// `content`. `start == end + 1` inserts before `start` without removing. The
+/// original trailing newline (if any) is preserved. Headless fallback for `edit`.
+fn splice_lines(source: &str, start: usize, end: usize, content: &str) -> Result<String, String> {
+    if start == 0 {
+        return Err("start_line must be >= 1".to_string());
+    }
+    let had_trailing_nl = source.ends_with('\n');
+    let lines: Vec<&str> = source.lines().collect();
+    let n = lines.len();
+    let s = start - 1; // 0-indexed start
+    if s > n {
+        return Err(format!(
+            "start_line {start} is beyond the end of the document ({n} lines)"
+        ));
+    }
+    // Inclusive `end` -> exclusive index; for an insert (end < start) it equals s.
+    let e = if end >= start { end.min(n) } else { s };
+    let mut out: Vec<&str> = Vec::with_capacity(n);
+    out.extend_from_slice(&lines[..s]);
+    out.extend(content.lines());
+    if e < n {
+        out.extend_from_slice(&lines[e..]);
+    }
+    let mut result = out.join("\n");
+    if had_trailing_nl {
+        result.push('\n');
+    }
+    Ok(result)
 }
 
 fn count_nodes(nodes: &[Node], headings: &mut usize, code_blocks: &mut usize, links: &mut usize) {
@@ -1025,5 +1174,61 @@ mod tests {
         let mut reg = ToolRegistry::new();
         let result = reg.call_tool("read", &json!({"id": "bogus-id-xyz"}));
         assert!(result["error"].is_string());
+    }
+
+    #[test]
+    fn test_splice_lines_replaces_inclusive_range() {
+        // Replace lines 2..=3 of a 4-line doc.
+        let src = "a\nb\nc\nd\n";
+        let out = splice_lines(src, 2, 3, "X\nY").unwrap();
+        assert_eq!(out, "a\nX\nY\nd\n");
+    }
+
+    #[test]
+    fn test_splice_lines_single_line() {
+        let out = splice_lines("a\nb\nc\n", 2, 2, "B").unwrap();
+        assert_eq!(out, "a\nB\nc\n");
+    }
+
+    #[test]
+    fn test_splice_lines_insert_when_end_before_start() {
+        // start == end + 1 inserts before `start` without removing.
+        let out = splice_lines("a\nb\nc\n", 2, 1, "NEW").unwrap();
+        assert_eq!(out, "a\nNEW\nb\nc\n");
+    }
+
+    #[test]
+    fn test_splice_lines_rejects_out_of_range_start() {
+        assert!(splice_lines("a\nb\n", 5, 5, "x").is_err());
+        assert!(splice_lines("a\n", 0, 0, "x").is_err());
+    }
+
+    #[test]
+    fn test_section_by_heading_slices_body() {
+        let src = "# Title\n\nintro\n\n## Alpha\n\nbody one\nbody two\n\n## Beta\n\nother\n";
+        let (h, level, content) = section_by_heading(src, "alpha").unwrap();
+        assert_eq!(h, "Alpha");
+        assert_eq!(level, 2);
+        assert!(content.contains("body one"));
+        assert!(content.contains("body two"));
+        // stops at the next same-level heading
+        assert!(!content.contains("Beta"));
+        assert!(!content.contains("other"));
+    }
+
+    #[test]
+    fn test_section_by_heading_missing_returns_none() {
+        assert!(section_by_heading("# Only\n\ntext\n", "nope").is_none());
+    }
+
+    #[test]
+    fn test_edit_requires_line_range_args() {
+        // The edit contract is now line-range, not old/new.
+        let mut reg = ToolRegistry::new();
+        let result = reg.call_tool("edit", &json!({"id": "x", "old": "a", "new": "b"}));
+        assert!(
+            result["error"].as_str().unwrap().contains("start_line"),
+            "expected start_line requirement, got: {result}"
+        );
     }
 }
