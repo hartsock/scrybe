@@ -116,6 +116,50 @@ This technique verified `#108` (MCP opens a live tab) and `#136` (word-wrap togg
 end-to-end. To verify a toolbar toggle specifically: screenshot, drive it via its
 poll file (e.g. `echo -n on > /tmp/scrybe-set-wrap.txt`), screenshot again, compare.
 
+## Verifying a change — three levels, and the read-back rule
+
+Pick the level(s) that actually prove your change, strongest last:
+
+1. **Deterministic test** (always). Pure logic → `cargo test`. MCP↔app wiring →
+   a mock `scrybe-rpc` socket (`scrybe-mcp-server/tests/live_app_open.rs`). No
+   display, runs in CI.
+2. **Headless screenshot** (for *rendering / layout*). The Xvfb harness above.
+   Best for "does the tab appear", "did the diagram render", "does word-wrap
+   reflow" — anything whose truth is **pixels**.
+3. **Protocol read-back** (for *state / content mutations* — authoritative).
+   A screenshot can **lie about a mutation**: it may lag, or the fs-watcher's
+   "changed externally" reload can revert an in-memory MCP edit a beat after it
+   lands (see #140). So to prove a mutation *actually reached the buffer*, **read
+   it back over the same protocol** rather than trusting the picture:
+   - after an MCP `edit`, call MCP `read` and assert the edited content;
+   - after a UI toggle, read `/tmp/scrybe-state.json` (e.g. `"wrap":true`).
+
+**Driving the MCP server over stdio** (the pattern the harnesses use) — chain
+calls in one process so the id from `open` is in scope for `edit`/`read`:
+
+```python
+import json, subprocess
+p = subprocess.Popen(["scrybe-mcp-server","stdio"], stdin=subprocess.PIPE,
+                     stdout=subprocess.PIPE, text=True)
+def call(o): p.stdin.write(json.dumps(o)+"\n"); p.stdin.flush(); return json.loads(p.stdout.readline())
+call({"jsonrpc":"2.0","id":1,"method":"initialize","params":{}})
+p.stdin.write('{"jsonrpc":"2.0","method":"notifications/initialized"}\n'); p.stdin.flush()
+op  = call({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"open","arguments":{"path":"/abs/doc.md"}}})
+tid = json.loads(op["result"]["content"][0]["text"])["id"]
+call({"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"edit","arguments":{"id":tid,"start_line":4,"end_line":4,"content":"NEW LINE"}}})
+rd  = call({"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"read","arguments":{"id":tid}}})
+assert "NEW LINE" in json.loads(rd["result"]["content"][0]["text"])["source"]   # read-back proves it
+```
+
+Every tool result carries `"live": true|false` — `true` means it went to the
+running app over `scrybe-rpc`, `false` means the headless in-memory fallback.
+Assert on that too when you mean to exercise the live path.
+
+> **Worked example (2026-07-14):** MCP `edit` returned `applied:true, live:true`,
+> the screenshot showed the *original* text (fs-watcher reload, #140), but MCP
+> `read` returned the edited line — proving the edit reached the live buffer.
+> The read-back was authoritative; the screenshot was not.
+
 ## CI gates (what must be green)
 
 `.github/workflows/ci.yml` runs on every PR: **Rust lint** (clippy `-D warnings`),
