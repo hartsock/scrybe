@@ -18,10 +18,10 @@ scrybe-mcp-server tools
 | Tool | Description | Key Args |
 |---|---|---|
 | `open` | Open a file (returns doc ID); also launches GUI | `path` |
-| `read` | Read Markdown source of an open document | `id` |
-| `section` | Extract a heading section by H-level and index | `id`, `level`, `index` |
-| `edit` | Replace first occurrence of text in a document | `id`, `old`, `new` |
-| `find` | Search for a string with line context | `id`, `query` |
+| `read` | Read Markdown source (the LIVE buffer when the app is running) | `id` |
+| `section` | Extract a heading section by heading text (substring) | `id`, `heading` |
+| `edit` | Replace an inclusive 1-indexed LINE RANGE with new content (live buffer) | `id`, `start_line`, `end_line`, `content` |
+| `find` | Search for a string with line context (live buffer) | `id`, `query` |
 | `render` | Render document to HTML | `id`, `theme?` |
 | `embed` | Embed Mermaid source into a PNG (iTXt) | `png_path`, `source` |
 | `extract` | Extract Mermaid source from a PNG | `png_path` |
