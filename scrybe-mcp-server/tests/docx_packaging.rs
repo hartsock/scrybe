@@ -16,8 +16,11 @@ fn read_repo_file(path: &str) -> String {
 fn metapackage_depends_on_docx_exporter() {
     let pyproject = read_repo_file("scrybe-meta/pyproject.toml");
 
+    // Version-agnostic: a release bump must not break "the metapackage
+    // installs the Word exporter". Asserts the pin exists at any lock-step
+    // version (the version lives in [workspace.package], per #128).
     assert!(
-        pyproject.contains("\"scrybe-plugin-docx == 0.3.0\""),
+        pyproject.contains("\"scrybe-plugin-docx =="),
         "scrybe.ai should install the Word exporter"
     );
 }
