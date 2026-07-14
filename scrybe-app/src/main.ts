@@ -14,9 +14,9 @@ import { save as saveDialog } from "@tauri-apps/plugin-dialog";
 import { showToast } from "./toast";
 import { AppState } from "./state";
 import { renderTabBar } from "./tabs";
-import { createEditor, swapDocument, shouldSuppressAutosave, setEditorTheme, setVim } from "./editor";
+import { createEditor, swapDocument, shouldSuppressAutosave, setEditorTheme, setVim, setWrap } from "./editor";
 import { PreviewPane } from "./preview";
-import { buildToolbar, setToolbarViewMode, setToolbarTheme, setToolbarVim } from "./toolbar";
+import { buildToolbar, setToolbarViewMode, setToolbarTheme, setToolbarVim, setToolbarWrap } from "./toolbar";
 import type { Theme } from "./toolbar";
 import { renderPathBar } from "./pathbar";
 import { Sidebar } from "./sidebar";
@@ -88,6 +88,7 @@ const preview = new PreviewPane(previewEl);
 // per-tab) and are mirrored to the MCP `state` tool via `publishState`.
 let currentTheme: Theme = "default";
 let vimEnabled = false;
+let wrapEnabled = false;
 
 function flashSidebar(dir: string): void {
   sidebar.loadDirectory(dir);
@@ -209,6 +210,7 @@ buildToolbar(toolbarEl, {
   onReload: () => { void reloadActiveTabNow(); },
   onExport: () => { void exportActiveTabToWord(); },
   onToggleVim: () => setVimEnabled(!vimEnabled),
+  onToggleWrap: () => setWrapEnabled(!wrapEnabled),
 });
 
 /// Apply a theme to BOTH panes so the editor chrome matches the preview,
@@ -255,6 +257,15 @@ function setVimEnabled(on: boolean): void {
   publishState();
 }
 
+/// Enable/disable soft word-wrap in the editor, update the toolbar button,
+/// mirror to MCP. Shared by the toolbar toggle and the MCP `set_wrap` poller.
+function setWrapEnabled(on: boolean): void {
+  wrapEnabled = on;
+  setWrap(view, on);
+  setToolbarWrap(toolbarEl, on);
+  publishState();
+}
+
 /// Publish the current UI state to `/tmp/scrybe-state.json` so the MCP
 /// `state` tool can report what the human is looking at (active path,
 /// view mode, theme, vim). The human-side equivalents are the path bar,
@@ -269,6 +280,7 @@ function publishState(): void {
       view_mode: tab?.viewMode ?? "both",
       theme: currentTheme,
       vim: vimEnabled,
+      wrap: wrapEnabled,
       open_paths: state.tabs.map(t => t.path).filter((p): p is string => !!p),
     },
   }).catch(() => { /* state mirror is best-effort */ });
@@ -617,6 +629,7 @@ newTab();
 applyViewMode(state.activeTab()?.viewMode ?? "both");
 setToolbarTheme(toolbarEl, currentTheme);
 setToolbarVim(toolbarEl, vimEnabled);
+setToolbarWrap(toolbarEl, wrapEnabled);
 invoke<string | null>("get_initial_directory").then(dir =>
   dir ? sidebar.loadDirectory(dir) : homeDir().then(home => sidebar.loadDirectory(home))
 ).catch(console.error);
@@ -661,6 +674,9 @@ setInterval(async () => {
   const vim = await invoke<string | null>("poll_set_vim").catch(() => null);
   if (vim === "on") setVimEnabled(true);
   else if (vim === "off") setVimEnabled(false);
+  const wrap = await invoke<string | null>("poll_set_wrap").catch(() => null);
+  if (wrap === "on") setWrapEnabled(true);
+  else if (wrap === "off") setWrapEnabled(false);
 }, 500);
 
 // ─── Reload: MCP-driven (poll) + OS file watcher (event) ─────────────────────

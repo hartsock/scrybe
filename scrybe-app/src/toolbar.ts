@@ -22,6 +22,8 @@ export interface ToolbarHandlers {
   onExport: () => void;
   /// Toggle the Vim keymap in the editor on/off.
   onToggleVim: () => void;
+  /// Toggle soft word-wrap in the editor on/off.
+  onToggleWrap: () => void;
 }
 
 export function buildToolbar(container: HTMLElement, handlers: ToolbarHandlers): void {
@@ -40,6 +42,7 @@ export function buildToolbar(container: HTMLElement, handlers: ToolbarHandlers):
         <option value="solarized">Solarized</option>
       </select>
       <button id="toggle-vim" title="Toggle Vim keybindings" aria-pressed="false" style="${btn}">Vim: off</button>
+      <button id="toggle-wrap" title="Toggle soft word wrap" aria-pressed="false" style="${btn}">Wrap: off</button>
       <button id="toggle-preview" title="Cycle view: both / editor / preview" style="${btn}">View: ◧◨</button>
       <button id="toggle-devtools" title="Toggle DevTools inspector" style="background:transparent;border:1px solid #555;color:#888;padding:2px 6px;border-radius:3px;font-size:13px;cursor:pointer;line-height:1;">🐞</button>
     </div>
@@ -75,6 +78,8 @@ export function buildToolbar(container: HTMLElement, handlers: ToolbarHandlers):
     .addEventListener("change", e => handlers.onThemeChange((e.target as HTMLSelectElement).value as Theme));
   container.querySelector<HTMLButtonElement>("#toggle-vim")!
     .addEventListener("click", () => handlers.onToggleVim());
+  container.querySelector<HTMLButtonElement>("#toggle-wrap")!
+    .addEventListener("click", () => handlers.onToggleWrap());
   container.querySelector<HTMLButtonElement>("#toggle-preview")!
     .addEventListener("click", () => handlers.onCyclePreview());
   container.querySelector<HTMLButtonElement>("#toggle-devtools")!
@@ -101,6 +106,17 @@ export function setToolbarVim(container: HTMLElement, enabled: boolean): void {
   const b = container.querySelector<HTMLButtonElement>("#toggle-vim");
   if (b) {
     b.textContent = `Vim: ${enabled ? "on" : "off"}`;
+    b.setAttribute("aria-pressed", String(enabled));
+    b.style.borderColor = enabled ? "#1577c4" : "#666";
+    b.style.color = enabled ? "#fff" : "#ccc";
+  }
+}
+
+/// Reflect the soft word-wrap on/off state on the toolbar toggle button.
+export function setToolbarWrap(container: HTMLElement, enabled: boolean): void {
+  const b = container.querySelector<HTMLButtonElement>("#toggle-wrap");
+  if (b) {
+    b.textContent = `Wrap: ${enabled ? "on" : "off"}`;
     b.setAttribute("aria-pressed", String(enabled));
     b.style.borderColor = enabled ? "#1577c4" : "#666";
     b.style.color = enabled ? "#fff" : "#ccc";

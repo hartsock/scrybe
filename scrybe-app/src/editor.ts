@@ -15,6 +15,11 @@ export const themeCompartment = new Compartment();
 /// can toggle modal editing on and off without rebuilding the view.
 export const vimCompartment = new Compartment();
 
+/// Holds the optional soft line-wrapping extension. Reconfigured by
+/// `setWrap` so long lines can wrap to the pane width instead of scrolling
+/// horizontally — toggled live without rebuilding the view.
+export const wrapCompartment = new Compartment();
+
 /// A light, warm CodeMirror theme tuned to match the preview pane's
 /// "solarized" palette (`preview.css`: bg #fdf6e3, fg #657b83). The
 /// preview's syntect/markdown styling stays light, so we only need to
@@ -60,6 +65,8 @@ export function createEditor(
         basicSetup,
         markdown({ base: markdownLanguage, codeLanguages: languages }),
         themeCompartment.of([]),
+        // Soft wrap off by default (CodeMirror's default); toggled via setWrap.
+        wrapCompartment.of([]),
         EditorView.updateListener.of(update => {
           if (update.docChanged) onChange(update.state.doc.toString());
         }),
@@ -77,6 +84,14 @@ export function setEditorTheme(view: EditorView, theme: string): void {
 /// Enable or disable the Vim keymap in the running editor.
 export function setVim(view: EditorView, enabled: boolean): void {
   view.dispatch({ effects: vimCompartment.reconfigure(enabled ? vim() : []) });
+}
+
+/// Enable or disable soft line-wrapping in the running editor. When on,
+/// long lines wrap to the pane width; when off, they scroll horizontally.
+export function setWrap(view: EditorView, enabled: boolean): void {
+  view.dispatch({
+    effects: wrapCompartment.reconfigure(enabled ? EditorView.lineWrapping : []),
+  });
 }
 
 /// Set true while a programmatic dispatch is replacing buffer content
