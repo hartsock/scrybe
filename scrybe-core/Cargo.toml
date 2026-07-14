@@ -1,6 +1,6 @@
 [package]
 name = "scrybe-core"
-version = "0.2.1-dev"
+version.workspace = true
 edition = "2021"
 description = "Scrybe core — AST, Document, ContentAddressable, Plugin trait, Workspace"
 license = "Apache-2.0"
