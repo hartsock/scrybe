@@ -11,13 +11,20 @@ Scrybe follows [SemVer](https://semver.org/) on the 0.x train.
 - **Major** (`0.x` → `1.0.0`): committed long-term stability of the public
   surface (MCP tool names, CLI flags, Python API, file formats).
 
-All workspace crates ship in lockstep — every release bumps every
-`Cargo.toml`, every `pyproject.toml`, `scrybe-app/package.json`, and
-`scrybe-app/src-tauri/tauri.conf.json` together. Inter-crate path-dep
-version pins in the root `Cargo.toml` use `version = "=X.Y.Z"` so a stale
-crate cannot accidentally publish against a newer sibling.
+All workspace crates ship in lockstep. The Rust version lives in **one**
+place — `[workspace.package] version` in the root `Cargo.toml` — and every
+member inherits it via `version.workspace = true` (issue #128). A release
+bumps that single line, plus the non-Cargo surfaces: every `pyproject.toml`,
+`scrybe-app/package.json`, and `scrybe-app/src-tauri/tauri.conf.json`.
+Inter-crate path-dep pins in the root `[workspace.dependencies]` use
+`version = "=X.Y.Z"` so a stale crate cannot publish against a newer sibling.
 
 The metapackage `scrybe.ai` pins every leaf with `==X.Y.Z`.
+
+> **Version history note:** the last tagged release was `v0.2.0`. The 0.3.x
+> line (path bar, theme sync, Vim toggle, Word export, MCP UI-parity — merged
+> to `main` after v0.2.0) was never tagged; it ships folded into **v0.4.0**.
+> There is no `v0.3.0` tag by design.
 
 ## Branch policy
 

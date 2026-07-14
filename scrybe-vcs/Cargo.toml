@@ -1,6 +1,6 @@
 [package]
 name = "scrybe-vcs"
-version = "0.2.1-dev"
+version.workspace = true
 edition = "2021"
 description = "Scrybe VCS — Gitea-first git2 wrapper, multi-remote, ssh-agent auth"
 license = "Apache-2.0"
