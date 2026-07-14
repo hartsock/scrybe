@@ -114,3 +114,19 @@ tail -f /tmp/scrybe-debug.log
 3. All checks must pass before pushing (pre-push hook enforces this)
 4. Open a PR via `gh pr create`
 5. Include agent identity in the PR description
+
+## Crate README Rule
+
+Every crate in this workspace gets its own `README.md` — crates.io renders
+it as the crate's front page, and `cargo package` fails if a declared
+`readme` file is missing.
+
+1. **Existence:** a new crate lands with a `README.md` in its crate root
+   (short: what it is, what it does, license).
+2. **Freshness:** every version bump of a crate includes a review of that
+   crate's README. Update it to match the released behavior — new features,
+   changed CLI flags, removed APIs. If a bump PR leaves the README
+   untouched, the PR body must say why.
+
+Treat a version bump without a README review as an incomplete change, the
+same way a bug fix without a regression test is incomplete.
