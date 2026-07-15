@@ -1,9 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readFileSync, mkdtempSync, mkdirSync, writeFileSync, cpSync, chmodSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
+import { spawnSync } from 'node:child_process';
+import { tmpdir } from 'node:os';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const root = join(here, '..');
@@ -25,6 +27,7 @@ test('platforms.json entries are well-formed and unique', () => {
     }
     assert.ok(NODE_OS.has(p.os), `invalid node os: ${p.os}`);
     assert.ok(NODE_CPU.has(p.cpu), `invalid node cpu: ${p.cpu}`);
+    if (p.libc) assert.ok(['glibc', 'musl'].includes(p.libc), `invalid libc: ${p.libc}`);
     assert.equal(p.key, `${p.os}-${p.cpu}`, `key must equal "<os>-<cpu>": ${p.key}`);
     assert.ok(!keys.has(p.key), `duplicate platform key: ${p.key}`);
     keys.add(p.key);
@@ -66,4 +69,32 @@ test('binaryPath throws a helpful, actionable error when platform packages are a
       return true;
     }
   );
+});
+
+test('happy path: the shim resolves and execs an installed platform package', () => {
+  const { entryForCurrentPlatform } = require(join(root, 'cli', 'lib', 'binary.cjs'));
+  const entry = entryForCurrentPlatform();
+  if (!entry) return; // host platform unsupported — nothing to exercise
+  if (entry.os === 'win32') return; // a fake .exe isn't a real PE; win32 path join is traced separately
+
+  // Fabricate a real install layout: @scrybe-ai/cli (copied) + the platform pkg
+  // as siblings in one node_modules, so the copied resolver finds the binary.
+  const tmp = mkdtempSync(join(tmpdir(), 'scrybe-npm-'));
+  const scoped = join(tmp, 'node_modules', '@scrybe-ai');
+  cpSync(join(root, 'cli'), join(scoped, 'cli'), { recursive: true });
+
+  const platDir = join(scoped, `cli-${entry.key}`);
+  mkdirSync(platDir, { recursive: true });
+  writeFileSync(
+    join(platDir, 'package.json'),
+    JSON.stringify({ name: `@scrybe-ai/cli-${entry.key}`, version: '0.0.0', os: [entry.os], cpu: [entry.cpu] })
+  );
+  const fakeBin = join(platDir, entry.binary);
+  writeFileSync(fakeBin, '#!/bin/sh\necho scrybe-fake-ok "$@"\n');
+  chmodSync(fakeBin, 0o755);
+
+  const shim = join(scoped, 'cli', 'bin', 'scrybe.cjs');
+  const res = spawnSync(process.execPath, [shim, 'render', 'x.md'], { encoding: 'utf8' });
+  assert.equal(res.status, 0, res.stderr);
+  assert.match(res.stdout, /scrybe-fake-ok render x\.md/, 'shim must exec the resolved binary with argv passed through');
 });

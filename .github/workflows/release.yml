@@ -375,13 +375,20 @@ jobs:
   # and npm/scripts/sync-versions.mjs stamps the release version.
   #
   # Tag-only, like crates.io — an npm version can't be republished, so we never
-  # publish from a release/** branch push. Publishing needs the NPM_TOKEN repo
-  # secret: a granular automation token with publish rights to the @scrybe-ai
-  # scope AND the scrybe-ai package. (The maintainer account's interactive 2FA
-  # is passkey/WebAuthn, so a token — not OTP — is required for CI. Prefer npm
-  # OIDC trusted publishing here once configured.) build-npm/publish-npm-meta
-  # are independent of the PyPI/crates/app jobs, so a missing token turns only
-  # these red without blocking the rest of the release (iterative activation).
+  # publish from a release/** branch push. Auth is npm OIDC trusted publishing
+  # (NO stored token): each package has a trusted publisher configured on npmjs
+  # (publisher = GitHub Actions, org/user = hartsock, repo = scrybe, workflow =
+  # release.yml, environment blank), and `id-token: write` + npm >= 11.5.1 lets
+  # `npm publish` mint a short-lived token at run time. Provenance is attested
+  # automatically. build-npm/publish-npm-meta are independent of the
+  # PyPI/crates/app jobs, so a package without its trusted publisher configured
+  # yet just turns red without blocking the rest (iterative activation, same
+  # bootstrap as PyPI).
+  #
+  # BOOTSTRAP: npm trusted publishers are configured per-package on an EXISTING
+  # package. The two umbrellas already exist (0.0.1 stubs). The four
+  # @scrybe-ai/cli-<platform> packages must be published once (stubs) before
+  # their trusted publisher can be set up — until then those matrix legs 403.
 
   build-npm:
     name: npm binary (${{ matrix.key }})
@@ -404,6 +411,8 @@ jobs:
         with:
           node-version: "22"
           registry-url: "https://registry.npmjs.org"
+      - name: Upgrade npm for OIDC trusted publishing (>= 11.5.1)
+        run: npm install -g npm@latest
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
@@ -416,6 +425,19 @@ jobs:
       - name: Derive version from tag
         shell: bash
         run: echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
+
+      - name: Assert tag matches workspace crate version
+        shell: bash
+        # Lockstep versioning: the npm packages take their version from the tag,
+        # the binary's own --version comes from Cargo. If they diverge, scrybe-ai@X
+        # would ship a binary reporting a different version. Fail loud instead.
+        run: |
+          CRATE=$(sed -n '/\[workspace.package\]/,/^\[/{s/^version *= *"\([^"]*\)".*/\1/p}' Cargo.toml | head -1)
+          if [ "$CRATE" != "$VERSION" ]; then
+            echo "::error::tag v$VERSION != workspace.package.version $CRATE — bump Cargo.toml before tagging"
+            exit 1
+          fi
+          echo "version ok: $VERSION"
 
       - name: Build scrybe (${{ matrix.target }})
         run: cargo build --release -p scrybe-cli --target ${{ matrix.target }}
@@ -431,9 +453,16 @@ jobs:
 
       - name: Publish @scrybe-ai/cli-${{ matrix.key }}
         working-directory: dist-npm/${{ matrix.key }}
-        run: npm publish --provenance --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        shell: bash
+        run: |
+          PKG=$(node -p "require('./package.json').name")
+          # Idempotent: a re-run after a partial failure skips already-live
+          # versions instead of dying on E403 (npm has no --skip-existing).
+          if npm view "$PKG@$VERSION" version >/dev/null 2>&1; then
+            echo "$PKG@$VERSION already published — skipping"
+          else
+            npm publish --provenance --access public
+          fi
 
   publish-npm-meta:
     name: npm umbrella (@scrybe-ai/cli + scrybe-ai)
@@ -450,6 +479,9 @@ jobs:
           node-version: "22"
           registry-url: "https://registry.npmjs.org"
 
+      - name: Upgrade npm for OIDC trusted publishing (>= 11.5.1)
+        run: npm install -g npm@latest
+
       - name: Derive version from tag
         run: echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
 
@@ -458,12 +490,26 @@ jobs:
 
       - name: Publish @scrybe-ai/cli
         working-directory: npm/cli
-        run: npm publish --provenance --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        shell: bash
+        run: |
+          PKG=$(node -p "require('./package.json').name")
+          # Idempotent: a re-run after a partial failure skips already-live
+          # versions instead of dying on E403 (npm has no --skip-existing).
+          if npm view "$PKG@$VERSION" version >/dev/null 2>&1; then
+            echo "$PKG@$VERSION already published — skipping"
+          else
+            npm publish --provenance --access public
+          fi
 
       - name: Publish scrybe-ai (unscoped umbrella)
         working-directory: npm/scrybe-ai
-        run: npm publish --provenance --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        shell: bash
+        run: |
+          PKG=$(node -p "require('./package.json').name")
+          # Idempotent: a re-run after a partial failure skips already-live
+          # versions instead of dying on E403 (npm has no --skip-existing).
+          if npm view "$PKG@$VERSION" version >/dev/null 2>&1; then
+            echo "$PKG@$VERSION already published — skipping"
+          else
+            npm publish --provenance --access public
+          fi

@@ -52,7 +52,10 @@ const pkg = {
   license: 'Apache-2.0',
   os: [entry.os],
   cpu: [entry.cpu],
-  files: [entry.binary],
+  // `libc` (npm >= 10) keeps a glibc build from installing on musl (Alpine),
+  // turning a silent runtime loader failure into a clean "no prebuilt binary".
+  ...(entry.libc ? { libc: [entry.libc] } : {}),
+  files: [entry.binary, 'README.md'],
   publishConfig: { access: 'public' },
 };
 

@@ -35,6 +35,10 @@ cd npm && npm test          # node --test: manifest integrity + resolver errors
 ```
 
 Release wiring lives in `.github/workflows/release.yml` (`build-npm` +
-`publish-npm` jobs). Publishing needs an `NPM_TOKEN` repo secret with publish
-rights to the `@scrybe-ai` scope and `scrybe-ai` (a granular automation token,
-since the account's interactive 2FA is passkey/WebAuthn).
+`publish-npm-meta` jobs). Publishing uses npm **OIDC trusted publishing** — no
+stored token. Each package has a trusted publisher configured on npmjs
+(publisher = GitHub Actions, repo = `hartsock/scrybe`, workflow = `release.yml`,
+environment blank); CI mints a short-lived token via `id-token: write`, and
+provenance is attested automatically. Trusted publishers are configured
+per-package on an **existing** package, so the four `@scrybe-ai/cli-<platform>`
+packages must be published once (stubs) before their OIDC can be set up.
