@@ -31,3 +31,11 @@ if command -v npm >/dev/null 2>&1; then
 else
     echo "npm not found; skipping TypeScript build"
 fi
+
+# npm shim resolver tests — parity: .github/workflows/ci.yml `test-npm`.
+# Dependency-free (node:test only), so this is fast.
+if command -v node >/dev/null 2>&1; then
+    (cd npm && npm test)
+else
+    echo "node not found; skipping npm shim tests"
+fi

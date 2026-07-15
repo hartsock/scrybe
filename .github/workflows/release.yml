@@ -104,6 +104,11 @@ jobs:
             pip install scrybe-cli scrybe-mcp-server scrybe-py scrybe-mermaid scrybe-plugin-docx
             ```
 
+            **npm (Node users):**
+            ```bash
+            npm install -g scrybe-ai        # the scrybe CLI binary — no Rust toolchain or pip needed
+            ```
+
             ### What's new
             See [CHANGELOG.md](https://github.com/hartsock/scrybe/blob/main/CHANGELOG.md) for details.
           releaseDraft: true
@@ -357,3 +362,108 @@ jobs:
         run: cargo publish -p ${{ matrix.crate.pkg }} --locked --no-verify
         env:
           CARGO_TERM_COLOR: always
+
+  # ── npm binary shim (@scrybe-ai/cli-<platform> + umbrellas) ───────────────
+  #
+  # Delivers the `scrybe` CLI binary to npm users the uv/esbuild way: one tiny
+  # per-platform package carrying just the prebuilt binary + os/cpu fields,
+  # with the umbrella `@scrybe-ai/cli` listing them as optionalDependencies and
+  # `scrybe-ai` (unscoped) depending on the umbrella. No postinstall.
+  #
+  # Sources + design: npm/ (see npm/README.md). platforms.json is the single
+  # source of truth; npm/scripts/build-platform-package.mjs wraps each binary
+  # and npm/scripts/sync-versions.mjs stamps the release version.
+  #
+  # Tag-only, like crates.io — an npm version can't be republished, so we never
+  # publish from a release/** branch push. Publishing needs the NPM_TOKEN repo
+  # secret: a granular automation token with publish rights to the @scrybe-ai
+  # scope AND the scrybe-ai package. (The maintainer account's interactive 2FA
+  # is passkey/WebAuthn, so a token — not OTP — is required for CI. Prefer npm
+  # OIDC trusted publishing here once configured.) build-npm/publish-npm-meta
+  # are independent of the PyPI/crates/app jobs, so a missing token turns only
+  # these red without blocking the rest of the release (iterative activation).
+
+  build-npm:
+    name: npm binary (${{ matrix.key }})
+    if: startsWith(github.ref, 'refs/tags/')
+    permissions:
+      contents: read
+      id-token: write        # npm provenance attestation
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { key: darwin-arm64, os: macos-latest,   target: aarch64-apple-darwin,    binary: scrybe }
+          - { key: darwin-x64,   os: macos-latest,   target: x86_64-apple-darwin,     binary: scrybe }
+          - { key: linux-x64,    os: ubuntu-latest,  target: x86_64-unknown-linux-gnu, binary: scrybe }
+          - { key: win32-x64,    os: windows-latest, target: x86_64-pc-windows-msvc,   binary: scrybe.exe }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          registry-url: "https://registry.npmjs.org"
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: npm-${{ matrix.key }}
+
+      # scrybe-cli is pure Rust (no openssl/git2, no webkit/gtk), so no system
+      # deps and darwin-x64 cross-compiles cleanly from the arm64 mac runner.
+      - name: Derive version from tag
+        shell: bash
+        run: echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
+
+      - name: Build scrybe (${{ matrix.target }})
+        run: cargo build --release -p scrybe-cli --target ${{ matrix.target }}
+
+      - name: Wrap into @scrybe-ai/cli-${{ matrix.key }}
+        shell: bash
+        run: |
+          node npm/scripts/build-platform-package.mjs \
+            --key ${{ matrix.key }} \
+            --binary target/${{ matrix.target }}/release/${{ matrix.binary }} \
+            --version "$VERSION" \
+            --out dist-npm/${{ matrix.key }}
+
+      - name: Publish @scrybe-ai/cli-${{ matrix.key }}
+        working-directory: dist-npm/${{ matrix.key }}
+        run: npm publish --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+  publish-npm-meta:
+    name: npm umbrella (@scrybe-ai/cli + scrybe-ai)
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: [build-npm]     # platform packages must be published first
+    permissions:
+      contents: read
+      id-token: write
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Derive version from tag
+        run: echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
+
+      - name: Stamp versions across the shim packages
+        run: node npm/scripts/sync-versions.mjs --version "$VERSION"
+
+      - name: Publish @scrybe-ai/cli
+        working-directory: npm/cli
+        run: npm publish --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Publish scrybe-ai (unscoped umbrella)
+        working-directory: npm/scrybe-ai
+        run: npm publish --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
