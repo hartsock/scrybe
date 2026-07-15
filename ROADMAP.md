@@ -99,6 +99,7 @@ This roadmap *sequences* existing plans; it does not replace them.
 - [`docs/TRIAGE.md`](docs/TRIAGE.md) — full 58-issue triage, epics, dispositions.
 - [`docs/design/mcp-rebuild.md`](docs/design/mcp-rebuild.md) — the native-modulex MCP rebuild (epic **#122**).
 - [`docs/design/cli-rpc.md`](docs/design/cli-rpc.md) — the CLI↔GUI socket protocol the rebuild unifies onto.
+- [`docs/design/vision-conversational-editing.md`](docs/design/vision-conversational-editing.md) — the conversational-editing north star; feeds **#147** (addressability) → **#148** (grounding) → **#149** (patches), built on **#122**.
 - [`docs/adr/0001-python-outside-rust-inside.md`](docs/adr/0001-python-outside-rust-inside.md) — the distribution philosophy.
 - **#132** — the crate-adoption spike + re-scope for the renderer epic (**#37**). Supersedes the from-scratch `PLAN.md` on the `feat/scrybe-mermaid-render` branch. Today only `scrybe-mermaid` (the iTXt PNG codec) ships; `scrybe-swarm` / `scrybe-panels` are in `experimental/`, not shipped members.
 
@@ -107,6 +108,7 @@ This roadmap *sequences* existing plans; it does not replace them.
 | Epic | Milestones | Tracking |
 |---|---|---|
 | MCP rebuild / CLI↔MCP parity (native-modulex) | v0.4–v0.7 | **#122** (epic), #108 #46 #121 #28 #15 #123 #124 #125 #126 #127 |
+| **Conversational editing** (object IDs → grounding → patches) | v0.8–v0.10 | **#147** #148 #149 + [vision](docs/design/vision-conversational-editing.md); builds on **#122** |
 | **Mermaid provenance** (source in PNG/SVG metadata) ★ | v0.4–v0.6 | #119 #28 #121 #126 + #37 wrapper |
 | Mermaid renderer — **adopt** `mermaid-rs-renderer` | v0.6–v0.7 (+ gate #132) | **#37**, #132; #52–#75 close on pass, #76–#85 re-scoped |
 | Human editor UX | v0.4–v0.7 | #32 #15 #109 #45 #111 #120 #44 |
@@ -114,6 +116,26 @@ This roadmap *sequences* existing plans; it does not replace them.
 | Packaging / distribution / CI guardrails | v0.4, v0.11 | #116 #1 #2 #128 |
 | New feature plugins (v0) | v0.9, v0.12 | #31 #33 #34 |
 | Strategic explores (resolved) | v0.4 | #114 #115 → both **build-ours** |
+
+### Conversational editing arc (post-#122)
+
+The MCP rebuild (**#122**) is the platform; the next arc turns Scrybe into a
+*conversational editor* — the document is the shared state and conversation
+generates structured edits, rather than a chatbot bolted onto an editor. See
+[`docs/design/vision-conversational-editing.md`](docs/design/vision-conversational-editing.md).
+Three epics, in dependency order, ~v0.8–v0.10:
+
+1. **#147 — object addressability.** Stable IDs over the AST (derived for named
+   structure + a `.scrybe/` sidecar for fine anchors; embedded anchors opt-in).
+   Foundation — everything else needs it.
+2. **#148 — reference resolution / grounding.** Resolve "Figure 2" to an object
+   handle *before* the model runs; named references deterministic now, full deixis
+   later (multimodal).
+3. **#149 — patch-oriented editing.** Edits arrive as reviewable, revisioned patches
+   (on `ContentAddressable` + `scrybe-vcs`), not blind overwrites.
+
+Detailed per-milestone placement lands as these are scheduled; they slot after the
+v0.4–v0.7 rebuild.
 
 ---
 
