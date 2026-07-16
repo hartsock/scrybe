@@ -1,0 +1,92 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+/*
+ * Print / print-to-PDF (#120). The app is a fixed-viewport flex layout with
+ * overflow:hidden throughout, so printing must (a) hide all app chrome,
+ * (b) force the containers to flow so the document isn't clipped to one page,
+ * and (c) reveal the rendered #preview full-width, light, and readable — even
+ * when the active tab is in editor-only view.
+ */
+@media print {
+  /* Hide every piece of app chrome. Selectors that don't match no-op. */
+  #toolbar,
+  #conflict-bar,
+  #modal-overlay,
+  #sidebar-col,
+  #tab-bar,
+  #path-bar,
+  #editor,
+  .cm-editor,
+  #mcp-panel,
+  #vcs-panel,
+  #terminal,
+  .copy-btn,
+  #toggle-devtools {
+    display: none !important;
+  }
+
+  /* Let the document flow across pages instead of being clipped by the
+     fixed-height, overflow:hidden app layout. */
+  html,
+  body,
+  #app,
+  #content,
+  #editor-col,
+  #editor-and-preview {
+    display: block !important;
+    height: auto !important;
+    min-height: 0 !important;
+    max-height: none !important;
+    overflow: visible !important;
+    background: #fff !important;
+  }
+
+  /* Show the rendered preview full-width, light + readable, overriding the
+     on-screen editor-only view (mode-edit) and any dark/solarized theme. */
+  #editor-and-preview.mode-edit #preview,
+  #editor-and-preview.mode-preview #preview,
+  #preview {
+    display: block !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    height: auto !important;
+    overflow: visible !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    border: none !important;
+    background: #fff !important;
+    color: #111 !important;
+  }
+
+  /* Code blocks readable on paper regardless of screen theme. */
+  #preview pre,
+  #preview code {
+    background: #f5f5f5 !important;
+  }
+
+  /* Keep diagrams, images, tables, and code from splitting across a page break. */
+  #preview img,
+  #preview svg,
+  #preview pre,
+  #preview table,
+  #preview blockquote {
+    break-inside: avoid;
+    page-break-inside: avoid;
+    max-width: 100% !important;
+  }
+  #preview h1,
+  #preview h2,
+  #preview h3 {
+    break-after: avoid;
+    page-break-after: avoid;
+  }
+
+  /* Links legible in ink. */
+  #preview a {
+    color: #111 !important;
+    text-decoration: underline;
+  }
+
+  @page {
+    margin: 2cm;
+  }
+}

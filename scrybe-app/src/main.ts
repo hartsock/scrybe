@@ -6,6 +6,7 @@ import "./styles/sidebar.css";
 import "./styles/mcp_panel.css";
 import "./styles/vcs_panel.css";
 import "./styles/pathbar.css";
+import "./styles/print.css";
 import { invoke, convertFileSrc } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { homeDir } from "@tauri-apps/api/path";
@@ -209,9 +210,24 @@ buildToolbar(toolbarEl, {
   onSave: () => { void saveActiveTabNow(); },
   onReload: () => { void reloadActiveTabNow(); },
   onExport: () => { void exportActiveTabToWord(); },
+  onPrint: () => { void printActiveTab(); },
   onToggleVim: () => setVimEnabled(!vimEnabled),
   onToggleWrap: () => setWrapEnabled(!wrapEnabled),
 });
+
+/// Print the active tab. Render its current buffer into the preview first — so
+/// printing works even from editor-only view and always reflects unsaved edits —
+/// let async KaTeX/Mermaid rendering settle, then open the OS print dialog
+/// (which also offers "Save as PDF"). styles/print.css shows only the rendered
+/// document, laid out for paper. Mirrored by the ⌘P/Ctrl+P shortcut.
+async function printActiveTab(): Promise<void> {
+  const tab = state.activeTab();
+  if (!tab) return;
+  await preview.render(tab.content);
+  // KaTeX/Mermaid post-processing is async; give it a beat before the snapshot.
+  await new Promise((r) => setTimeout(r, 250));
+  window.print();
+}
 
 /// Apply a theme to BOTH panes so the editor chrome matches the preview,
 /// update the toolbar dropdown, and mirror the choice to the MCP `state`
@@ -331,6 +347,11 @@ window.addEventListener("keydown", (e) => {
     // and instead reload the active tab's disk content.
     e.preventDefault();
     void reloadActiveTabNow();
+  } else if (e.key === "p" || e.key === "P") {
+    // Intercept the default print so we can render the current buffer to the
+    // preview first (styles/print.css then prints only the rendered document).
+    e.preventDefault();
+    void printActiveTab();
   }
 });
 
