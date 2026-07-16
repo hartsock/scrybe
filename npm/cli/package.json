@@ -1,0 +1,22 @@
+{
+  "name": "@scrybe-ai/cli",
+  "version": "0.0.0",
+  "description": "Scrybe CLI — the `scrybe` binary (headless render / lint / mermaid / edit + MCP-native live-tab driver). Delivers the prebuilt Rust binary for your platform, no Rust toolchain or pip required.",
+  "keywords": ["scrybe", "markdown", "mcp", "cli", "mermaid", "editor"],
+  "homepage": "https://github.com/hartsock/scrybe#readme",
+  "bugs": "https://github.com/hartsock/scrybe/issues",
+  "repository": { "type": "git", "url": "git+https://github.com/hartsock/scrybe.git", "directory": "npm/cli" },
+  "license": "Apache-2.0",
+  "author": "Shawn Hartsock",
+  "type": "commonjs",
+  "bin": { "scrybe": "bin/scrybe.cjs" },
+  "files": ["bin/", "lib/", "platforms.json", "README.md"],
+  "engines": { "node": ">=18" },
+  "publishConfig": { "access": "public" },
+  "optionalDependencies": {
+    "@scrybe-ai/cli-darwin-arm64": "0.0.0",
+    "@scrybe-ai/cli-darwin-x64": "0.0.0",
+    "@scrybe-ai/cli-linux-x64": "0.0.0",
+    "@scrybe-ai/cli-win32-x64": "0.0.0"
+  }
+}

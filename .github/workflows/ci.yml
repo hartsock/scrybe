@@ -75,3 +75,17 @@ jobs:
           cache-dependency-path: scrybe-app/package-lock.json
       - run: npm ci
       - run: npm run build
+
+  test-npm:
+    name: npm shim tests
+    runs-on: scrybe-k3s
+    defaults:
+      run:
+        working-directory: npm
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      # Dependency-free (node:test only) — no `npm ci`.
+      - run: npm test
