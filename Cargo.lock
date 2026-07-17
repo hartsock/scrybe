@@ -3828,6 +3828,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "scrybe-tools"
+version = "0.4.0"
+dependencies = [
+ "scrybe-core",
+ "scrybe-render",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "scrybe-tui"
 version = "0.4.0"
 dependencies = [

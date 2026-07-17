@@ -10,6 +10,7 @@ members = [
     "scrybe-py",
     "scrybe-cli",
     "scrybe-rpc",
+    "scrybe-tools",
     "scrybe-tui",
     "scrybe-app/src-tauri",
 ]
@@ -80,6 +81,7 @@ scrybe-mermaid    = { path = "scrybe-mermaid",    version = "=0.4.0" }
 scrybe-vcs        = { path = "scrybe-vcs",        version = "=0.4.0" }
 scrybe-py         = { path = "scrybe-py",         version = "=0.4.0" }
 scrybe-rpc        = { path = "scrybe-rpc",        version = "=0.4.0" }
+scrybe-tools      = { path = "scrybe-tools",      version = "=0.4.0" }
 
 [workspace.lints.clippy]
 explicit_iter_loop     = "warn"
