@@ -10,6 +10,7 @@ members = [
     "scrybe-py",
     "scrybe-cli",
     "scrybe-rpc",
+    "scrybe-tui",
     "scrybe-app/src-tauri",
 ]
 
@@ -53,6 +54,8 @@ git2 = { version = "0.20", default-features = false, features = ["vendored-opens
 
 # CLI
 clap = { version = "4", features = ["derive", "env"] }
+ratatui = "0.29"
+crossterm = "0.28"
 which = "7"
 
 # PNG / image codec (scrybe-mermaid iTXt)
