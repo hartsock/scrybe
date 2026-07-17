@@ -1,20 +1,29 @@
 # scrybe-tui
 
-A single-pane Markdown viewer for the terminal — another lens onto the same
-`scrybe-core` AST as the desktop app, CLI, and MCP server. No tabs, one document.
+A Markdown viewer for the terminal — another lens onto the same `scrybe-core`
+AST as the desktop app, CLI, and MCP server. One or more documents in scrollable
+panes; two or more files open as a **split screen**.
 
 ```bash
-scrybe-tui README.md
+scrybe-tui README.md                    # single pane
+scrybe-tui a.md b.md                    # side-by-side split
+scrybe-tui --vertical a.md b.md         # stacked split
 ```
+
+The renderer + viewer are a **reusable library**: `scrybe_tui::view::MarkdownView`
+is a ratatui `StatefulWidget` another project can embed in its own layout via
+`frame.render_stateful_widget(view, area, &mut state)`.
 
 ## Keys
 
 | Key | Action |
 |---|---|
-| `j` / `k` / `↓` / `↑` | scroll a line |
+| `j` / `k` / `↓` / `↑` | scroll a line (focused pane) |
 | `Ctrl-d` / `Ctrl-u` | half page |
 | `Space` / `PageDown` / `PageUp` | page |
 | `g` / `G` | top / bottom |
+| `Tab` / `Shift-Tab` | switch focused pane (split) |
+| `o` | toggle split orientation (horizontal / vertical) |
 | `q` / `Esc` / `Ctrl-c` | quit |
 
 ## Scope

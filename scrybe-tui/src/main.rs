@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Shawn Hartsock and contributors
 
-//! `scrybe-tui` — view a Markdown file in a scrollable terminal pane.
+//! `scrybe-tui` — view one or more Markdown files in scrollable terminal panes.
 
 use anyhow::{Context, Result};
 use clap::Parser;
@@ -10,25 +10,40 @@ use crossterm::terminal::{
     disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
 };
 use ratatui::backend::CrosstermBackend;
+use ratatui::layout::Direction;
 use ratatui::Terminal;
 use scrybe_tui::app::App;
 use std::fs;
 use std::io::stdout;
 use std::path::PathBuf;
 
-/// Scrybe TUI — a single-pane Markdown viewer for the terminal.
+/// Scrybe TUI — a Markdown viewer for the terminal. Two or more files open in a
+/// split screen (Tab switches panes, `o` toggles the split orientation).
 #[derive(Parser)]
 #[command(name = "scrybe-tui", version, about)]
 struct Cli {
-    /// Markdown file to view.
-    file: PathBuf,
+    /// Markdown file(s) to view. Two or more open as a split screen.
+    #[arg(required = true)]
+    files: Vec<PathBuf>,
+
+    /// Start with a vertical (stacked) split instead of horizontal (side-by-side).
+    #[arg(long)]
+    vertical: bool,
 }
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
-    let source =
-        fs::read_to_string(&cli.file).with_context(|| format!("reading {}", cli.file.display()))?;
-    let mut app = App::from_source(&source, cli.file.display().to_string());
+
+    let mut docs = Vec::with_capacity(cli.files.len());
+    for f in &cli.files {
+        let src = fs::read_to_string(f).with_context(|| format!("reading {}", f.display()))?;
+        docs.push((src, f.display().to_string()));
+    }
+
+    let mut app = App::from_documents(docs);
+    if cli.vertical {
+        app = app.orientation(Direction::Vertical);
+    }
 
     let mut terminal = setup_terminal()?;
     let res = app.run(&mut terminal);
