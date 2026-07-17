@@ -2,7 +2,8 @@
 
 A Markdown viewer for the terminal — another lens onto the same `scrybe-core`
 AST as the desktop app, CLI, and MCP server. One or more documents in scrollable
-panes; two or more files open as a **split screen**.
+panes; two or more files open as a **split screen**; panes **reload live** when
+their file changes on disk (edit in your editor, watch the view update).
 
 ```bash
 scrybe-tui README.md                    # single pane
