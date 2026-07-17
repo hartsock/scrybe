@@ -60,6 +60,35 @@ jobs:
       - name: test (excluding scrybe-app)
         run: cargo test --workspace --exclude scrybe-app
 
+  # Windows coverage. The self-hosted farm above is Linux-only and the Linux
+  # test job excludes scrybe-app, so Windows-specific breakage in scrybe-app
+  # (e.g. a test hardcoding a Unix "/tmp" path) went completely uncaught by CI
+  # and only surfaced in the external nightly Windows check (#135). This job
+  # runs the FULL `cargo test --workspace` — including scrybe-app — on a
+  # GitHub-hosted Windows runner (release.yml already builds the Tauri app on
+  # windows-latest), so that class of failure is caught at PR time, not nightly.
+  # CI-only by nature: the .githooks/pre-push hook runs on Linux/macOS dev boxes
+  # and cannot mirror a Windows job — Windows parity lives here, not in the hook.
+  test-rust-windows:
+    name: Rust tests (Windows)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: scrybe-app/package-lock.json
+      - name: Build frontend (Tauri build script needs scrybe-app/dist)
+        working-directory: scrybe-app
+        run: |
+          npm ci
+          npm run build
+      - name: test (full workspace, incl. scrybe-app — mirrors the nightly Windows check)
+        run: cargo test --workspace
+
   lint-ts:
     name: TypeScript lint
     runs-on: scrybe-k3s

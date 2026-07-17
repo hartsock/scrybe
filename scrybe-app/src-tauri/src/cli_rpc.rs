@@ -545,10 +545,19 @@ mod tests {
 
     #[test]
     fn canonical_resolves_existing_path() {
-        // /tmp always exists on Linux/macOS test runners.
-        let p = canonical("/tmp").unwrap();
-        // On macOS, /tmp resolves to /private/tmp; on Linux it stays /tmp.
-        assert!(p == "/tmp" || p == "/private/tmp");
+        // Use the platform temp dir, which exists on Linux, macOS, AND Windows.
+        // A hardcoded "/tmp" does not exist on Windows, so the old assertion
+        // panicked in the nightly `cargo test --workspace` there (#135). Compare
+        // against `std::fs::canonicalize` of the same directory — the exact call
+        // `canonical` makes — so the expected value is correct on every platform
+        // (Windows yields a `\\?\` verbatim path; macOS maps /tmp -> /private/tmp).
+        let tmp = std::env::temp_dir();
+        let want = std::fs::canonicalize(&tmp)
+            .expect("temp dir canonicalizes")
+            .to_string_lossy()
+            .into_owned();
+        let got = canonical(tmp.to_str().expect("temp dir path is valid UTF-8")).unwrap();
+        assert_eq!(got, want);
     }
 
     #[test]
