@@ -87,12 +87,13 @@ impl App {
     }
 
     fn draw(&mut self, f: &mut Frame) {
-        let chunks =
-            Layout::vertical([Constraint::Min(1), Constraint::Length(1)]).split(f.area());
+        let chunks = Layout::vertical([Constraint::Min(1), Constraint::Length(1)]).split(f.area());
 
         let block = Block::default().borders(Borders::ALL).title(Span::styled(
             format!(" {} ", self.title),
-            Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
         ));
         // Content viewport = the block's inner height; keep scroll in range on resize.
         self.viewport = block.inner(chunks[0]).height.max(1);

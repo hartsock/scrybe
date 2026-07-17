@@ -140,7 +140,11 @@ impl Renderer {
                 other => std::slice::from_ref(other),
             };
             for (j, line) in Renderer::sub(children).into_iter().enumerate() {
-                let prefix = if j == 0 { marker.clone() } else { indent.clone() };
+                let prefix = if j == 0 {
+                    marker.clone()
+                } else {
+                    indent.clone()
+                };
                 let mut spans = vec![Span::styled(prefix, Style::default().fg(Color::Yellow))];
                 spans.extend(line.spans);
                 self.lines.push(Line::from(spans));
@@ -199,7 +203,11 @@ fn inline_into(
                 }
             }
             Node::Image { alt, .. } => {
-                let label = if alt.is_empty() { "image" } else { alt.as_str() };
+                let label = if alt.is_empty() {
+                    "image"
+                } else {
+                    alt.as_str()
+                };
                 cur.push(Span::styled(
                     format!("🖼 {label}"),
                     Style::default().fg(Color::Magenta),
@@ -225,14 +233,20 @@ mod tests {
     fn plain(text: &Text) -> Vec<String> {
         text.lines
             .iter()
-            .map(|l| l.spans.iter().map(|s| s.content.as_ref()).collect::<String>())
+            .map(|l| {
+                l.spans
+                    .iter()
+                    .map(|s| s.content.as_ref())
+                    .collect::<String>()
+            })
             .collect()
     }
 
     fn has_mod(text: &Text, needle: &str, m: Modifier) -> bool {
-        text.lines.iter().flat_map(|l| &l.spans).any(|s| {
-            s.content.contains(needle) && s.style.add_modifier.contains(m)
-        })
+        text.lines
+            .iter()
+            .flat_map(|l| &l.spans)
+            .any(|s| s.content.contains(needle) && s.style.add_modifier.contains(m))
     }
 
     #[test]
@@ -254,7 +268,9 @@ mod tests {
     fn unordered_list_items_get_bullets() {
         let t = render_source("- alpha\n- beta\n");
         let lines = plain(&t);
-        assert!(lines.iter().any(|l| l.contains("• ") && l.contains("alpha")));
+        assert!(lines
+            .iter()
+            .any(|l| l.contains("• ") && l.contains("alpha")));
         assert!(lines.iter().any(|l| l.contains("• ") && l.contains("beta")));
     }
 
@@ -278,7 +294,9 @@ mod tests {
     fn blockquote_gets_prefix() {
         let t = render_source("> quoted\n");
         let lines = plain(&t);
-        assert!(lines.iter().any(|l| l.contains("┃ ") && l.contains("quoted")));
+        assert!(lines
+            .iter()
+            .any(|l| l.contains("┃ ") && l.contains("quoted")));
     }
 
     #[test]

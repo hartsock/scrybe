@@ -26,8 +26,8 @@ struct Cli {
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
-    let source = fs::read_to_string(&cli.file)
-        .with_context(|| format!("reading {}", cli.file.display()))?;
+    let source =
+        fs::read_to_string(&cli.file).with_context(|| format!("reading {}", cli.file.display()))?;
     let mut app = App::from_source(&source, cli.file.display().to_string());
 
     let mut terminal = setup_terminal()?;
