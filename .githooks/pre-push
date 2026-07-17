@@ -23,6 +23,10 @@ else
 fi
 
 # ── ci.yml / release.yml parity ───────────────────────────────────────────────
+# NOTE: ci.yml also has a `test-rust-windows` job (full `cargo test --workspace`
+# on windows-latest, added for #135). It is intentionally NOT mirrored here —
+# this hook runs on Linux/macOS dev boxes and cannot run a Windows build. Windows
+# parity is enforced by CI at PR time, not by this hook.
 just check
 just test
 
