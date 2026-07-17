@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Shawn Hartsock and contributors
 
-//! The single-pane viewer: state + the ratatui draw / key-handling loop.
+//! The single-pane viewer binary's driver: terminal event loop + key handling
+//! around the reusable [`MarkdownView`] widget. Another project embeds
+//! [`crate::view`] directly; this is just Scrybe's own thin host.
 
 use anyhow::Result;
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
@@ -9,21 +11,19 @@ use ratatui::backend::Backend;
 use ratatui::layout::{Constraint, Layout};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span, Text};
-use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
+use ratatui::widgets::{Block, Borders, Paragraph};
 use ratatui::{Frame, Terminal};
 use std::time::Duration;
 
 use crate::render;
+use crate::view::{MarkdownView, MarkdownViewState};
 use scrybe_core::ast::Ast;
 
 /// A single-pane Markdown viewer.
 pub struct App {
     title: String,
     text: Text<'static>,
-    line_count: usize,
-    scroll: u16,
-    /// Content-area height from the last draw — used for paging and clamping.
-    viewport: u16,
+    state: MarkdownViewState,
     quit: bool,
 }
 
@@ -31,13 +31,11 @@ impl App {
     /// Build a viewer from Markdown source and a display title (e.g. file path).
     pub fn from_source(source: &str, title: impl Into<String>) -> Self {
         let text = render::render(&Ast::parse(source));
-        let line_count = text.lines.len();
+        let state = MarkdownViewState::new(text.lines.len());
         Self {
             title: title.into(),
             text,
-            line_count,
-            scroll: 0,
-            viewport: 1,
+            state,
             quit: false,
         }
     }
@@ -58,32 +56,21 @@ impl App {
         Ok(())
     }
 
-    fn max_scroll(&self) -> u16 {
-        (self.line_count as u16).saturating_sub(self.viewport)
-    }
-
     fn on_key(&mut self, key: KeyEvent) {
         let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
-        let half = (self.viewport / 2).max(1) as i32;
-        let page = self.viewport.saturating_sub(1).max(1) as i32;
         match key.code {
             KeyCode::Char('q') | KeyCode::Esc => self.quit = true,
             KeyCode::Char('c') if ctrl => self.quit = true,
-            KeyCode::Char('j') | KeyCode::Down => self.scroll_by(1),
-            KeyCode::Char('k') | KeyCode::Up => self.scroll_by(-1),
-            KeyCode::Char('d') if ctrl => self.scroll_by(half),
-            KeyCode::Char('u') if ctrl => self.scroll_by(-half),
-            KeyCode::PageDown | KeyCode::Char(' ') => self.scroll_by(page),
-            KeyCode::PageUp => self.scroll_by(-page),
-            KeyCode::Char('g') | KeyCode::Home => self.scroll = 0,
-            KeyCode::Char('G') | KeyCode::End => self.scroll = self.max_scroll(),
+            KeyCode::Char('j') | KeyCode::Down => self.state.scroll_by(1),
+            KeyCode::Char('k') | KeyCode::Up => self.state.scroll_by(-1),
+            KeyCode::Char('d') if ctrl => self.state.half_page(true),
+            KeyCode::Char('u') if ctrl => self.state.half_page(false),
+            KeyCode::PageDown | KeyCode::Char(' ') => self.state.page(true),
+            KeyCode::PageUp => self.state.page(false),
+            KeyCode::Char('g') | KeyCode::Home => self.state.scroll_to_top(),
+            KeyCode::Char('G') | KeyCode::End => self.state.scroll_to_bottom(),
             _ => {}
         }
-    }
-
-    fn scroll_by(&mut self, delta: i32) {
-        let next = (self.scroll as i32 + delta).clamp(0, self.max_scroll() as i32);
-        self.scroll = next as u16;
     }
 
     fn draw(&mut self, f: &mut Frame) {
@@ -95,28 +82,22 @@ impl App {
                 .fg(Color::Cyan)
                 .add_modifier(Modifier::BOLD),
         ));
-        // Content viewport = the block's inner height; keep scroll in range on resize.
-        self.viewport = block.inner(chunks[0]).height.max(1);
-        self.scroll = self.scroll.min(self.max_scroll());
+        let view = MarkdownView::new(&self.text).block(block);
+        f.render_stateful_widget(view, chunks[0], &mut self.state);
 
-        let body = Paragraph::new(self.text.clone())
-            .block(block)
-            .wrap(Wrap { trim: false })
-            .scroll((self.scroll, 0));
-        f.render_widget(body, chunks[0]);
-
-        let max = self.max_scroll();
-        let pct = if max == 0 {
-            100
-        } else {
-            (self.scroll as usize * 100 / max as usize).min(100)
-        };
         let footer = Line::from(vec![
             Span::styled(
                 " j/k ↑↓  ^d/^u  space  g/G  q:quit ",
                 Style::default().fg(Color::DarkGray),
             ),
-            Span::styled(format!(" {pct}% "), Style::default().fg(Color::Yellow)),
+            Span::styled(
+                if self.state.fits() {
+                    " All ".to_string()
+                } else {
+                    format!(" {}% ", self.state.percent())
+                },
+                Style::default().fg(Color::Yellow),
+            ),
         ]);
         f.render_widget(Paragraph::new(footer), chunks[1]);
     }
@@ -127,19 +108,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn scroll_clamps_within_bounds() {
-        let mut app = App::from_source("# A\n\nbody\n", "t.md");
-        app.viewport = 1;
-        app.line_count = 5;
-        app.scroll_by(100);
-        assert_eq!(app.scroll, app.max_scroll());
-        app.scroll_by(-100);
-        assert_eq!(app.scroll, 0);
-    }
-
-    #[test]
-    fn quit_key_sets_flag() {
-        let mut app = App::from_source("x\n", "t.md");
+    fn j_scrolls_down_q_quits() {
+        let mut app = App::from_source("# A\n\nbody\nmore\nlines\nhere\n", "t.md");
+        // Give the view a viewport so there's room to scroll.
+        app.state.set_line_count(20);
+        let before = app.state.scroll();
+        app.on_key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE));
+        assert!(app.state.scroll() >= before);
         app.on_key(KeyEvent::new(KeyCode::Char('q'), KeyModifiers::NONE));
         assert!(app.quit);
     }
