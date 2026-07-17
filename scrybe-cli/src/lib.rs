@@ -6,12 +6,14 @@
 //! `main.rs` contains the thin clap shell; the real work lives here so it
 //! can be unit-tested without spawning a process.
 
-pub mod lint;
 pub mod rpc_client;
 pub mod wrap;
 
-// Re-export the primary public API for convenience.
-pub use lint::{lint_document, BrokenLink, LintReport};
+// Re-export the primary public API for convenience. The linter now lives in
+// `scrybe-tools` (the shared CLI+MCP tool registry, #122); it is re-exported
+// here so the CLI's public surface — `scrybe_cli::lint_document` etc. — is
+// unchanged for `main.rs` and downstream users.
+pub use scrybe_tools::lint::{lint_document, BrokenLink, LintReport};
 pub use wrap::wrap_full_html;
 
 // ---------------------------------------------------------------------------
@@ -34,8 +36,8 @@ pub fn active_features() -> &'static str {
 
 #[cfg(test)]
 mod tests {
-    use super::lint::lint_document;
     use super::wrap::wrap_full_html;
+    use crate::lint_document;
     use scrybe_core::Document;
     use scrybe_render::{render_html, Theme};
 

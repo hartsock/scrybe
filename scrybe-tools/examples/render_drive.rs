@@ -37,6 +37,17 @@ fn main() {
     println!("--- body_html (first 500 chars) ---");
     println!("{}", &body[..body.len().min(500)]);
 
+    // Drive the `lint` tool on a document with a broken link.
+    let lint = reg
+        .call(
+            "lint",
+            &Ctx::headless(),
+            &json!({ "source": "# Doc\n\ntext with $x$ and [broken]().\n\n```rust\nfn a(){}\n```\n" }),
+        )
+        .expect("lint should dispatch");
+    println!("\n--- lint data ---");
+    println!("{}", serde_json::to_string_pretty(&lint.data).unwrap());
+
     // A missing required argument is an engine fault, not a silent success.
     match reg.call("render", &Ctx::headless(), &json!({})) {
         Err(e) => println!("\nmissing-arg engine fault (expected): {e}"),

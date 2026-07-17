@@ -8,9 +8,11 @@
 
 use crate::Registry;
 
+pub mod lint;
 pub mod render;
 
 /// Register every built-in tool into `reg`.
 pub(crate) fn register_defaults(reg: &mut Registry) {
     reg.register(render::spec());
+    reg.register(lint::spec());
 }

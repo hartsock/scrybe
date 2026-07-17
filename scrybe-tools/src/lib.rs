@@ -13,6 +13,7 @@
 
 use serde_json::Value;
 
+pub mod lint;
 pub mod tools;
 
 /// Tool group — drives progressive disclosure and feature gating (design §4).
