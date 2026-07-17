@@ -1,0 +1,22 @@
+[package]
+name = "scrybe-mermaid-render"
+version.workspace = true
+edition = "2021"
+description = "Scrybe Mermaid renderer — a thin wrapper over mermaid-rs-renderer that injects Scrybe provenance (source + sha256)"
+license = "Apache-2.0"
+repository = "https://github.com/hartsock/scrybe"
+homepage = "https://github.com/hartsock/scrybe"
+readme = "README.md"
+keywords = ["mermaid", "svg", "render", "scrybe"]
+categories = ["text-processing"]
+
+[dependencies]
+# SVG-only for now (default-features = false drops the `png`/`cli` features and
+# their resvg/clap trees). PNG-via-resvg lands as the next increment.
+mermaid-rs-renderer = { workspace = true }
+anyhow.workspace = true
+sha2.workspace = true
+hex.workspace = true
+
+[lints]
+workspace = true
