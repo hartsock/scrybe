@@ -5,16 +5,37 @@ Copyright 2026 Shawn Hartsock and contributors
 
 # Scrybe ROADMAP — v0.4.0 → v1.0.0
 
-**Current:** `v0.2.0` (last pushed tag) · `0.2.1-dev` (working tree) — see
-[Version reconciliation](docs/TRIAGE.md#version-reconciliation-read-this-first).
+**Current:** `v0.4.0` — "Keystone", shipped 2026-07-14 (lock-step
+`[workspace.package]` version, #128/#144). **Active milestone: `v0.5.0` — "Parity".**
 **Target:** `v1.0.0`, delivered across milestones **v0.4.0 → v0.12.0** (the
 renderer epic now **adopts** an upstream crate — see below — so the back half
 compresses; 1.0 arrives sooner than the milestone count implies).
-**Created:** 2026-07-13 · **Maintained per:** [`.claude/skills/repository-roadmap/SKILL.md`](.claude/skills/repository-roadmap/SKILL.md)
+**Created:** 2026-07-13 · **Last reconciled:** 2026-07-17 · **Maintained per:** [`.claude/skills/repository-roadmap/SKILL.md`](.claude/skills/repository-roadmap/SKILL.md)
 
 > **GitHub issues are the state; this document is the map.** Every work item
 > carries a tracking issue number. When this document and GitHub disagree,
 > **GitHub wins** — reconcile before trusting the prose.
+
+## Reconciliation — 2026-07-17
+
+This roadmap had drifted from GitHub (the header still read `v0.2.0`). Verified
+against merged code + PRs and reconciled:
+
+- **`v0.4.0` "Keystone" shipped** (CHANGELOG, #128/#144). The `v0.4.0` section
+  below is now historical; live issue state is on GitHub.
+- **Closed as verified-done** (evidence in the closing PR): #108 (open→tab
+  appears; #134/#142/#143 + regression test), #45 (vim keys/themes; #105), #15
+  (fs-watcher reload; #11/#143), #136 (word-wrap; shipped 0.4.0/#138), and the
+  resolved spikes #114/#115 (both build-ours).
+- **`#120` (print)** shipped early (#153) though milestoned `v0.6.0`.
+- **New threads given a home** (were untracked): the **scrybe-tui viewer #154**
+  (re-scoped to the *delivered* viewer; remaining checklist split into follow-ups
+  #162–#167) and the **install/upgrade epic #146** (Part A shipped, #151).
+- **Windows CI**: the external nightly Windows check (#135) is now mirrored by a
+  `test-rust-windows` job in `ci.yml`, so Windows breakage is caught at PR time.
+- **Still genuinely open in `v0.4.0`**: #119 (Mermaid-PNG provenance — no
+  uuid/skill/standalone tool yet), #32 (content-root-relative path copy — only
+  full-path shipped), #122 (MCP-rebuild epic, ~15%; `scrybe-tools` registry 0%).
 
 ## Ground-truth protocol
 
@@ -116,6 +137,8 @@ This roadmap *sequences* existing plans; it does not replace them.
 | Packaging / distribution / CI guardrails | v0.4, v0.11 | #116 #1 #2 #128 |
 | New feature plugins (v0) | v0.9, v0.12 | #31 #33 #34 |
 | Strategic explores (resolved) | v0.4 | #114 #115 → both **build-ours** |
+| **scrybe-tui viewer** (terminal lens on the AST) | v0.6 | **#154** (delivered viewer #155–#158; harness #159); follow-ups #162 #163 #164 (v0.6) · #165 #166 #167 (backlog) |
+| **Install / upgrade** — `scrybe upgrade` + npm shim | v0.5, v0.11 | **#146** (Part A shipped #151) |
 
 ### Conversational editing arc (post-#122)
 
@@ -139,7 +162,7 @@ v0.4–v0.7 rebuild.
 
 ---
 
-## v0.4.0 — "Keystone" (the next release)
+## v0.4.0 — "Keystone" (SHIPPED 2026-07-14)
 
 **Theme:** Make the MCP actually work and ship the priority Mermaid-PNG
 provenance skill (★), behind privacy guardrails, with the strategic spikes
@@ -189,6 +212,12 @@ independent editor quality-of-life increments.
 - Every tool returns a versioned `data` payload on both CLI and MCP; golden `--tools` snapshot test passes. (#123)
 - Each MCP tool built this milestone ships **with** its CLI subcommand (parity-by-construction; the CI *gate* lands v0.7/#125).
 - `mcp-editing` and `repository-roadmap` skills are installable. (#127)
+
+> **Reconciliation:** the GitHub `v0.5.0` milestone also carries items absent
+> from the table above — `#137` (tab-reorder drag-and-drop, still open) plus
+> `#136` (word-wrap) and the bugs `#140`/`#141`, which were **pulled forward and
+> shipped in 0.4.0** (#138/#143). Trust the milestone, not this table:
+> `gh issue list --repo hartsock/scrybe --milestone "v0.5.0 — Parity" --state all`.
 
 ---
 
