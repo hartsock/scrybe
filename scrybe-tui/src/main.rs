@@ -3,7 +3,7 @@
 
 //! `scrybe-tui` — view one or more Markdown files in scrollable terminal panes.
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use clap::Parser;
 use crossterm::execute;
 use crossterm::terminal::{
@@ -13,12 +13,12 @@ use ratatui::backend::CrosstermBackend;
 use ratatui::layout::Direction;
 use ratatui::Terminal;
 use scrybe_tui::app::App;
-use std::fs;
 use std::io::stdout;
 use std::path::PathBuf;
 
 /// Scrybe TUI — a Markdown viewer for the terminal. Two or more files open in a
-/// split screen (Tab switches panes, `o` toggles the split orientation).
+/// split screen (Tab switches panes, `o` toggles the split orientation). Panes
+/// reload live when their file changes on disk.
 #[derive(Parser)]
 #[command(name = "scrybe-tui", version, about)]
 struct Cli {
@@ -34,13 +34,7 @@ struct Cli {
 fn main() -> Result<()> {
     let cli = Cli::parse();
 
-    let mut docs = Vec::with_capacity(cli.files.len());
-    for f in &cli.files {
-        let src = fs::read_to_string(f).with_context(|| format!("reading {}", f.display()))?;
-        docs.push((src, f.display().to_string()));
-    }
-
-    let mut app = App::from_documents(docs);
+    let mut app = App::from_files(cli.files)?;
     if cli.vertical {
         app = app.orientation(Direction::Vertical);
     }
