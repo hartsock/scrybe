@@ -2,7 +2,7 @@
 name = "scrybe-tui"
 version.workspace = true
 edition = "2021"
-description = "Scrybe TUI — a single-pane Markdown viewer for the terminal (ratatui)"
+description = "Scrybe TUI — a split-capable Markdown viewer for the terminal (ratatui)"
 license = "Apache-2.0"
 repository = "https://github.com/hartsock/scrybe"
 homepage = "https://github.com/hartsock/scrybe"
