@@ -6,6 +6,7 @@ members = [
     "scrybe-mcp-client",
     "scrybe-mcp-server",
     "scrybe-mermaid",
+    "scrybe-mermaid-render",
     "scrybe-vcs",
     "scrybe-py",
     "scrybe-cli",
@@ -82,6 +83,11 @@ scrybe-vcs        = { path = "scrybe-vcs",        version = "=0.4.0" }
 scrybe-py         = { path = "scrybe-py",         version = "=0.4.0" }
 scrybe-rpc        = { path = "scrybe-rpc",        version = "=0.4.0" }
 scrybe-tools      = { path = "scrybe-tools",      version = "=0.4.0" }
+scrybe-mermaid-render = { path = "scrybe-mermaid-render", version = "=0.4.0" }
+
+# Adopted pure-Rust Mermaid → SVG renderer (#132 spike-Pass, 2026-07-17).
+# SVG-only by default here; the `png` feature (resvg) is opted into per-crate.
+mermaid-rs-renderer = { version = "0.3.1", default-features = false }
 
 [workspace.lints.clippy]
 explicit_iter_loop     = "warn"
