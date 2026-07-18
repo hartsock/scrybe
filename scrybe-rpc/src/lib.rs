@@ -145,6 +145,27 @@ pub struct ReadResult {
     pub is_dirty: bool,
 }
 
+/// One open tab as seen over the socket (`list_tabs`).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct TabInfo {
+    /// Canonical path, or empty for an untitled buffer.
+    pub path: String,
+    /// Display title (usually the file name).
+    pub title: String,
+    /// Unsaved edits present.
+    pub is_dirty: bool,
+    /// Current view mode (`both` | `edit` | `preview`).
+    pub view_mode: String,
+    /// True for the currently focused tab.
+    pub active: bool,
+}
+
+/// Result of `list_tabs`: the live set of open tabs.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ListTabsResult {
+    pub tabs: Vec<TabInfo>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct FindParams {
     pub pattern: String,
