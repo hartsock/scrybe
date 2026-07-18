@@ -19,6 +19,7 @@ scrybe-core.workspace = true
 scrybe-render.workspace = true
 scrybe-mermaid.workspace = true
 scrybe-rpc.workspace = true
+scrybe-tools.workspace = true
 anyhow.workspace = true
 thiserror.workspace = true
 serde.workspace = true
