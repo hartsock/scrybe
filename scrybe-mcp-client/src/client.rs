@@ -153,9 +153,18 @@ for line in sys.stdin:
 "#;
 
     fn echo_entry() -> AgentEntry {
-        // Write the Python echo server to a temp file synchronously so we can
-        // use it in async tests.
-        let tmp = std::env::temp_dir().join("scrybe_mcp_client_echo.py");
+        // Write the Python echo server to a UNIQUE temp file (pid + counter). A
+        // shared fixed name races under parallel `cargo test` — one test rewrites
+        // the file while another spawns it, so `python3` reads a half-written
+        // script and the handshake times out (flaky CI). Same fix as
+        // stdio_transport's spawn_echo_server.
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static N: AtomicU64 = AtomicU64::new(0);
+        let tmp = std::env::temp_dir().join(format!(
+            "scrybe_mcp_client_echo_{}_{}.py",
+            std::process::id(),
+            N.fetch_add(1, Ordering::Relaxed)
+        ));
         std::fs::write(&tmp, ECHO_SERVER_PY).expect("write echo server");
         AgentEntry {
             name: "echo".to_string(),
