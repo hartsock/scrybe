@@ -25,6 +25,10 @@ pub struct MermaidPayload {
     pub source: String,
     /// SHA-256 of the source bytes (for integrity verification).
     pub sha256: String,
+    /// Per-artifact UUID identifying this embed instance. Empty string when the
+    /// PNG was embedded before UUIDs were added (older payloads carry only
+    /// `source` + `sha256`).
+    pub uuid: String,
 }
 
 // ── Python bindings ─────────────────────────────────────────────────────────
@@ -73,12 +77,14 @@ mod python {
             .map(|p| PyMermaidPayload {
                 source: p.source,
                 sha256: p.sha256,
+                uuid: p.uuid,
             })
             .map_err(|e| PyValueError::new_err(e.to_string()))
     }
 
     /// Result of `extract`. `source` is the Mermaid diagram text; `sha256`
-    /// is the hex digest of `source.encode('utf-8')` at embed time.
+    /// is the hex digest of `source.encode('utf-8')` at embed time; `uuid` is
+    /// the per-artifact id (empty for pre-UUID payloads).
     #[pyclass(name = "MermaidPayload", skip_from_py_object)]
     #[derive(Clone)]
     struct PyMermaidPayload {
@@ -86,14 +92,16 @@ mod python {
         source: String,
         #[pyo3(get)]
         sha256: String,
+        #[pyo3(get)]
+        uuid: String,
     }
 
     #[pymethods]
     impl PyMermaidPayload {
         fn __repr__(&self) -> String {
             format!(
-                "MermaidPayload(source={:?}, sha256={:?})",
-                self.source, self.sha256
+                "MermaidPayload(source={:?}, sha256={:?}, uuid={:?})",
+                self.source, self.sha256, self.uuid
             )
         }
     }
