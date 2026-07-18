@@ -110,7 +110,21 @@ pub struct SaveParams {
     pub path: String,
 }
 
-/// `save`/`close` result. `applied: false` means the file wasn't open and
+/// Result of `save` (reply-correlated): the tab's buffer was written to its
+/// file. `was_dirty` reports whether the buffer had unsaved edits before the
+/// write — a clean save is a harmless rewrite of identical content. A path
+/// that isn't open errors with `ERR_TAB_NOT_OPEN`; each surface decides its
+/// own presentation (the CLI keeps its documented silent no-op).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct SaveResult {
+    pub path: String,
+    /// Bytes written to disk.
+    pub bytes: u64,
+    /// Whether the buffer had unsaved edits at save time.
+    pub was_dirty: bool,
+}
+
+/// `close`/`quit` result. `applied: false` means the file wasn't open and
 /// the command was a no-op (per the design's "silent no-op" rule).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct AckResult {
@@ -250,6 +264,11 @@ pub struct EditParams {
 pub struct EditResult {
     pub applied: bool,
     pub size_after: usize,
+    /// Buffer dirty after the edit — true until an explicit `save` persists
+    /// it (edits land in the in-memory buffer only, never directly on disk).
+    /// Defaults to `false` for replies from older apps that omit it.
+    #[serde(default)]
+    pub is_dirty: bool,
 }
 
 // ── Reply correlation (server → frontend → server) ───────────────────────────
@@ -311,8 +330,8 @@ pub const ERR_INVALID_PARAMS: i32 = -32602;
 pub const ERR_INTERNAL: i32 = -32603;
 
 /// The path argument is not a tab currently open in the GUI.
-/// `save`/`close`/`read`/`edit` may use this when applicable; `save` and
-/// `close` translate it into `applied: false` instead by design choice.
+/// `read`/`edit`/`save` reply with this; `close` translates it into
+/// `applied: false` instead by design choice.
 pub const ERR_TAB_NOT_OPEN: i32 = -32001;
 
 /// `quit` was requested with `force=false` but the app has dirty buffers.
@@ -326,6 +345,9 @@ pub const ERR_REPLY_TIMEOUT: i32 = -32003;
 /// The requested heading wasn't found in the document.
 /// Used by `section`.
 pub const ERR_SECTION_NOT_FOUND: i32 = -32004;
+
+/// `reload` was requested without `force` but the tab has unsaved edits.
+pub const ERR_DIRTY_RELOAD_REFUSED: i32 = -32005;
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -548,9 +570,36 @@ mod tests {
         let r = EditResult {
             applied: true,
             size_after: 1024,
+            is_dirty: true,
         };
         let v = serde_json::to_value(&r).unwrap();
-        assert_eq!(v, serde_json::json!({"applied": true, "size_after": 1024}));
+        assert_eq!(
+            v,
+            serde_json::json!({"applied": true, "size_after": 1024, "is_dirty": true})
+        );
+    }
+
+    #[test]
+    fn edit_result_is_dirty_defaults_false_for_older_apps() {
+        let v = serde_json::json!({"applied": true, "size_after": 10});
+        let r: EditResult = serde_json::from_value(v).unwrap();
+        assert!(!r.is_dirty);
+    }
+
+    #[test]
+    fn save_result_roundtrip() {
+        let r = SaveResult {
+            path: "/tmp/foo.md".into(),
+            bytes: 42,
+            was_dirty: true,
+        };
+        let v = serde_json::to_value(&r).unwrap();
+        assert_eq!(
+            v,
+            serde_json::json!({"path": "/tmp/foo.md", "bytes": 42, "was_dirty": true})
+        );
+        let back: SaveResult = serde_json::from_value(v).unwrap();
+        assert_eq!(back, r);
     }
 
     #[test]
@@ -589,6 +638,7 @@ mod tests {
             ERR_DIRTY_QUIT_REFUSED,
             ERR_REPLY_TIMEOUT,
             ERR_SECTION_NOT_FOUND,
+            ERR_DIRTY_RELOAD_REFUSED,
         ];
         for &c in &codes {
             assert!((-32099..=-32000).contains(&c), "code {c} outside app range");
