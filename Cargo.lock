@@ -3993,6 +3993,7 @@ dependencies = [
  "scrybe-mermaid",
  "scrybe-render",
  "scrybe-rpc",
+ "scrybe-tools",
  "serde",
  "serde_json",
  "tempfile",
