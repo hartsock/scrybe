@@ -11,9 +11,9 @@ keywords = ["mermaid", "svg", "render", "scrybe"]
 categories = ["text-processing"]
 
 [dependencies]
-# SVG-only for now (default-features = false drops the `png`/`cli` features and
-# their resvg/clap trees). PNG-via-resvg lands as the next increment.
-mermaid-rs-renderer = { workspace = true }
+# `png` enables the crate's resvg/tiny-skia rasterizer (its own, proven path);
+# `cli`/clap stay off (workspace dep sets default-features = false).
+mermaid-rs-renderer = { workspace = true, features = ["png"] }
 anyhow.workspace = true
 sha2.workspace = true
 hex.workspace = true
