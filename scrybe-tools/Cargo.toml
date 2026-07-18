@@ -13,9 +13,12 @@ categories = ["command-line-utilities"]
 [dependencies]
 scrybe-core.workspace = true
 scrybe-render.workspace = true
+scrybe-mermaid.workspace = true
+scrybe-mermaid-render.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
+uuid.workspace = true
 
 [lints]
 workspace = true
