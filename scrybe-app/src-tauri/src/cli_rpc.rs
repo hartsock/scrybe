@@ -228,6 +228,7 @@ fn dispatch(app: &AppHandle, req: &Request) -> Response {
         "section" => handle_section(app, req),
         "edit" => handle_edit(app, req),
         "list_tabs" => handle_list_tabs(app, req),
+        "reload" => handle_reload(app, req),
         other => Response::err(
             req.id,
             ERR_METHOD_NOT_FOUND,
@@ -262,6 +263,26 @@ fn handle_open(app: &AppHandle, req: &Request) -> Response {
 /// its tab state and replies with `{ tabs: [TabInfo, ...] }` (#46).
 fn handle_list_tabs(app: &AppHandle, req: &Request) -> Response {
     dispatch_with_reply(app, req, "scrybe://cli-list-tabs", serde_json::json!({}))
+}
+
+/// `reload` — re-read an open tab from disk into its live buffer (a first-class
+/// socket op, replacing the `/tmp/scrybe-reload-tab.txt` poke). The frontend
+/// reloads the tab and replies with `{ path, bytes, was_dirty }`.
+fn handle_reload(app: &AppHandle, req: &Request) -> Response {
+    let params: scrybe_rpc::ReloadParams = match parse_params(req) {
+        Ok(p) => p,
+        Err(r) => return r,
+    };
+    let path = match canonical(&params.path) {
+        Ok(p) => p,
+        Err(r) => return Response::err(req.id, ERR_INVALID_PARAMS, r),
+    };
+    dispatch_with_reply(
+        app,
+        req,
+        "scrybe://cli-reload",
+        serde_json::json!({ "path": path, "force": params.force }),
+    )
 }
 
 fn handle_save(app: &AppHandle, req: &Request) -> Response {
