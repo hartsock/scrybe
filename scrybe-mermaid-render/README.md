@@ -23,8 +23,13 @@ post-processing the crate's output. See `docs/design/mcp-rebuild.md` and
 - `render_svg_with_source(source) -> Result<String>` — SVG + an injected
   `<metadata>` element (namespace `https://scrybe.ai/ns/mermaid`) carrying the
   escaped source and its SHA-256.
+- `render_png(source) -> Result<Vec<u8>>` — Mermaid → PNG bytes, via the crate's
+  own resvg/tiny-skia rasterizer (`png` feature). Verified end-to-end: produces a
+  real `PNG image data … 8-bit/color RGBA` file.
+- `source_sha256(source) -> String` — the digest shared with the PNG iTXt codec.
 
 ## Next
 
-PNG-via-resvg (`render_png`), then the PNG iTXt `mermaid_to_png` tool (#119)
-which embeds `source + uuid + sha256` in the PNG metadata.
+The PNG iTXt `mermaid_to_png` tool (#119), which renders via `render_png` and
+embeds `source + uuid + sha256` in the PNG metadata (requires adding `uuid` to
+the `scrybe-mermaid` iTXt payload).

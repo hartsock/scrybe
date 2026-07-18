@@ -29,4 +29,13 @@ fn main() {
     } else {
         println!("recovered src : <none found>");
     }
+
+    // Rasterize to PNG and write it out so it can be opened / inspected.
+    let png = scrybe_mermaid_render::render_png(source).expect("render_png");
+    let mut out = std::env::temp_dir();
+    out.push("scrybe-provenance-drive.png");
+    std::fs::write(&out, &png).expect("write png");
+    println!("png bytes     : {}", png.len());
+    println!("png magic ok  : {}", png.starts_with(b"\x89PNG\r\n\x1a\n"));
+    println!("png written   : {}", out.display());
 }

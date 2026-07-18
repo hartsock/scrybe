@@ -12,7 +12,10 @@
 //! post-processing that SVG. PNG-via-resvg and the PNG iTXt `mermaid_to_png`
 //! tool (#119) build on top of this.
 
-use anyhow::Result;
+use std::sync::atomic::{AtomicU64, Ordering};
+
+use anyhow::{Context, Result};
+use mermaid_rs_renderer::{write_output_png, Config};
 use sha2::{Digest, Sha256};
 
 /// XML namespace for Scrybe's Mermaid provenance metadata.
@@ -21,6 +24,40 @@ pub const SCRYBE_MERMAID_NS: &str = "https://scrybe.ai/ns/mermaid";
 /// Render Mermaid `source` to an SVG string (pure Rust, via `mermaid-rs-renderer`).
 pub fn render_svg(source: &str) -> Result<String> {
     mermaid_rs_renderer::render(source)
+}
+
+/// Render Mermaid `source` to PNG bytes, via the adopted crate's own resvg/
+/// tiny-skia rasterizer (its proven path). Returns the encoded PNG in memory.
+///
+/// The crate exposes rasterization only as a write-to-file (`write_output_png`),
+/// so we round-trip through a uniquely-named file in the **platform temp dir**
+/// (`std::env::temp_dir()`, never a hardcoded `/tmp` — see #135) and read the
+/// bytes back. The temp file is removed on the way out.
+pub fn render_png(source: &str) -> Result<Vec<u8>> {
+    let svg = render_svg(source)?;
+    svg_to_png(&svg)
+}
+
+/// Rasterize an SVG string to PNG bytes.
+fn svg_to_png(svg: &str) -> Result<Vec<u8>> {
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+    let config = Config::default();
+    let mut path = std::env::temp_dir();
+    // Unique across concurrent calls (counter) and processes (pid) so parallel
+    // test threads don't collide on the same file.
+    let n = COUNTER.fetch_add(1, Ordering::Relaxed);
+    path.push(format!(
+        "scrybe-mermaid-render-{}-{n}.png",
+        std::process::id()
+    ));
+
+    let result = (|| {
+        write_output_png(svg, &path, &config.render, &config.theme)
+            .context("rasterize SVG to PNG")?;
+        std::fs::read(&path).context("read rasterized PNG")
+    })();
+    let _ = std::fs::remove_file(&path);
+    result
 }
 
 /// Render to SVG and inject Scrybe provenance: a `<metadata>` element carrying
@@ -82,6 +119,22 @@ mod tests {
         let svg =
             render_svg("sequenceDiagram\n    Alice->>Bob: Hello\n    Bob-->>Alice: Hi").unwrap();
         assert!(svg.contains("<svg"), "expected an <svg> root");
+    }
+
+    #[test]
+    fn render_png_produces_valid_png_bytes() {
+        let png = render_png("graph TD; A[Start]-->B[End]").unwrap();
+        // PNG 8-byte signature.
+        assert!(
+            png.starts_with(b"\x89PNG\r\n\x1a\n"),
+            "expected a PNG signature, got {:?}",
+            &png[..png.len().min(8)]
+        );
+        assert!(
+            png.len() > 100,
+            "PNG should be non-trivial, got {} bytes",
+            png.len()
+        );
     }
 
     #[test]
