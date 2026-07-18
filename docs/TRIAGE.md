@@ -79,15 +79,19 @@ remainder · `explore-spike` = time-boxed decision, not build work.
 | 119 | keep | **v0.4** | — | **PRIORITY.** LLM-callable Mermaid→PNG skill (iTXt source+uuid+sha256). The `/mermaid-png` skill already exists; gap is the MCP-native surface + `mermaid_to_png` tool. |
 | 28 | keep | v0.5 | — | Render inline `![alt](diagram.png)` PNGs carrying iTXt `mermaid-source`. Rides `reload`'s live re-render pass. |
 
-### Mermaid renderer — ADOPT `mermaid-rs-renderer` (#37, gated on #132)
+### Mermaid renderer — ADOPTED `mermaid-rs-renderer` (#37, #132 ✓ PASSED)
 
-> **Re-scope (2026-07-13):** the milestones below reflect the *original* build
-> plan and match the current GitHub milestone assignments. Per the #37 decision,
-> on the **#132** spike-Pass the build issues **#52–#75 close** as
-> provided-by-dependency (and PR #99 closes); **#76–#85 stay, re-scoped** to
-> wrapper bits (PNG-via-resvg, PyO3, pin-and-gate conformance). The renderer's
-> Scrybe-only value-add — embedding source in SVG `<metadata>` / PNG iTXt — is
-> **kept in-house**. See `ROADMAP.md` → "The renderer epic (#37): adopted, not built".
+> **DONE (2026-07-17):** the **#132** spike was *run* and **passed** —
+> `mermaid-rs-renderer` v0.3.1 renders the MVP flowchart + sequence corpus to
+> valid SVG (pure Rust, no `mmdc`). Disposition applied: **#52–#76 CLOSED** as
+> provided-by-dependency (+ PR #99); **#77–#85 re-scoped** (kept open). The
+> `scrybe-mermaid-render` wrapper shipped (#171/#172) and **#119 is closed**
+> (`scrybe mermaid png`). **#37 pulled forward to v0.5.** The table below is the
+> *original* build plan — historical; trust GitHub for live state.
+>
+> **Prior re-scope (2026-07-13):** milestones below reflect the original build
+> plan; the renderer's Scrybe value-add — source in SVG `<metadata>` / PNG iTXt —
+> is kept in-house. See `ROADMAP.md` → "The renderer epic (#37): adopted, not built".
 | # | Disp. | Milestone | Blocked by | Note |
 |---|---|---|---|---|
 | 37 | keep | v0.6→v0.11 | — | Umbrella; closes with its last child #85. |
