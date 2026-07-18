@@ -22,6 +22,7 @@ pub(crate) fn specs() -> Vec<ToolSpec> {
         find_spec(),
         section_spec(),
         edit_spec(),
+        reload_spec(),
     ]
 }
 
@@ -226,6 +227,41 @@ fn edit_spec() -> ToolSpec {
     }
 }
 
+// ── reload ────────────────────────────────────────────────────────────────────
+
+fn reload_spec() -> ToolSpec {
+    ToolSpec {
+        name: "reload",
+        description: "Re-read an open tab from disk into its live buffer (picks up \
+            external edits). Address the tab by `path`; pass `force: true` to \
+            discard unsaved edits. Returns `{ path, bytes, was_dirty }`. Requires a \
+            live app; a first-class socket op, replacing the old /tmp poke.",
+        input_schema: || {
+            json!({
+                "type": "object",
+                "properties": {
+                    "path": { "type": "string" },
+                    "force": { "type": "boolean", "description": "Discard unsaved edits." }
+                },
+                "required": ["path"]
+            })
+        },
+        data_schema: DataSchema {
+            version: DATA_VERSION,
+            schema: || json!({ "type": "object" }),
+        },
+        mutates: true,
+        facet: Facet::Editor,
+        handler: |ctx, args| {
+            let params = json!({
+                "path": str_arg(args, "path"),
+                "force": args.get("force").and_then(Value::as_bool).unwrap_or(false),
+            });
+            dispatch(ctx, "reload", "reload", params)
+        },
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -281,7 +317,7 @@ mod tests {
     #[test]
     fn all_editor_tools_are_registered_and_no_app_is_a_business_failure() {
         let reg = Registry::default();
-        for name in ["open", "read", "find", "section", "edit"] {
+        for name in ["open", "read", "find", "section", "edit", "reload"] {
             assert!(reg.get(name).is_some(), "missing tool: {name}");
         }
         // No live app → business tool_error, never an engine fault.

@@ -892,6 +892,36 @@ listen<{ id: number; data: unknown }>("scrybe://cli-list-tabs", async event => {
   await reply(id, { result: { tabs } });
 }).catch(console.error);
 
+// `scrybe reload <path>` / MCP `reload` — re-read an open tab from disk into its
+// live buffer (first-class socket op, retiring the /tmp/scrybe-reload-tab.txt poll).
+listen<{ id: number; data: { path: string; force: boolean } }>("scrybe://cli-reload", async event => {
+  const { id, data } = event.payload;
+  const tab = state.tabs.find(t => t.path === data.path);
+  if (!tab) {
+    await reply(id, { error: { code: ERR_TAB_NOT_OPEN, message: `not open: ${data.path}` } });
+    return;
+  }
+  const wasDirty = tab.isDirty;
+  if (wasDirty && !data.force) {
+    await reply(id, { error: { code: -32005, message: `unsaved edits in ${data.path} — pass force to discard` } });
+    return;
+  }
+  try {
+    const content = await invoke<string>("read_file", { path: data.path });
+    state.updateContent(tab.id, content);
+    state.markClean(tab.id);
+    if (state.activeTabId === tab.id) {
+      swapDocument(view, content);
+      preview.render(content);
+    }
+    redrawTabs();
+    const bytes = new TextEncoder().encode(content).length;
+    await reply(id, { result: { path: data.path, bytes, was_dirty: wasDirty } });
+  } catch (err) {
+    await reply(id, { error: { code: -32603, message: `reload failed: ${err instanceof Error ? err.message : err}` } });
+  }
+}).catch(console.error);
+
 // `scrybe find <pattern> [paths...]` — regex/literal grep across open tabs
 // (or named paths, falling back to disk for non-open ones).
 interface FindRequest {

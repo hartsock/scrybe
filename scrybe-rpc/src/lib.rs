@@ -166,6 +166,26 @@ pub struct ListTabsResult {
     pub tabs: Vec<TabInfo>,
 }
 
+/// Params for `reload`: re-read an open tab from disk into its live buffer.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ReloadParams {
+    /// Canonical path of the open tab to reload.
+    pub path: String,
+    /// Reload even if the buffer has unsaved edits (discarding them).
+    #[serde(default)]
+    pub force: bool,
+}
+
+/// Result of `reload`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ReloadResult {
+    pub path: String,
+    /// Bytes re-read from disk.
+    pub bytes: u64,
+    /// Whether the buffer had unsaved edits at reload time.
+    pub was_dirty: bool,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct FindParams {
     pub pattern: String,
