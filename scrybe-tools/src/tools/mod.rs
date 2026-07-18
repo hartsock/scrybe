@@ -11,10 +11,12 @@ use crate::Registry;
 pub mod lint;
 pub mod mermaid;
 pub mod render;
+pub mod tabs;
 
 /// Register every built-in tool into `reg`.
 pub(crate) fn register_defaults(reg: &mut Registry) {
     reg.register(render::spec());
     reg.register(lint::spec());
     reg.register(mermaid::spec());
+    reg.register(tabs::spec());
 }

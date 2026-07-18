@@ -46,19 +46,30 @@ impl McpServer {
     /// data — the tool ran and told the agent "no"). The typed payload is mirrored
     /// under `data`, with a compact form in `text`.
     fn call_shared(&self, name: &str, args: &Value) -> Value {
-        // Registry tools served here are pure/headless for now; stateful tools
-        // route via `Ctx::live()` (LiveApp) as they migrate off the legacy path.
-        let ctx = scrybe_tools::Ctx::headless();
+        // Dial the live app (`LiveApp`) so stateful tools (e.g. `list_tabs`) can
+        // reach it; pure tools ignore the transport and work regardless.
+        let ctx = scrybe_tools::Ctx::live();
         match self.tools.call(name, &ctx, args) {
             Err(e) => serde_json::json!({
                 "content": [{"type": "text", "text": e.to_string()}],
                 "isError": true,
             }),
-            Ok(outcome) => serde_json::json!({
-                "content": [{"type": "text", "text": outcome.data.to_string()}],
-                "isError": false,
-                "data": outcome.data,
-            }),
+            Ok(outcome) => {
+                let mut data = outcome.data;
+                // A business failure travels *inside* data (isError stays false —
+                // the tool ran and said "no"); design §5.3.
+                if let (Some(obj), Some(te)) = (data.as_object_mut(), &outcome.tool_error) {
+                    obj.insert(
+                        "tool_error".to_string(),
+                        serde_json::json!({ "code": te.code, "message": te.message }),
+                    );
+                }
+                serde_json::json!({
+                    "content": [{"type": "text", "text": data.to_string()}],
+                    "isError": false,
+                    "data": data,
+                })
+            }
         }
     }
 
@@ -408,5 +419,33 @@ mod tests {
         });
         let resp = s.handle(&req).unwrap();
         assert_eq!(resp["result"]["isError"], true);
+    }
+
+    #[test]
+    fn test_list_tabs_is_a_shared_tool_and_never_engine_faults() {
+        let mut s = server();
+        // It's offered in tools/list…
+        let list = s
+            .handle(&json!({"jsonrpc":"2.0","id":15,"method":"tools/list"}))
+            .unwrap();
+        let names: Vec<&str> = list["result"]["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|t| t["name"].as_str().unwrap())
+            .collect();
+        assert!(names.contains(&"list_tabs"));
+
+        // …and calling it is never an engine fault: with a live app it returns
+        // the tabs; with none it's a business `tool_error` (isError stays false).
+        let resp = s
+            .handle(&json!({
+                "jsonrpc":"2.0","id":16,"method":"tools/call",
+                "params":{"name":"list_tabs","arguments":{}}
+            }))
+            .unwrap();
+        assert_eq!(resp["result"]["isError"], false);
+        assert_eq!(resp["result"]["data"]["kind"], "list_tabs");
+        assert!(resp["result"]["data"]["tabs"].is_array());
     }
 }

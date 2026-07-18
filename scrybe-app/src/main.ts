@@ -878,6 +878,20 @@ listen<{ id: number; data: { path: string } }>("scrybe://cli-read", async event 
   });
 }).catch(console.error);
 
+// `scrybe tabs` / MCP `list_tabs` — the live set of open tabs (#46). No params;
+// enumerate our tab state into `TabInfo`s and reply.
+listen<{ id: number; data: unknown }>("scrybe://cli-list-tabs", async event => {
+  const { id } = event.payload;
+  const tabs = state.tabs.map(t => ({
+    path: t.path ?? "",
+    title: t.title,
+    is_dirty: t.isDirty,
+    view_mode: t.viewMode,
+    active: t.id === state.activeTabId,
+  }));
+  await reply(id, { result: { tabs } });
+}).catch(console.error);
+
 // `scrybe find <pattern> [paths...]` — regex/literal grep across open tabs
 // (or named paths, falling back to disk for non-open ones).
 interface FindRequest {

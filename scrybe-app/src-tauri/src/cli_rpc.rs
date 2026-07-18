@@ -227,6 +227,7 @@ fn dispatch(app: &AppHandle, req: &Request) -> Response {
         "find" => handle_find(app, req),
         "section" => handle_section(app, req),
         "edit" => handle_edit(app, req),
+        "list_tabs" => handle_list_tabs(app, req),
         other => Response::err(
             req.id,
             ERR_METHOD_NOT_FOUND,
@@ -255,6 +256,12 @@ fn handle_open(app: &AppHandle, req: &Request) -> Response {
     // read/edit hit "not open" (#141). The frontend's `scrybe://cli-open`
     // handler calls `cli_rpc_reply` when the tab is ready.
     dispatch_with_reply(app, req, "scrybe://cli-open", path)
+}
+
+/// `list_tabs` — the live set of open tabs. No params; the frontend enumerates
+/// its tab state and replies with `{ tabs: [TabInfo, ...] }` (#46).
+fn handle_list_tabs(app: &AppHandle, req: &Request) -> Response {
+    dispatch_with_reply(app, req, "scrybe://cli-list-tabs", serde_json::json!({}))
 }
 
 fn handle_save(app: &AppHandle, req: &Request) -> Response {
