@@ -171,8 +171,17 @@ for line in sys.stdin:
 "#;
 
     async fn spawn_echo_server() -> Result<StdioTransport> {
-        // Write script to a temp file so we can spawn it.
-        let tmp = std::env::temp_dir().join("scrybe_mcp_echo_server.py");
+        // Write the script to a UNIQUE temp file per call. A shared fixed name
+        // races under parallel `cargo test` — one test truncates/rewrites the
+        // file while another is spawning it, so `python3` reads a half-written
+        // script and the init handshake times out (flaky CI failure).
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static N: AtomicU64 = AtomicU64::new(0);
+        let tmp = std::env::temp_dir().join(format!(
+            "scrybe_mcp_echo_server_{}_{}.py",
+            std::process::id(),
+            N.fetch_add(1, Ordering::Relaxed)
+        ));
         tokio::fs::write(&tmp, ECHO_SERVER_PY)
             .await
             .map_err(ScrybeError::Io)?;

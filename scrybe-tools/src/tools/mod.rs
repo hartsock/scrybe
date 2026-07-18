@@ -8,6 +8,7 @@
 
 use crate::Registry;
 
+pub mod editor;
 pub mod lint;
 pub mod mermaid;
 pub mod render;
@@ -19,4 +20,7 @@ pub(crate) fn register_defaults(reg: &mut Registry) {
     reg.register(lint::spec());
     reg.register(mermaid::spec());
     reg.register(tabs::spec());
+    for spec in editor::specs() {
+        reg.register(spec);
+    }
 }
