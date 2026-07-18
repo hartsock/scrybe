@@ -91,10 +91,21 @@ fn which_scrybe_docx() -> Result<String, String> {
     )
 }
 
-/// Registry of all scrybe MCP tools plus the open-document workspace.
+/// Legacy hand-rolled registry. **Mostly DEAD as of #122 Phase 2.**
+///
+/// The MCP server now prefers the shared `scrybe-tools` registry
+/// (`server.rs::call_shared`), so the stateful editor tools (open/read/find/
+/// section/edit/reload) and render/lint route **path-based through the socket**
+/// (`LiveApp`). The `workspace`/`id_map` fields below and the id-based `tool_*`
+/// handlers they back are therefore **unreachable** — deduped out of
+/// `tools/list`, never reached in `tools/call`. They remain only until the
+/// dead-code deletion tracked in **#181** (full removal map there). Still-live
+/// legacy tools: embed/extract/quit/close_tab/logs/state/set_theme/view_mode/
+/// set_vim/export.
 pub struct ToolRegistry {
+    /// DEAD (see struct doc / #181): only the removed id-based handlers used it.
     workspace: Workspace,
-    /// Maps the string representation of a DocumentId to the actual id.
+    /// DEAD (see struct doc / #181): the DocumentId→id map for the same handlers.
     id_map: HashMap<String, scrybe_core::workspace::DocumentId>,
 }
 
