@@ -315,6 +315,19 @@ enum MermaidCmd {
         #[arg(value_name = "PNG")]
         png: std::path::PathBuf,
     },
+    /// Render a Mermaid diagram to PNG with its source embedded (uuid + sha256).
+    ///
+    /// Pure-Rust rendering (no `mmdc`) via the shared `mermaid_to_png` tool, so
+    /// the produced PNG is losslessly round-trippable — recover the source with
+    /// `scrybe mermaid extract`.
+    Png {
+        /// File containing the Mermaid source (e.g. a `.mmd` file).
+        #[arg(value_name = "SOURCE_FILE")]
+        input: std::path::PathBuf,
+        /// Output PNG path.
+        #[arg(short, long, value_name = "OUT")]
+        out: std::path::PathBuf,
+    },
 }
 
 /// Known subcommand names. Anything else in argv[1] is treated as a path to open.
@@ -475,6 +488,26 @@ fn main() -> anyhow::Result<()> {
                         }
                     }
                 }
+            }
+            MermaidCmd::Png { input, out } => {
+                let source = std::fs::read_to_string(&input)?;
+                let reg = scrybe_tools::Registry::default();
+                let outcome = reg.call(
+                    "mermaid_to_png",
+                    &scrybe_tools::Ctx::headless(),
+                    &serde_json::json!({
+                        "source": source,
+                        "output_path": out.to_string_lossy(),
+                    }),
+                )?;
+                if let Some(err) = outcome.tool_error {
+                    eprintln!("scrybe mermaid png: {}", err.message);
+                    std::process::exit(1);
+                }
+                let d = &outcome.data;
+                println!("Wrote {}", d["png_path"].as_str().unwrap_or(""));
+                println!("  uuid   {}", d["uuid"].as_str().unwrap_or(""));
+                println!("  sha256 {}", d["sha256"].as_str().unwrap_or(""));
             }
         },
 

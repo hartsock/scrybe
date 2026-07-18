@@ -4071,10 +4071,13 @@ name = "scrybe-tools"
 version = "0.4.0"
 dependencies = [
  "scrybe-core",
+ "scrybe-mermaid",
+ "scrybe-mermaid-render",
  "scrybe-render",
  "serde",
  "serde_json",
  "thiserror 2.0.18",
+ "uuid",
 ]
 
 [[package]]

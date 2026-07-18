@@ -15,7 +15,7 @@
 pub mod codec;
 pub mod error;
 
-pub use codec::{embed, extract};
+pub use codec::{embed, embed_with_uuid, extract};
 pub use error::MermaidError;
 
 /// The result of embedding or extracting Mermaid source.
