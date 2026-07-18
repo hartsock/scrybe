@@ -4074,6 +4074,7 @@ dependencies = [
  "scrybe-mermaid",
  "scrybe-mermaid-render",
  "scrybe-render",
+ "scrybe-rpc",
  "serde",
  "serde_json",
  "thiserror 2.0.18",

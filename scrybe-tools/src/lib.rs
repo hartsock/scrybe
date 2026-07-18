@@ -152,7 +152,7 @@ pub trait Transport {
 }
 
 /// No socket: only the pure, GUI-free subset of tools runs. GUI/stateful tools
-/// get a clean `NoApp`. The `LiveApp` transport arrives in Phase 2.
+/// get a clean `NoApp`.
 pub struct Headless;
 
 impl Transport for Headless {
@@ -162,6 +162,30 @@ impl Transport for Headless {
 
     fn is_live(&self) -> bool {
         false
+    }
+}
+
+/// Dials the **live app** over `~/.scrybe/sock` via `scrybe-rpc`'s client — the
+/// same wire the CLI uses, so a tool routed through this transport drives the
+/// running editor exactly like `scrybe <cmd>` does. When no app is running,
+/// `call` returns `NoApp` and pure tools should fall back to `Headless`.
+pub struct LiveApp;
+
+impl Transport for LiveApp {
+    fn call(&self, method: &str, params: Value) -> Result<Value, TransportError> {
+        match scrybe_rpc::client::send(method, params) {
+            Ok(resp) => match resp.error {
+                Some(err) => Err(TransportError::Io(format!("{}: {}", err.code, err.message))),
+                None => Ok(resp.result.unwrap_or(Value::Null)),
+            },
+            // The client says "no Scrybe running" when the socket isn't there.
+            Err(e) if e.contains("no Scrybe running") => Err(TransportError::NoApp),
+            Err(e) => Err(TransportError::Io(e)),
+        }
+    }
+
+    fn is_live(&self) -> bool {
+        scrybe_rpc::client::is_live()
     }
 }
 
@@ -176,6 +200,13 @@ impl Ctx {
     pub fn headless() -> Self {
         Self {
             transport: Box::new(Headless),
+        }
+    }
+
+    /// A context that dials the live app over `~/.scrybe/sock` (`LiveApp`).
+    pub fn live() -> Self {
+        Self {
+            transport: Box::new(LiveApp),
         }
     }
 
@@ -304,6 +335,20 @@ mod tests {
         let ctx = Ctx::headless();
         assert!(!ctx.transport.is_live());
         assert!(ctx.transport.call("open", json!({})).is_err());
+    }
+
+    #[test]
+    fn live_app_transport_is_wired_and_fails_cleanly_without_an_app() {
+        // Robust regardless of whether a dev app happens to be running: the call
+        // must never panic, and when no app is reachable it must error (NoApp),
+        // never silently succeed.
+        let ctx = Ctx::live();
+        if !ctx.transport.is_live() {
+            assert!(
+                ctx.transport.call("state", json!({})).is_err(),
+                "no live app → call must error"
+            );
+        }
     }
 
     #[test]
