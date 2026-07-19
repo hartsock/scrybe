@@ -821,12 +821,17 @@ listen<{ id: number; data: string }>("scrybe://cli-save", async event => {
     return;
   }
   const wasDirty = tab.isDirty;
+  // Snapshot the buffer before the await: keystrokes and concurrent socket
+  // edits mutate tab.content in place while the write is in flight. The
+  // snapshot is what save_file writes, so bytes must come from it, and the
+  // tab may only be marked clean if the buffer still matches what was saved.
+  const content = tab.content;
   try {
-    await invoke("save_file", { path: tab.path, content: tab.content });
+    await invoke("save_file", { path: tab.path, content });
     invoke("note_autosave", { path: tab.path }).catch(() => {});
-    state.markClean(tab.id);
+    if (tab.content === content) state.markClean(tab.id);
     redrawTabs();
-    const bytes = new TextEncoder().encode(tab.content).length;
+    const bytes = new TextEncoder().encode(content).length;
     await reply(id, { result: { path: tab.path, bytes, was_dirty: wasDirty } });
   } catch (err) {
     await reply(id, {

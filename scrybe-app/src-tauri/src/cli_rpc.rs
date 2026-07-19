@@ -4,12 +4,13 @@
 //! and accepts JSON-RPC 2.0 requests. Each request is dispatched onto a
 //! Tauri event broadcast to the frontend, which already owns tab state.
 //!
-//! Phase 1 methods (fire-and-forget): `save`, `close`, `quit`.
+//! Fire-and-forget methods: `close`, `quit`.
 //! Each emits a typed event to the frontend and acks the caller.
 //!
-//! Phase 2 methods (request-with-reply): `open`, `read`, `find`, `section`,
-//! `edit`. (`open` moved here so the caller blocks until the tab is actually
-//! created — removing the open→edit race, #141.)
+//! Request-with-reply methods: `open`, `save`, `read`, `find`, `section`,
+//! `edit`, `list_tabs`, `reload`. (`open` moved here so the caller blocks
+//! until the tab is actually created — removing the open→edit race, #141;
+//! `save` moved here so callers learn whether the write really happened.)
 //! These need data BACK from the frontend (buffer content, search hits,
 //! etc.). Pattern:
 //!   1. Server registers a oneshot channel keyed by request id in

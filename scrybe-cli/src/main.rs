@@ -553,15 +553,19 @@ fn main() -> anyhow::Result<()> {
             let canon = path.canonicalize().unwrap_or_else(|_| path.clone());
             match rpc_client::send("save", serde_json::json!({"path": canon.to_string_lossy()})) {
                 Ok(resp) => match resp.error {
-                    // Reply-correlated save reports { path, bytes, was_dirty }.
+                    // Reply-correlated save reports { path, bytes, was_dirty };
+                    // an older app replies the legacy {applied} ack with no
+                    // byte count — don't fabricate one.
                     None => {
                         let bytes = resp
                             .result
                             .as_ref()
                             .and_then(|r| r.get("bytes"))
-                            .and_then(serde_json::Value::as_u64)
-                            .unwrap_or(0);
-                        println!("Saved {} ({bytes} bytes)", canon.display());
+                            .and_then(serde_json::Value::as_u64);
+                        match bytes {
+                            Some(b) => println!("Saved {} ({b} bytes)", canon.display()),
+                            None => println!("Saved {}", canon.display()),
+                        }
                     }
                     // Not open: silent no-op per the documented CLI contract.
                     Some(e) if e.code == scrybe_rpc::ERR_TAB_NOT_OPEN => {}

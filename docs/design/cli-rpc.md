@@ -12,23 +12,23 @@ JSON-RPC 2.0, newline-delimited, one line per request and one per response. Tran
 
 ### Methods
 
-**Phase 1 — fire-and-forget GUI mutations:**
+**Fire-and-forget GUI mutations:**
+
+| Method | Params | Result |
+|---|---|---|
+| `close` | `{path}` | `{applied}` |
+| `quit`  | `{force}` | `{applied}` |
+
+**Request-with-reply:**
 
 | Method | Params | Result |
 |---|---|---|
 | `open`  | `{path}` | `{tab_id, reloaded}` |
-| `save`  | `{path}` | `{applied}` (false = file not open; no-op) |
-| `close` | `{path}` | `{applied}` |
-| `quit`  | `{force}` | `{applied}` |
-
-**Phase 2 — request-with-reply read-side:**
-
-| Method | Params | Result |
-|---|---|---|
+| `save`  | `{path}` | `{path, bytes, was_dirty}` |
 | `read` | `{path}` | `{path, content, is_dirty}` |
 | `find` | `{pattern, paths, literal, case_sensitive}` | `{hits: [{path, line, column, text}]}` |
 | `section` | `{path, heading}` | `{heading, level, content}` |
-| `edit` | `{path, start_line, end_line, content}` | `{applied, size_after}` |
+| `edit` | `{path, start_line, end_line, content}` | `{applied, size_after, is_dirty}` |
 
 `find` paths is optional (empty = search all open tabs). `section` heading match is case-insensitive substring; the section runs from the matched heading to the next heading of the same or shallower level.
 
@@ -36,10 +36,11 @@ JSON-RPC 2.0, newline-delimited, one line per request and one per response. Tran
 
 Standard JSON-RPC codes (`-32700` parse, `-32600` invalid request, `-32601` method not found, `-32602` invalid params, `-32603` internal). App-defined range starts at `-32000`:
 
-- `-32001` `ERR_TAB_NOT_OPEN` — `read`/`section`/`edit` against a path that isn't open in the GUI; `save`/`close` collapse this to `applied: false` instead.
+- `-32001` `ERR_TAB_NOT_OPEN` — `read`/`section`/`edit`/`save` against a path that isn't open in the GUI; `close` collapses this to `applied: false` instead. (The `scrybe save` CLI presents it as its documented silent no-op.)
 - `-32002` `ERR_DIRTY_QUIT_REFUSED` — `quit` with `force=false` and unsaved tabs exist.
 - `-32003` `ERR_REPLY_TIMEOUT` — frontend didn't reply within 5s. Caller can retry.
 - `-32004` `ERR_SECTION_NOT_FOUND` — `section` heading didn't match any heading in the document.
+- `-32005` `ERR_DIRTY_RELOAD_REFUSED` — `reload` with `force=false` on a tab with unsaved edits.
 
 ## Structure
 
