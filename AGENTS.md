@@ -36,11 +36,13 @@ scrybe-mcp-server tools
 | `view_mode` | Set active tab view mode (human: View button) | `mode` |
 | `set_vim` | Toggle Vim keybindings (human: Vim toggle) | `enabled` |
 | `export` | Export Markdown to Word (.docx) with Mermaid PNGs | `input`, `output?`, `no_diagrams?` |
+| `export_figures` | Export every Mermaid diagram in a document to sibling `<stem>_fig_NN.png` files (each embeds its source) | `path` |
 
 > **Parity rule:** every human control in scrybe-app has an MCP equivalent
-> and vice versa. The `state`/`set_theme`/`view_mode`/`set_vim`/`export`
-> tools mirror the path bar, theme dropdown, View button, Vim toggle, and
-> Export button respectively.
+> and vice versa. The `state`/`set_theme`/`view_mode`/`set_vim`/`export`/
+> `export_figures` tools mirror the path bar, theme dropdown, View button,
+> Vim toggle, the Export button, and the "Export Diagrams…" menu item
+> respectively.
 
 ### Document IDs
 

@@ -3916,6 +3916,7 @@ dependencies = [
  "scrybe-mcp-server",
  "scrybe-render",
  "scrybe-rpc",
+ "scrybe-tools",
  "scrybe-vcs",
  "serde",
  "serde_json",
@@ -4071,6 +4072,7 @@ dependencies = [
 name = "scrybe-tools"
 version = "0.5.0"
 dependencies = [
+ "anyhow",
  "scrybe-core",
  "scrybe-mermaid",
  "scrybe-mermaid-render",
@@ -4078,6 +4080,7 @@ dependencies = [
  "scrybe-rpc",
  "serde",
  "serde_json",
+ "tempfile",
  "thiserror 2.0.18",
  "uuid",
 ]

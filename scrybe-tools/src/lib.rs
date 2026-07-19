@@ -13,8 +13,11 @@
 
 use serde_json::Value;
 
+pub mod figures;
 pub mod lint;
 pub mod tools;
+
+pub use figures::{export_figures, plan_figures, FigurePlan, FigureResult};
 
 /// Tool group — drives progressive disclosure and feature gating (design §4).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
