@@ -432,7 +432,11 @@ jobs:
         # the binary's own --version comes from Cargo. If they diverge, scrybe-ai@X
         # would ship a binary reporting a different version. Fail loud instead.
         run: |
-          CRATE=$(sed -n '/\[workspace.package\]/,/^\[/{s/^version *= *"\([^"]*\)".*/\1/p}' Cargo.toml | head -1)
+          # `;` before `}` — BSD sed (macOS runners) requires it; GNU sed accepts it.
+          # Without it the extraction is empty on darwin and the assert fails
+          # spuriously (v0.5.0: both darwin npm binaries died here, skipping the
+          # npm umbrella publish).
+          CRATE=$(sed -n '/\[workspace.package\]/,/^\[/{s/^version *= *"\([^"]*\)".*/\1/p;}' Cargo.toml | head -1)
           if [ "$CRATE" != "$VERSION" ]; then
             echo "::error::tag v$VERSION != workspace.package.version $CRATE — bump Cargo.toml before tagging"
             exit 1
