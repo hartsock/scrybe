@@ -329,6 +329,13 @@ jobs:
           - { name: scrybe-core,       pkg: scrybe-core }
           - { name: scrybe-rpc,        pkg: scrybe-rpc }
           - { name: scrybe-render,     pkg: scrybe-render }
+          # New in v0.5 (#169/#171) — absent from this matrix at the v0.5.0
+          # release, so scrybe-mcp-server (pins scrybe-tools =X.Y.Z) could
+          # never resolve its deps and the publish chain broke deterministically.
+          # mermaid-render has no in-workspace deps; tools needs core, render,
+          # mermaid, mermaid-render, rpc — both must precede mcp-server.
+          - { name: scrybe-mermaid-render, pkg: scrybe-mermaid-render }
+          - { name: scrybe-tools,      pkg: scrybe-tools }
           - { name: scrybe-mcp-server, pkg: scrybe-mcp-server }
           - { name: scrybe-cli,        pkg: scrybe-cli }
 
