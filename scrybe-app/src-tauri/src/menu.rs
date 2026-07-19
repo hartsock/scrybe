@@ -40,6 +40,7 @@ pub const MENU_IDS: &[&str] = &[
     "theme_solarized",
     "toggle_vim",
     "toggle_wrap",
+    "close_window",
 ];
 
 /// Validate a menu event id against the contract. Returns the id back as
@@ -119,13 +120,9 @@ pub fn build(app: &AppHandle<Wry>) -> tauri::Result<Menu<Wry>> {
     )?;
 
     // ── View ────────────────────────────────────────────────────────────
-    let cycle_view = MenuItem::with_id(
-        app,
-        "cycle_view",
-        "Cycle View Mode",
-        true,
-        Some("CmdOrCtrl+Shift+V"),
-    )?;
+    // No accelerator: ⇧⌘V is macOS "Paste and Match Style" muscle memory,
+    // and the toolbar View button never had a shortcut either.
+    let cycle_view = MenuItem::with_id(app, "cycle_view", "Cycle View Mode", true, None::<&str>)?;
     let theme_default = CheckMenuItem::with_id(
         app,
         "theme_default",
@@ -172,6 +169,17 @@ pub fn build(app: &AppHandle<Wry>) -> tauri::Result<Menu<Wry>> {
     )?;
 
     // ── Window ──────────────────────────────────────────────────────────
+    // Close Window is a custom ⇧⌘W item (the predefined one carries ⌘W,
+    // which belongs to Close Tab here). ⌘W itself falls through to
+    // window-close in the frontend when no tab remains — macOS tabbed-app
+    // convention.
+    let close_window = MenuItem::with_id(
+        app,
+        "close_window",
+        "Close Window",
+        true,
+        Some("CmdOrCtrl+Shift+W"),
+    )?;
     let window = Submenu::with_items(
         app,
         "Window",
@@ -179,8 +187,14 @@ pub fn build(app: &AppHandle<Wry>) -> tauri::Result<Menu<Wry>> {
         &[
             &PredefinedMenuItem::minimize(app, None)?,
             &PredefinedMenuItem::maximize(app, None)?,
+            &PredefinedMenuItem::separator(app)?,
+            &close_window,
         ],
     )?;
+    // Register as the NSApp windows menu so macOS appends the standard
+    // window list + tiling items, matching what the default menu provided.
+    #[cfg(target_os = "macos")]
+    window.set_as_windows_menu_for_nsapp()?;
 
     *CHECK_ITEMS.lock().unwrap() = Some(CheckItems {
         theme_default,
