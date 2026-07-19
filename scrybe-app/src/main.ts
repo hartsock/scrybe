@@ -300,6 +300,10 @@ function publishState(): void {
       open_paths: state.tabs.map(t => t.path).filter((p): p is string => !!p),
     },
   }).catch(() => { /* state mirror is best-effort */ });
+  // Mirror the same state onto the native menu's check items (theme radio,
+  // Vim, Wrap) so menu, toolbar, and MCP can never disagree for long.
+  invoke("menu_sync", { theme: currentTheme, vim: vimEnabled, wrap: wrapEnabled })
+    .catch(() => { /* menu mirror is best-effort */ });
 }
 
 /// Update the selectable path bar to show the active tab's full path, and
@@ -658,6 +662,30 @@ invoke<string | null>("get_initial_file").then(file => {
   console.log("get_initial_file:", file);
   if (file) openFileByPath(file);
 }).catch(err => console.error("get_initial_file failed:", err));
+
+// Native menu bar (#184). Each item id routes to the same single-entry-point
+// function its toolbar/keyboard twin uses, so the human ↔ MCP parity rule
+// holds with no new tools. Predefined items (Edit menu, quit, …) are handled
+// by the OS and never arrive here.
+listen<string>("scrybe://menu", event => {
+  switch (event.payload) {
+    case "new_tab":     newTab(); break;
+    case "open_file":   document.getElementById("open-file")?.click(); break;
+    case "open_folder": document.getElementById("open-folder")?.click(); break;
+    case "save":        void saveActiveTabNow(); break;
+    case "reload":      void reloadActiveTabNow(); break;
+    case "export_docx": void exportActiveTabToWord(); break;
+    case "print":       void printActiveTab(); break;
+    case "close_tab":   if (state.activeTabId) closeTab(state.activeTabId); break;
+    case "cycle_view":  cyclePreviewMode(); break;
+    case "theme_default":   applyTheme("default"); break;
+    case "theme_dark":      applyTheme("dark"); break;
+    case "theme_solarized": applyTheme("solarized"); break;
+    case "toggle_vim":  setVimEnabled(!vimEnabled); break;
+    case "toggle_wrap": setWrapEnabled(!wrapEnabled); break;
+    default: console.warn("unknown menu action:", event.payload);
+  }
+}).catch(console.error);
 
 // When a second `scrybe open <path>` is run, the single-instance plugin
 // forwards the path here instead of spawning a new window.

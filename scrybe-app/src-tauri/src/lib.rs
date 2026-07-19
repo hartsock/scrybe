@@ -31,6 +31,7 @@
 //! Full editor integration (P4.2–P4.11) builds on this IPC bridge.
 
 mod cli_rpc;
+mod menu;
 
 use std::collections::{HashMap, HashSet};
 use std::process::{Child, Command, Stdio};
@@ -943,7 +944,10 @@ pub fn run() {
             get_initial_directory,
             get_initial_file,
             cli_rpc::cli_rpc_reply,
+            menu::menu_sync,
         ])
+        .menu(menu::build)
+        .on_menu_event(|app, event| menu::handle_event(app, &event))
         .setup(|app| {
             use notify::EventKind;
 
