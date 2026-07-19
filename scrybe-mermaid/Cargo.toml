@@ -25,6 +25,7 @@ png.workspace = true
 base64.workspace = true
 sha2.workspace = true
 hex.workspace = true
+uuid.workspace = true
 # auto-initialize is for Rust binaries that *embed* Python; this crate is
 # an extension module that Python loads. The flag breaks manylinux's
 # static-linked Python builds. Only the `extension-module` feature is

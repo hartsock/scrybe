@@ -227,6 +227,8 @@ fn dispatch(app: &AppHandle, req: &Request) -> Response {
         "find" => handle_find(app, req),
         "section" => handle_section(app, req),
         "edit" => handle_edit(app, req),
+        "list_tabs" => handle_list_tabs(app, req),
+        "reload" => handle_reload(app, req),
         other => Response::err(
             req.id,
             ERR_METHOD_NOT_FOUND,
@@ -255,6 +257,32 @@ fn handle_open(app: &AppHandle, req: &Request) -> Response {
     // read/edit hit "not open" (#141). The frontend's `scrybe://cli-open`
     // handler calls `cli_rpc_reply` when the tab is ready.
     dispatch_with_reply(app, req, "scrybe://cli-open", path)
+}
+
+/// `list_tabs` — the live set of open tabs. No params; the frontend enumerates
+/// its tab state and replies with `{ tabs: [TabInfo, ...] }` (#46).
+fn handle_list_tabs(app: &AppHandle, req: &Request) -> Response {
+    dispatch_with_reply(app, req, "scrybe://cli-list-tabs", serde_json::json!({}))
+}
+
+/// `reload` — re-read an open tab from disk into its live buffer (a first-class
+/// socket op, replacing the `/tmp/scrybe-reload-tab.txt` poke). The frontend
+/// reloads the tab and replies with `{ path, bytes, was_dirty }`.
+fn handle_reload(app: &AppHandle, req: &Request) -> Response {
+    let params: scrybe_rpc::ReloadParams = match parse_params(req) {
+        Ok(p) => p,
+        Err(r) => return r,
+    };
+    let path = match canonical(&params.path) {
+        Ok(p) => p,
+        Err(r) => return Response::err(req.id, ERR_INVALID_PARAMS, r),
+    };
+    dispatch_with_reply(
+        app,
+        req,
+        "scrybe://cli-reload",
+        serde_json::json!({ "path": path, "force": params.force }),
+    )
 }
 
 fn handle_save(app: &AppHandle, req: &Request) -> Response {
@@ -545,10 +573,19 @@ mod tests {
 
     #[test]
     fn canonical_resolves_existing_path() {
-        // /tmp always exists on Linux/macOS test runners.
-        let p = canonical("/tmp").unwrap();
-        // On macOS, /tmp resolves to /private/tmp; on Linux it stays /tmp.
-        assert!(p == "/tmp" || p == "/private/tmp");
+        // Use the platform temp dir, which exists on Linux, macOS, AND Windows.
+        // A hardcoded "/tmp" does not exist on Windows, so the old assertion
+        // panicked in the nightly `cargo test --workspace` there (#135). Compare
+        // against `std::fs::canonicalize` of the same directory — the exact call
+        // `canonical` makes — so the expected value is correct on every platform
+        // (Windows yields a `\\?\` verbatim path; macOS maps /tmp -> /private/tmp).
+        let tmp = std::env::temp_dir();
+        let want = std::fs::canonicalize(&tmp)
+            .expect("temp dir canonicalizes")
+            .to_string_lossy()
+            .into_owned();
+        let got = canonical(tmp.to_str().expect("temp dir path is valid UTF-8")).unwrap();
+        assert_eq!(got, want);
     }
 
     #[test]

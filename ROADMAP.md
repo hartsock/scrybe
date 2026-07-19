@@ -5,16 +5,45 @@ Copyright 2026 Shawn Hartsock and contributors
 
 # Scrybe ROADMAP — v0.4.0 → v1.0.0
 
-**Current:** `v0.2.0` (last pushed tag) · `0.2.1-dev` (working tree) — see
-[Version reconciliation](docs/TRIAGE.md#version-reconciliation-read-this-first).
+**Current:** `v0.4.0` — "Keystone", shipped 2026-07-14 (lock-step
+`[workspace.package]` version, #128/#144). **Active milestone: `v0.5.0` — "Parity".**
 **Target:** `v1.0.0`, delivered across milestones **v0.4.0 → v0.12.0** (the
 renderer epic now **adopts** an upstream crate — see below — so the back half
 compresses; 1.0 arrives sooner than the milestone count implies).
-**Created:** 2026-07-13 · **Maintained per:** [`.claude/skills/repository-roadmap/SKILL.md`](.claude/skills/repository-roadmap/SKILL.md)
+**Created:** 2026-07-13 · **Last reconciled:** 2026-07-17 · **Maintained per:** [`.claude/skills/repository-roadmap/SKILL.md`](.claude/skills/repository-roadmap/SKILL.md)
 
 > **GitHub issues are the state; this document is the map.** Every work item
 > carries a tracking issue number. When this document and GitHub disagree,
 > **GitHub wins** — reconcile before trusting the prose.
+
+## Reconciliation — 2026-07-17
+
+This roadmap had drifted from GitHub (the header still read `v0.2.0`). Verified
+against merged code + PRs and reconciled:
+
+- **`v0.4.0` "Keystone" shipped** (CHANGELOG, #128/#144). The `v0.4.0` section
+  below is now historical; live issue state is on GitHub.
+- **Closed as verified-done** (evidence in the closing PR): #108 (open→tab
+  appears; #134/#142/#143 + regression test), #45 (vim keys/themes; #105), #15
+  (fs-watcher reload; #11/#143), #136 (word-wrap; shipped 0.4.0/#138), and the
+  resolved spikes #114/#115 (both build-ours).
+- **`#120` (print)** shipped early (#153) though milestoned `v0.6.0`.
+- **New threads given a home** (were untracked): the **scrybe-tui viewer #154**
+  (re-scoped to the *delivered* viewer; remaining checklist split into follow-ups
+  #162–#167) and the **install/upgrade epic #146** (Part A shipped, #151).
+- **Windows CI**: the external nightly Windows check (#135) is now mirrored by a
+  `test-rust-windows` job in `ci.yml`, so Windows breakage is caught at PR time.
+- **Renderer adopted (moved up from v0.6):** the #132 spike was *run* and
+  **passed** → `mermaid-rs-renderer` v0.3.1 adopted; the `scrybe-mermaid-render`
+  wrapper shipped (#171 SVG+provenance, #172 render_png) and **#119 is closed**
+  (`scrybe mermaid png` + the `mermaid-png` skill). #52–#76 closed as
+  provided-by-dependency; #77–#85 re-scoped; **#37 pulled forward to v0.5**. See
+  "The renderer epic" below.
+- **#122 MCP rebuild in progress:** `scrybe-tools` registry now carries
+  `render` / `lint` / `mermaid_to_png` (#169/#170/#174); Phase 2 (dispatch
+  unification via `scrybe-rpc`) is next.
+- **Still genuinely open in `v0.4.0`**: #32 (content-root-relative path copy —
+  only full-path shipped).
 
 ## Ground-truth protocol
 
@@ -71,24 +100,24 @@ wrapper**:
 source → mermaid-rs-renderer::render → inject Scrybe <metadata> (sha256+source) → resvg → PNG
 ```
 
-**Gated on the [#132] fidelity spike** (bake-off vs `mmdc` on the MVP
-flowchart+sequence corpus using `scrybe-panels`; pin a version). Issue disposition:
+**[#132] spike — RUN and PASSED (2026-07-17).** A hands-on bake-off confirmed
+`mermaid-rs-renderer` **v0.3.1** renders the MVP flowchart + sequence corpus to
+valid SVG (pure Rust, no `mmdc`). Adopted; `merman` stays a documented fallback
+only (unresolved GitHub "license: other"). Disposition **APPLIED**:
 
-- **Close on #132-Pass — provided by the dependency:** #52–#75 (lexer, flowchart
-  + sequence parsers, Sugiyama/layout, SVG element emit) and **draft PR #99**.
-- **Keep, re-scoped to wrapper bits:** the `<metadata>` provenance injection
-  (Scrybe's value-add, above), PNG-via-resvg (#76–#78), PyO3 packaging
-  (#79–#82), and conformance (#83–#85) — the last **re-scoped** from "test our
-  parser" to "**pin + golden-SVG snapshots + upgrade gate + mmdc-parity
-  tracking**" of the dependency.
+- **Closed — provided by the dependency:** #52–#76 (lexer, parsers, Sugiyama /
+  layout, SVG emit, PNG-via-resvg) and draft **PR #99**.
+- **Kept, re-scoped to wrapper bits:** #77–#85 — conformance-track the *dependency*
+  (pin + golden snapshots + optional SSIM), PyO3 over the wrapper, and the
+  pin-and-gate / release tail.
 
-**Schedule impact:** the MVP renderer lands in **v0.6** (a wrapper, not a
-grammar), and the #52–#75 build issues close as the crate provides them rather
-than being implemented one milestone at a time. The kept bits (#76–#85) stay in
-their milestones, re-framed. Net: the renderer stops being the v0.6–v0.11 long
-pole. **The GitHub milestone assignments below are unchanged** — the renderer
-issues sit where they are until #132 lands and closes/re-scopes them (that is
-#132's job), so the doc and GitHub stay reconcilable.
+**Shipped:** the `scrybe-mermaid-render` wrapper — `render_svg` + Scrybe
+`<metadata>` provenance (#171) and `render_png` via resvg (#172) — and **#119 is
+closed**: `scrybe mermaid png` renders Mermaid → PNG with the source + UUID +
+SHA-256 embedded in iTXt, driven end-to-end (`png` → `extract` → `verify`).
+Because the renderer is now a *validated dependency* (not a 34-issue build),
+**#37 is pulled forward from v0.6 → v0.5**; it closes with its last child (#85,
+publish the wrapper). The v0.6–v0.11 renderer long pole is gone.
 
 [#132]: https://github.com/hartsock/scrybe/issues/132
 
@@ -110,12 +139,14 @@ This roadmap *sequences* existing plans; it does not replace them.
 | MCP rebuild / CLI↔MCP parity (native-modulex) | v0.4–v0.7 | **#122** (epic), #108 #46 #121 #28 #15 #123 #124 #125 #126 #127 |
 | **Conversational editing** (object IDs → grounding → patches) | v0.8–v0.10 | **#147** #148 #149 + [vision](docs/design/vision-conversational-editing.md); builds on **#122** |
 | **Mermaid provenance** (source in PNG/SVG metadata) ★ | v0.4–v0.6 | #119 #28 #121 #126 + #37 wrapper |
-| Mermaid renderer — **adopt** `mermaid-rs-renderer` | v0.6–v0.7 (+ gate #132) | **#37**, #132; #52–#75 close on pass, #76–#85 re-scoped |
+| Mermaid renderer — **ADOPTED** `mermaid-rs-renderer` v0.3.1 (#132 ✓) | v0.5 (pulled fwd) | **#37**; wrapper #171/#172 shipped, #119 closed; #52–#76 closed, #77–#85 re-scoped |
 | Human editor UX | v0.4–v0.7 | #32 #15 #109 #45 #111 #120 #44 |
 | scrybe-py library | v0.7–v0.8 | #6 #7 #8 |
 | Packaging / distribution / CI guardrails | v0.4, v0.11 | #116 #1 #2 #128 |
 | New feature plugins (v0) | v0.9, v0.12 | #31 #33 #34 |
 | Strategic explores (resolved) | v0.4 | #114 #115 → both **build-ours** |
+| **scrybe-tui viewer** (terminal lens on the AST) | v0.6 | **#154** (delivered viewer #155–#158; harness #159); follow-ups #162 #163 #164 (v0.6) · #165 #166 #167 (backlog) |
+| **Install / upgrade** — `scrybe upgrade` + npm shim | v0.5, v0.11 | **#146** (Part A shipped #151) |
 
 ### Conversational editing arc (post-#122)
 
@@ -139,7 +170,7 @@ v0.4–v0.7 rebuild.
 
 ---
 
-## v0.4.0 — "Keystone" (the next release)
+## v0.4.0 — "Keystone" (SHIPPED 2026-07-14)
 
 **Theme:** Make the MCP actually work and ship the priority Mermaid-PNG
 provenance skill (★), behind privacy guardrails, with the strategic spikes
@@ -190,9 +221,21 @@ independent editor quality-of-life increments.
 - Each MCP tool built this milestone ships **with** its CLI subcommand (parity-by-construction; the CI *gate* lands v0.7/#125).
 - `mcp-editing` and `repository-roadmap` skills are installable. (#127)
 
+> **Reconciliation:** the GitHub `v0.5.0` milestone also carries items absent
+> from the table above — `#137` (tab-reorder drag-and-drop, still open) plus
+> `#136` (word-wrap) and the bugs `#140`/`#141`, which were **pulled forward and
+> shipped in 0.4.0** (#138/#143). Trust the milestone, not this table:
+> `gh issue list --repo hartsock/scrybe --milestone "v0.5.0 — Parity" --state all`.
+
 ---
 
 ## v0.6.0 — "Grammar → Adopt"
+
+> **Renderer rows below are historical (done early).** The #132 spike passed and
+> the adoption was pulled forward to v0.5: the `scrybe-mermaid-render` wrapper
+> shipped (#171/#172), #119 closed, #52–#76 closed, #77–#85 re-scoped, #37 → v0.5.
+> See "The renderer epic (#37): adopted, not built" above. The MCP progressive-
+> disclosure + editor items remain v0.6.
 
 **Theme:** Deliver the Mermaid renderer by **adopting** a pure-Rust crate (not
 building it), inject Scrybe's SVG provenance ★, finish MCP progressive

@@ -34,6 +34,7 @@ SUBCOMMANDS
     save       Save an open tab's buffer to disk. Silent no-op if not open.
     close      Close a tab. Silent no-op if not open.
     quit       Quit the running Scrybe app. --force skips dirty-buffer prompt.
+    tabs       List the tabs open in the running app (path, dirty, active).
 
   Buffer-aware (require running Scrybe app + file open in a tab):
     read       Print the in-memory contents of an open buffer (sees
@@ -149,6 +150,13 @@ enum Command {
     Mermaid {
         #[command(subcommand)]
         cmd: MermaidCmd,
+    },
+
+    /// List the tabs open in the running Scrybe GUI (#46).
+    Tabs {
+        /// Output as JSON instead of a human-readable table.
+        #[arg(long)]
+        json: bool,
     },
 
     /// Open or refresh a tab in the running Scrybe GUI.
@@ -315,12 +323,25 @@ enum MermaidCmd {
         #[arg(value_name = "PNG")]
         png: std::path::PathBuf,
     },
+    /// Render a Mermaid diagram to PNG with its source embedded (uuid + sha256).
+    ///
+    /// Pure-Rust rendering (no `mmdc`) via the shared `mermaid_to_png` tool, so
+    /// the produced PNG is losslessly round-trippable — recover the source with
+    /// `scrybe mermaid extract`.
+    Png {
+        /// File containing the Mermaid source (e.g. a `.mmd` file).
+        #[arg(value_name = "SOURCE_FILE")]
+        input: std::path::PathBuf,
+        /// Output PNG path.
+        #[arg(short, long, value_name = "OUT")]
+        out: std::path::PathBuf,
+    },
 }
 
 /// Known subcommand names. Anything else in argv[1] is treated as a path to open.
 const SUBCOMMANDS: &[&str] = &[
-    "render", "lint", "mermaid", "open", "save", "close", "quit", "read", "find", "section",
-    "edit", "embed", "extract", "version", "help",
+    "render", "lint", "mermaid", "tabs", "open", "save", "close", "quit", "read", "find",
+    "section", "edit", "embed", "extract", "version", "help",
 ];
 
 fn main() -> anyhow::Result<()> {
@@ -476,6 +497,26 @@ fn main() -> anyhow::Result<()> {
                     }
                 }
             }
+            MermaidCmd::Png { input, out } => {
+                let source = std::fs::read_to_string(&input)?;
+                let reg = scrybe_tools::Registry::default();
+                let outcome = reg.call(
+                    "mermaid_to_png",
+                    &scrybe_tools::Ctx::headless(),
+                    &serde_json::json!({
+                        "source": source,
+                        "output_path": out.to_string_lossy(),
+                    }),
+                )?;
+                if let Some(err) = outcome.tool_error {
+                    eprintln!("scrybe mermaid png: {}", err.message);
+                    std::process::exit(1);
+                }
+                let d = &outcome.data;
+                println!("Wrote {}", d["png_path"].as_str().unwrap_or(""));
+                println!("  uuid   {}", d["uuid"].as_str().unwrap_or(""));
+                println!("  sha256 {}", d["sha256"].as_str().unwrap_or(""));
+            }
         },
 
         Command::Open { path } => match path {
@@ -543,6 +584,51 @@ fn main() -> anyhow::Result<()> {
             }
         }
 
+        Command::Tabs { json } => {
+            // The same shared `list_tabs` handler the MCP server uses.
+            let reg = scrybe_tools::Registry::default();
+            let outcome = reg
+                .call(
+                    "list_tabs",
+                    &scrybe_tools::Ctx::live(),
+                    &serde_json::json!({}),
+                )
+                .map_err(|e| anyhow::anyhow!("{e}"))?;
+            if let Some(err) = &outcome.tool_error {
+                if err.code == "no_live_app" {
+                    eprintln!("No Scrybe app is running.");
+                    std::process::exit(1);
+                }
+                anyhow::bail!("scrybe tabs: {}", err.message);
+            }
+            let data = &outcome.data;
+            if json {
+                println!("{}", serde_json::to_string_pretty(data)?);
+            } else {
+                let tabs = data["tabs"].as_array().cloned().unwrap_or_default();
+                if tabs.is_empty() {
+                    println!("No open tabs.");
+                } else {
+                    for t in &tabs {
+                        let active = if t["active"].as_bool().unwrap_or(false) {
+                            "*"
+                        } else {
+                            " "
+                        };
+                        let dirty = if t["is_dirty"].as_bool().unwrap_or(false) {
+                            "\u{25cf}"
+                        } else {
+                            " "
+                        };
+                        println!(
+                            "{active} {dirty} {:<8} {}",
+                            t["view_mode"].as_str().unwrap_or(""),
+                            t["path"].as_str().unwrap_or("")
+                        );
+                    }
+                }
+            }
+        }
         Command::Quit { force } => {
             match rpc_client::send("quit", serde_json::json!({"force": force})) {
                 Ok(resp) => match resp.error {

@@ -1,0 +1,26 @@
+[package]
+name = "scrybe-tui"
+version.workspace = true
+edition = "2021"
+description = "Scrybe TUI — a split-capable Markdown viewer for the terminal (ratatui)"
+license = "Apache-2.0"
+repository = "https://github.com/hartsock/scrybe"
+homepage = "https://github.com/hartsock/scrybe"
+readme = "README.md"
+keywords = ["markdown", "tui", "viewer", "terminal", "scrybe"]
+categories = ["command-line-utilities", "text-processing"]
+
+[lib]
+name = "scrybe_tui"
+path = "src/lib.rs"
+
+[[bin]]
+name = "scrybe-tui"
+path = "src/main.rs"
+
+[dependencies]
+scrybe-core.workspace = true
+anyhow.workspace = true
+clap.workspace = true
+ratatui.workspace = true
+crossterm.workspace = true

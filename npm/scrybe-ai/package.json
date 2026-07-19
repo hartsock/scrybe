@@ -1,0 +1,18 @@
+{
+  "name": "scrybe-ai",
+  "version": "0.0.0",
+  "description": "Umbrella installer for Scrybe.ai — the MCP-native Markdown editor (\"Python on the outside, Rust on the inside\"). Installs the `scrybe` CLI binary for your platform; no Rust toolchain or pip required.",
+  "keywords": ["scrybe", "scrybe-ai", "markdown", "mcp", "editor", "mermaid", "cli"],
+  "homepage": "https://github.com/hartsock/scrybe#readme",
+  "bugs": "https://github.com/hartsock/scrybe/issues",
+  "repository": { "type": "git", "url": "git+https://github.com/hartsock/scrybe.git", "directory": "npm/scrybe-ai" },
+  "license": "Apache-2.0",
+  "author": "Shawn Hartsock",
+  "type": "commonjs",
+  "bin": { "scrybe": "bin/scrybe.cjs" },
+  "files": ["bin/", "README.md"],
+  "engines": { "node": ">=18" },
+  "dependencies": {
+    "@scrybe-ai/cli": "0.0.0"
+  }
+}

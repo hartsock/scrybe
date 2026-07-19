@@ -1,0 +1,11 @@
+{
+  "name": "scrybe-npm-shim",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Build sources for Scrybe's npm packages (@scrybe-ai/cli, scrybe-ai + per-platform binaries). Not published — see cli/ and scrybe-ai/.",
+  "type": "module",
+  "scripts": {
+    "test": "node --test"
+  },
+  "license": "Apache-2.0"
+}

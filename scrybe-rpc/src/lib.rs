@@ -145,6 +145,47 @@ pub struct ReadResult {
     pub is_dirty: bool,
 }
 
+/// One open tab as seen over the socket (`list_tabs`).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct TabInfo {
+    /// Canonical path, or empty for an untitled buffer.
+    pub path: String,
+    /// Display title (usually the file name).
+    pub title: String,
+    /// Unsaved edits present.
+    pub is_dirty: bool,
+    /// Current view mode (`both` | `edit` | `preview`).
+    pub view_mode: String,
+    /// True for the currently focused tab.
+    pub active: bool,
+}
+
+/// Result of `list_tabs`: the live set of open tabs.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ListTabsResult {
+    pub tabs: Vec<TabInfo>,
+}
+
+/// Params for `reload`: re-read an open tab from disk into its live buffer.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ReloadParams {
+    /// Canonical path of the open tab to reload.
+    pub path: String,
+    /// Reload even if the buffer has unsaved edits (discarding them).
+    #[serde(default)]
+    pub force: bool,
+}
+
+/// Result of `reload`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ReloadResult {
+    pub path: String,
+    /// Bytes re-read from disk.
+    pub bytes: u64,
+    /// Whether the buffer had unsaved edits at reload time.
+    pub was_dirty: bool,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct FindParams {
     pub pattern: String,

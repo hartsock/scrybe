@@ -1,0 +1,25 @@
+[package]
+name = "scrybe-tools"
+version.workspace = true
+edition = "2021"
+description = "Scrybe tools — one ToolSpec registry shared by the CLI and the MCP server"
+license = "Apache-2.0"
+repository = "https://github.com/hartsock/scrybe"
+homepage = "https://github.com/hartsock/scrybe"
+readme = "README.md"
+keywords = ["mcp", "cli", "tools", "registry", "scrybe"]
+categories = ["command-line-utilities"]
+
+[dependencies]
+scrybe-core.workspace = true
+scrybe-render.workspace = true
+scrybe-mermaid.workspace = true
+scrybe-mermaid-render.workspace = true
+scrybe-rpc.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+uuid.workspace = true
+
+[lints]
+workspace = true

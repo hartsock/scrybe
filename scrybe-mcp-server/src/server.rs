@@ -16,7 +16,12 @@ use crate::tools::ToolRegistry;
 pub struct McpServer {
     /// Version string announced to clients.
     pub version: String,
+    /// Legacy hand-rolled registry — the source for tools not yet migrated.
     registry: ToolRegistry,
+    /// The shared `scrybe-tools` registry, **preferred** over `registry` for any
+    /// tool it provides, so the MCP surface and the CLI share one handler (#122
+    /// Phase 2). The MCP server is migrating to be a thin shim over this.
+    tools: scrybe_tools::Registry,
 }
 
 impl Default for McpServer {
@@ -31,7 +36,57 @@ impl McpServer {
         Self {
             version: env!("CARGO_PKG_VERSION").to_string(),
             registry: ToolRegistry::new(),
+            tools: scrybe_tools::Registry::default(),
         }
+    }
+
+    /// Dispatch a tool through the shared `scrybe-tools` registry and format the
+    /// MCP `tools/call` result. Engine faults (unknown tool / bad args) →
+    /// `isError: true`; a *business* `tool_error` stays `isError: false` (it is
+    /// data — the tool ran and told the agent "no"). The typed payload is mirrored
+    /// under `data`, with a compact form in `text`.
+    fn call_shared(&self, name: &str, args: &Value) -> Value {
+        // Dial the live app (`LiveApp`) so stateful tools (e.g. `list_tabs`) can
+        // reach it; pure tools ignore the transport and work regardless.
+        let ctx = scrybe_tools::Ctx::live();
+        match self.tools.call(name, &ctx, args) {
+            Err(e) => serde_json::json!({
+                "content": [{"type": "text", "text": e.to_string()}],
+                "isError": true,
+            }),
+            Ok(outcome) => {
+                let mut data = outcome.data;
+                // A business failure travels *inside* data (isError stays false —
+                // the tool ran and said "no"); design §5.3.
+                if let (Some(obj), Some(te)) = (data.as_object_mut(), &outcome.tool_error) {
+                    obj.insert(
+                        "tool_error".to_string(),
+                        serde_json::json!({ "code": te.code, "message": te.message }),
+                    );
+                }
+                serde_json::json!({
+                    "content": [{"type": "text", "text": data.to_string()}],
+                    "isError": false,
+                    "data": data,
+                })
+            }
+        }
+    }
+
+    /// MCP tool descriptors for the shared registry (`{name, description, inputSchema}`).
+    fn shared_tool_descriptors(&self) -> Vec<Value> {
+        self.tools
+            .names()
+            .into_iter()
+            .filter_map(|name| self.tools.get(name))
+            .map(|spec| {
+                serde_json::json!({
+                    "name": spec.name,
+                    "description": spec.description,
+                    "inputSchema": (spec.input_schema)(),
+                })
+            })
+            .collect()
     }
 
     /// Runs the stdio JSON-RPC loop until EOF.
@@ -83,20 +138,39 @@ impl McpServer {
             // Notifications have no id and expect no response.
             "notifications/initialized" => return None,
             "ping" => serde_json::json!({}),
-            "tools/list" => self.registry.list_tools_json(),
+            "tools/list" => {
+                // Legacy list, minus anything the shared registry now provides,
+                // plus the shared descriptors (shared registry wins on overlap).
+                let mut list = self.registry.list_tools_json();
+                let shared: std::collections::HashSet<&str> =
+                    self.tools.names().into_iter().collect();
+                if let Some(arr) = list.get_mut("tools").and_then(Value::as_array_mut) {
+                    arr.retain(|t| {
+                        !shared.contains(t.get("name").and_then(Value::as_str).unwrap_or(""))
+                    });
+                    arr.extend(self.shared_tool_descriptors());
+                }
+                list
+            }
             "tools/call" => {
                 let params = req.get("params")?;
                 let name = params["name"].as_str()?;
                 let args = params.get("arguments").unwrap_or(&Value::Null);
-                let content = self.registry.call_tool(name, args);
-                // A tool result carrying an `error` field is a failed call; set
-                // `isError` so agents can tell success from failure structurally
-                // instead of parsing the text payload.
-                let is_error = content.get("error").is_some();
-                serde_json::json!({
-                    "content": [{"type": "text", "text": content.to_string()}],
-                    "isError": is_error,
-                })
+                // Prefer the shared registry (parity with the CLI); fall back to
+                // the legacy registry for tools not yet migrated.
+                if self.tools.get(name).is_some() {
+                    self.call_shared(name, args)
+                } else {
+                    let content = self.registry.call_tool(name, args);
+                    // A legacy tool result carrying an `error` field is a failed
+                    // call; set `isError` so agents can tell success from failure
+                    // structurally instead of parsing the text payload.
+                    let is_error = content.get("error").is_some();
+                    serde_json::json!({
+                        "content": [{"type": "text", "text": content.to_string()}],
+                        "isError": is_error,
+                    })
+                }
             }
             other => {
                 // Unknown method → a real top-level JSON-RPC error object,
@@ -262,5 +336,116 @@ mod tests {
         let req = json!({"jsonrpc": "2.0", "id": 8, "method": "ping"});
         let resp = s.handle(&req).unwrap();
         assert_eq!(resp["jsonrpc"], "2.0");
+    }
+
+    // ── shared scrybe-tools registry (#122 Phase 2) ────────────────────────
+
+    #[test]
+    fn test_shared_render_carries_structured_data() {
+        // render now routes through the shared registry — same call, plus a
+        // typed `data` payload agents can read instead of parsing text.
+        let mut s = server();
+        let req = json!({
+            "jsonrpc": "2.0", "id": 11, "method": "tools/call",
+            "params": {"name": "render", "arguments": {"source": "# Hi"}}
+        });
+        let resp = s.handle(&req).unwrap();
+        assert_eq!(resp["result"]["isError"], false);
+        assert_eq!(resp["result"]["data"]["kind"], "render");
+        assert!(resp["result"]["data"]["html"]
+            .as_str()
+            .unwrap()
+            .contains("<h1"));
+    }
+
+    #[test]
+    fn test_tools_list_includes_mermaid_to_png() {
+        let mut s = server();
+        let req = json!({"jsonrpc": "2.0", "id": 12, "method": "tools/list"});
+        let resp = s.handle(&req).unwrap();
+        let names: Vec<&str> = resp["result"]["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|t| t["name"].as_str().unwrap())
+            .collect();
+        assert!(
+            names.contains(&"mermaid_to_png"),
+            "shared tool missing: {names:?}"
+        );
+        // Overlapping tools appear exactly once (shared wins, no duplicate).
+        assert_eq!(names.iter().filter(|&&n| n == "render").count(), 1);
+    }
+
+    #[test]
+    fn test_mermaid_to_png_over_mcp_round_trips() {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static N: AtomicU64 = AtomicU64::new(0);
+        let mut out = std::env::temp_dir();
+        out.push(format!(
+            "scrybe-mcp-mermaid-{}-{}.png",
+            std::process::id(),
+            N.fetch_add(1, Ordering::Relaxed)
+        ));
+
+        let mut s = server();
+        let req = json!({
+            "jsonrpc": "2.0", "id": 13, "method": "tools/call",
+            "params": {"name": "mermaid_to_png", "arguments": {
+                "source": "graph TD; A-->B", "output_path": out.to_string_lossy()
+            }}
+        });
+        let resp = s.handle(&req).unwrap();
+        assert_eq!(resp["result"]["isError"], false);
+        assert_eq!(resp["result"]["data"]["kind"], "mermaid_to_png");
+        assert!(resp["result"]["data"]["uuid"].as_str().unwrap().len() >= 8);
+
+        let bytes = std::fs::read(&out).expect("png written");
+        assert!(bytes.starts_with(b"\x89PNG\r\n\x1a\n"));
+        assert_eq!(
+            scrybe_mermaid::extract(&bytes).unwrap().source,
+            "graph TD; A-->B"
+        );
+        let _ = std::fs::remove_file(&out);
+    }
+
+    #[test]
+    fn test_shared_engine_fault_sets_is_error() {
+        // A missing required arg to a shared tool is an engine fault → isError.
+        let mut s = server();
+        let req = json!({
+            "jsonrpc": "2.0", "id": 14, "method": "tools/call",
+            "params": {"name": "render", "arguments": {}}
+        });
+        let resp = s.handle(&req).unwrap();
+        assert_eq!(resp["result"]["isError"], true);
+    }
+
+    #[test]
+    fn test_list_tabs_is_a_shared_tool_and_never_engine_faults() {
+        let mut s = server();
+        // It's offered in tools/list…
+        let list = s
+            .handle(&json!({"jsonrpc":"2.0","id":15,"method":"tools/list"}))
+            .unwrap();
+        let names: Vec<&str> = list["result"]["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|t| t["name"].as_str().unwrap())
+            .collect();
+        assert!(names.contains(&"list_tabs"));
+
+        // …and calling it is never an engine fault: with a live app it returns
+        // the tabs; with none it's a business `tool_error` (isError stays false).
+        let resp = s
+            .handle(&json!({
+                "jsonrpc":"2.0","id":16,"method":"tools/call",
+                "params":{"name":"list_tabs","arguments":{}}
+            }))
+            .unwrap();
+        assert_eq!(resp["result"]["isError"], false);
+        assert_eq!(resp["result"]["data"]["kind"], "list_tabs");
+        assert!(resp["result"]["data"]["tabs"].is_array());
     }
 }

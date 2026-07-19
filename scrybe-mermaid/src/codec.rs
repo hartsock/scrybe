@@ -112,10 +112,19 @@ fn parse_chunks(bytes: &[u8]) -> Result<Vec<([u8; 4], Vec<u8>)>> {
 // Public API
 // ---------------------------------------------------------------------------
 
-/// Embeds Mermaid *source* into *png_bytes* as an iTXt chunk.
+/// Embeds Mermaid *source* into *png_bytes* as an iTXt chunk, minting a fresh
+/// per-artifact UUID.
 ///
-/// Returns new PNG bytes with the chunk inserted immediately before IEND.
+/// Returns new PNG bytes with the chunk inserted immediately before IEND. Use
+/// [`embed_with_uuid`] when the caller needs to know (and return) the UUID it
+/// assigned — e.g. the `mermaid_to_png` tool.
 pub fn embed(png_bytes: &[u8], source: &str) -> Result<Vec<u8>> {
+    embed_with_uuid(png_bytes, source, &uuid::Uuid::new_v4().to_string())
+}
+
+/// Like [`embed`], but the caller supplies the *uuid* to record. This lets a
+/// caller mint the id, embed it, and return it without re-extracting.
+pub fn embed_with_uuid(png_bytes: &[u8], source: &str, uuid: &str) -> Result<Vec<u8>> {
     if png_bytes.len() < PNG_SIG.len() || &png_bytes[..PNG_SIG.len()] != PNG_SIG {
         return Err(MermaidError::Png("invalid PNG signature".into()));
     }
@@ -124,7 +133,7 @@ pub fn embed(png_bytes: &[u8], source: &str) -> Result<Vec<u8>> {
     hasher.update(source.as_bytes());
     let sha256 = hex::encode(hasher.finalize());
 
-    let payload = json!({ "source": source, "sha256": sha256 }).to_string();
+    let payload = json!({ "source": source, "sha256": sha256, "uuid": uuid }).to_string();
 
     let chunks = parse_chunks(png_bytes)?;
 
@@ -194,6 +203,8 @@ pub fn extract(png_bytes: &[u8]) -> Result<MermaidPayload> {
         return Ok(MermaidPayload {
             source: v["source"].as_str().unwrap_or("").to_string(),
             sha256: v["sha256"].as_str().unwrap_or("").to_string(),
+            // Absent for pre-UUID payloads → empty string (backward-compatible).
+            uuid: v["uuid"].as_str().unwrap_or("").to_string(),
         });
     }
 
@@ -324,5 +335,51 @@ mod tests {
             matches!(extract(not_png), Err(MermaidError::Png(_))),
             "extract should fail on non-PNG"
         );
+    }
+
+    #[test]
+    fn embed_mints_a_valid_v4_uuid() {
+        let png = minimal_png();
+        let p = extract(&embed(&png, "graph TD; A-->B").unwrap()).unwrap();
+        assert!(!p.uuid.is_empty(), "embed should mint a uuid");
+        let parsed = uuid::Uuid::parse_str(&p.uuid).expect("uuid should parse");
+        assert_eq!(parsed.get_version(), Some(uuid::Version::Random));
+    }
+
+    #[test]
+    fn embed_uuids_are_unique_per_call() {
+        let png = minimal_png();
+        let a = extract(&embed(&png, "same source").unwrap()).unwrap().uuid;
+        let b = extract(&embed(&png, "same source").unwrap()).unwrap().uuid;
+        assert_ne!(a, b, "each embed mints a fresh uuid");
+    }
+
+    #[test]
+    fn embed_with_uuid_records_the_given_id() {
+        let png = minimal_png();
+        let embedded = embed_with_uuid(&png, "graph TD; A-->B", "fixed-test-id-123").unwrap();
+        assert_eq!(extract(&embedded).unwrap().uuid, "fixed-test-id-123");
+    }
+
+    #[test]
+    fn extract_is_backward_compatible_without_uuid() {
+        // Craft an old-format payload (source + sha256 only), exactly as the
+        // pre-UUID embed did, and confirm extract yields uuid == "".
+        let png = minimal_png();
+        let source = "graph TD; A-->B";
+        let mut hasher = sha2::Sha256::new();
+        hasher.update(source.as_bytes());
+        let sha256 = hex::encode(hasher.finalize());
+        let payload = serde_json::json!({ "source": source, "sha256": sha256 }).to_string();
+        let mut out = PNG_SIG.to_vec();
+        for (t, d) in &parse_chunks(&png).unwrap() {
+            if t == b"IEND" {
+                out.extend_from_slice(&encode_itxt(ITXT_KEY, &payload));
+            }
+            out.extend_from_slice(&encode_chunk(t, d));
+        }
+        let p = extract(&out).unwrap();
+        assert_eq!(p.source, source);
+        assert_eq!(p.uuid, "", "missing uuid must decode to empty string");
     }
 }

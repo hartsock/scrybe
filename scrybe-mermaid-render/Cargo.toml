@@ -1,0 +1,22 @@
+[package]
+name = "scrybe-mermaid-render"
+version.workspace = true
+edition = "2021"
+description = "Scrybe Mermaid renderer — a thin wrapper over mermaid-rs-renderer that injects Scrybe provenance (source + sha256)"
+license = "Apache-2.0"
+repository = "https://github.com/hartsock/scrybe"
+homepage = "https://github.com/hartsock/scrybe"
+readme = "README.md"
+keywords = ["mermaid", "svg", "render", "scrybe"]
+categories = ["text-processing"]
+
+[dependencies]
+# `png` enables the crate's resvg/tiny-skia rasterizer (its own, proven path);
+# `cli`/clap stay off (workspace dep sets default-features = false).
+mermaid-rs-renderer = { workspace = true, features = ["png"] }
+anyhow.workspace = true
+sha2.workspace = true
+hex.workspace = true
+
+[lints]
+workspace = true

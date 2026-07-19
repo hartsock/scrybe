@@ -6,6 +6,7 @@ import "./styles/sidebar.css";
 import "./styles/mcp_panel.css";
 import "./styles/vcs_panel.css";
 import "./styles/pathbar.css";
+import "./styles/print.css";
 import { invoke, convertFileSrc } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { homeDir } from "@tauri-apps/api/path";
@@ -209,9 +210,24 @@ buildToolbar(toolbarEl, {
   onSave: () => { void saveActiveTabNow(); },
   onReload: () => { void reloadActiveTabNow(); },
   onExport: () => { void exportActiveTabToWord(); },
+  onPrint: () => { void printActiveTab(); },
   onToggleVim: () => setVimEnabled(!vimEnabled),
   onToggleWrap: () => setWrapEnabled(!wrapEnabled),
 });
+
+/// Print the active tab. Render its current buffer into the preview first — so
+/// printing works even from editor-only view and always reflects unsaved edits —
+/// let async KaTeX/Mermaid rendering settle, then open the OS print dialog
+/// (which also offers "Save as PDF"). styles/print.css shows only the rendered
+/// document, laid out for paper. Mirrored by the ⌘P/Ctrl+P shortcut.
+async function printActiveTab(): Promise<void> {
+  const tab = state.activeTab();
+  if (!tab) return;
+  await preview.render(tab.content);
+  // KaTeX/Mermaid post-processing is async; give it a beat before the snapshot.
+  await new Promise((r) => setTimeout(r, 250));
+  window.print();
+}
 
 /// Apply a theme to BOTH panes so the editor chrome matches the preview,
 /// update the toolbar dropdown, and mirror the choice to the MCP `state`
@@ -331,6 +347,11 @@ window.addEventListener("keydown", (e) => {
     // and instead reload the active tab's disk content.
     e.preventDefault();
     void reloadActiveTabNow();
+  } else if (e.key === "p" || e.key === "P") {
+    // Intercept the default print so we can render the current buffer to the
+    // preview first (styles/print.css then prints only the rendered document).
+    e.preventDefault();
+    void printActiveTab();
   }
 });
 
@@ -855,6 +876,50 @@ listen<{ id: number; data: { path: string } }>("scrybe://cli-read", async event 
   await reply(id, {
     result: { path: tab.path, content: tab.content, is_dirty: tab.isDirty },
   });
+}).catch(console.error);
+
+// `scrybe tabs` / MCP `list_tabs` — the live set of open tabs (#46). No params;
+// enumerate our tab state into `TabInfo`s and reply.
+listen<{ id: number; data: unknown }>("scrybe://cli-list-tabs", async event => {
+  const { id } = event.payload;
+  const tabs = state.tabs.map(t => ({
+    path: t.path ?? "",
+    title: t.title,
+    is_dirty: t.isDirty,
+    view_mode: t.viewMode,
+    active: t.id === state.activeTabId,
+  }));
+  await reply(id, { result: { tabs } });
+}).catch(console.error);
+
+// `scrybe reload <path>` / MCP `reload` — re-read an open tab from disk into its
+// live buffer (first-class socket op, retiring the /tmp/scrybe-reload-tab.txt poll).
+listen<{ id: number; data: { path: string; force: boolean } }>("scrybe://cli-reload", async event => {
+  const { id, data } = event.payload;
+  const tab = state.tabs.find(t => t.path === data.path);
+  if (!tab) {
+    await reply(id, { error: { code: ERR_TAB_NOT_OPEN, message: `not open: ${data.path}` } });
+    return;
+  }
+  const wasDirty = tab.isDirty;
+  if (wasDirty && !data.force) {
+    await reply(id, { error: { code: -32005, message: `unsaved edits in ${data.path} — pass force to discard` } });
+    return;
+  }
+  try {
+    const content = await invoke<string>("read_file", { path: data.path });
+    state.updateContent(tab.id, content);
+    state.markClean(tab.id);
+    if (state.activeTabId === tab.id) {
+      swapDocument(view, content);
+      preview.render(content);
+    }
+    redrawTabs();
+    const bytes = new TextEncoder().encode(content).length;
+    await reply(id, { result: { path: data.path, bytes, was_dirty: wasDirty } });
+  } catch (err) {
+    await reply(id, { error: { code: -32603, message: `reload failed: ${err instanceof Error ? err.message : err}` } });
+  }
 }).catch(console.error);
 
 // `scrybe find <pattern> [paths...]` — regex/literal grep across open tabs
