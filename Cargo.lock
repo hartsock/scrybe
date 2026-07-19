@@ -4044,6 +4044,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "scrybe-ratatui"
+version = "0.5.0"
+dependencies = [
+ "ratatui",
+ "scrybe-core",
+]
+
+[[package]]
 name = "scrybe-render"
 version = "0.5.0"
 dependencies = [
@@ -4092,6 +4100,7 @@ dependencies = [
  "crossterm",
  "ratatui",
  "scrybe-core",
+ "scrybe-ratatui",
 ]
 
 [[package]]

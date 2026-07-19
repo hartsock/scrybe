@@ -10,7 +10,7 @@
 //!
 //! ```no_run
 //! # use ratatui::{Frame, layout::Rect, widgets::{Block, Borders}};
-//! # use scrybe_tui::{render, view::{MarkdownView, MarkdownViewState}};
+//! # use scrybe_ratatui::{render, view::{MarkdownView, MarkdownViewState}};
 //! # fn draw(f: &mut Frame, area: Rect, state: &mut MarkdownViewState) {
 //! let text = render::render_source("# Hello\n\nworld");
 //! let view = MarkdownView::new(&text).block(Block::default().borders(Borders::ALL));
