@@ -149,8 +149,10 @@ pub fn build(app: &AppHandle<Wry>) -> tauri::Result<Menu<Wry>> {
         false,
         None::<&str>,
     )?;
+    // Word wrap defaults on (see main.ts); start the check item checked so it
+    // is correct on first paint, before the first publishState → menu_sync.
     let toggle_wrap =
-        CheckMenuItem::with_id(app, "toggle_wrap", "Word Wrap", true, false, None::<&str>)?;
+        CheckMenuItem::with_id(app, "toggle_wrap", "Word Wrap", true, true, None::<&str>)?;
 
     let view = Submenu::with_items(
         app,

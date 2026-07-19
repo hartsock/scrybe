@@ -104,6 +104,16 @@ fn get_version() -> &'static str {
     env!("CARGO_PKG_VERSION")
 }
 
+/// Open the OS print dialog (which also offers "Save as PDF") for the active
+/// window. WKWebView on macOS silently ignores JavaScript `window.print()`,
+/// so the frontend routes here; `WebviewWindow::print()` invokes the native
+/// print operation. The `@media print` stylesheet still applies, so only the
+/// rendered document prints. Mirrors the toolbar 🖨️ and File ▸ Print.
+#[tauri::command]
+fn print_document(window: tauri::WebviewWindow) -> Result<(), String> {
+    window.print().map_err(|e| e.to_string())
+}
+
 /// List the entries of a directory, returning name, path, and isDir for each.
 #[tauri::command]
 fn list_directory(path: String) -> Vec<serde_json::Value> {
@@ -945,6 +955,7 @@ pub fn run() {
             get_initial_file,
             cli_rpc::cli_rpc_reply,
             menu::menu_sync,
+            print_document,
         ])
         .menu(menu::build)
         .on_menu_event(|app, event| menu::handle_event(app, &event))

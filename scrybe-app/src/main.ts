@@ -89,7 +89,7 @@ const preview = new PreviewPane(previewEl);
 // per-tab) and are mirrored to the MCP `state` tool via `publishState`.
 let currentTheme: Theme = "default";
 let vimEnabled = false;
-let wrapEnabled = false;
+let wrapEnabled = true;
 
 function flashSidebar(dir: string): void {
   sidebar.loadDirectory(dir);
@@ -226,7 +226,12 @@ async function printActiveTab(): Promise<void> {
   await preview.render(tab.content);
   // KaTeX/Mermaid post-processing is async; give it a beat before the snapshot.
   await new Promise((r) => setTimeout(r, 250));
-  window.print();
+  // WKWebView ignores JS window.print(); route to the native print dialog.
+  try {
+    await invoke("print_document");
+  } catch (err) {
+    showToast(`Print failed: ${err instanceof Error ? err.message : err}`);
+  }
 }
 
 /// Apply a theme to BOTH panes so the editor chrome matches the preview,
@@ -661,6 +666,9 @@ newTab();
 applyViewMode(state.activeTab()?.viewMode ?? "both");
 setToolbarTheme(toolbarEl, currentTheme);
 setToolbarVim(toolbarEl, vimEnabled);
+// Word wrap defaults on — apply it to the editor (not just the toolbar), so
+// long lines wrap to the pane instead of scrolling off-screen out of the box.
+setWrap(view, wrapEnabled);
 setToolbarWrap(toolbarEl, wrapEnabled);
 invoke<string | null>("get_initial_directory").then(dir =>
   dir ? sidebar.loadDirectory(dir) : homeDir().then(home => sidebar.loadDirectory(home))
