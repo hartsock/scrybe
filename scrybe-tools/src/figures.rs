@@ -102,24 +102,85 @@ pub(crate) fn figure_width(total: usize) -> usize {
 /// written PNG carries its embedded source.
 pub fn export_figures(doc_source: &str, doc_path: &Path) -> anyhow::Result<Vec<FigureResult>> {
     let plans = plan_figures(doc_source, doc_path);
-    let mut results = Vec::with_capacity(plans.len());
+    // Render + embed the whole set into memory FIRST, so a render/embed failure
+    // aborts before we delete or write any file on disk.
+    let mut prepared = Vec::with_capacity(plans.len());
     for plan in plans {
-        // Same render → embed → write path as the `mermaid_to_png` tool.
+        // Same render → embed path as the `mermaid_to_png` tool.
         let png = render_png(&plan.source)
             .with_context(|| format!("render mermaid for {}", plan.path.display()))?;
         let uuid = uuid::Uuid::new_v4().to_string();
         let embedded = scrybe_mermaid::embed_with_uuid(&png, &plan.source, &uuid)
             .with_context(|| format!("embed source for {}", plan.path.display()))?;
-        std::fs::write(&plan.path, &embedded)
-            .with_context(|| format!("write {}", plan.path.display()))?;
+        let sha256 = source_sha256(&plan.source);
+        prepared.push((plan.path, uuid, sha256, embedded));
+    }
+    // Prune this document's prior figure set before writing the fresh one, so a
+    // re-export after the diagram count shrinks (5 → 2) or crosses a zero-pad
+    // width boundary (…_fig_08 → …_fig_100) never leaves orphaned/duplicate
+    // figures interleaved beside the document. Only done when there IS a new set
+    // to write: exporting a diagram-less document is a no-op, never a deletion.
+    if !prepared.is_empty() {
+        prune_figures(doc_path)?;
+    }
+    let mut results = Vec::with_capacity(prepared.len());
+    for (path, uuid, sha256, embedded) in prepared {
+        std::fs::write(&path, &embedded).with_context(|| format!("write {}", path.display()))?;
         results.push(FigureResult {
-            path: plan.path.to_string_lossy().into_owned(),
+            path: path.to_string_lossy().into_owned(),
             uuid,
-            sha256: source_sha256(&plan.source),
+            sha256,
             bytes: embedded.len(),
         });
     }
     Ok(results)
+}
+
+/// Remove this document's existing auto-generated figures (`<stem>_fig_<NN>.png`
+/// for any zero-pad width), so a re-export produces exactly the current set.
+/// Only files matching the generated pattern for this document's stem are
+/// touched; a missing directory is not an error.
+fn prune_figures(doc_path: &Path) -> anyhow::Result<()> {
+    let stem = doc_path
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("document");
+    let dir = match doc_path.parent().filter(|p| !p.as_os_str().is_empty()) {
+        Some(d) => d.to_path_buf(),
+        None => PathBuf::from("."),
+    };
+    let entries = match std::fs::read_dir(&dir) {
+        Ok(e) => e,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(e) => {
+            return Err(anyhow::Error::new(e).context(format!("read dir {}", dir.display())));
+        }
+    };
+    for entry in entries.flatten() {
+        if let Some(name) = entry.file_name().to_str() {
+            if is_figure_name(name, stem) {
+                let p = entry.path();
+                std::fs::remove_file(&p)
+                    .with_context(|| format!("remove stale figure {}", p.display()))?;
+            }
+        }
+    }
+    Ok(())
+}
+
+/// True when `name` is an auto-generated figure for `stem`: exactly
+/// `<stem>_fig_<NN>.png` where `NN` is one or more ASCII digits (any width).
+pub(crate) fn is_figure_name(name: &str, stem: &str) -> bool {
+    let Some(rest) = name.strip_prefix(stem) else {
+        return false;
+    };
+    let Some(rest) = rest.strip_prefix("_fig_") else {
+        return false;
+    };
+    let Some(digits) = rest.strip_suffix(".png") else {
+        return false;
+    };
+    !digits.is_empty() && digits.bytes().all(|b| b.is_ascii_digit())
 }
 
 // ---------------------------------------------------------------------------
@@ -136,8 +197,11 @@ pub(crate) fn spec() -> ToolSpec {
              document order (zero-padded so they sort next to the document). \
              Each PNG embeds its Mermaid source (a per-artifact UUID + the \
              source's SHA-256), so the diagrams are losslessly round-trippable \
-             with `extract`. Input: `path` (the Markdown document on disk). \
-             Returns `{ count, figures: [{ path, uuid, sha256, bytes }] }`.",
+             with `extract`. Re-exporting replaces the document's prior figure \
+             set (stale `<stem>_fig_NN.png` siblings are pruned), so the output \
+             always matches the current document. Input: `path` (the Markdown \
+             document on disk). Returns `{ count, figures: [{ path, uuid, \
+             sha256, bytes }] }`.",
         input_schema,
         data_schema: DataSchema {
             version: DATA_VERSION,
@@ -414,6 +478,86 @@ mod tests {
         assert!(
             matches!(err, crate::EngineFault::BadArgs(ref m) if m.contains("path")),
             "expected BadArgs for missing path, got {err:?}"
+        );
+    }
+
+    // -- prune / re-export cleanliness --------------------------------------
+
+    #[test]
+    fn is_figure_name_matches_only_the_generated_pattern() {
+        // Generated figures for stem "foo", any zero-pad width.
+        assert!(is_figure_name("foo_fig_01.png", "foo"));
+        assert!(is_figure_name("foo_fig_001.png", "foo"));
+        assert!(is_figure_name("foo_fig_7.png", "foo"));
+        // Not figures.
+        assert!(!is_figure_name("foo.png", "foo"));
+        assert!(!is_figure_name("foo_fig_.png", "foo")); // no digits
+        assert!(!is_figure_name("foo_fig_ab.png", "foo")); // non-digit
+        assert!(!is_figure_name("foo_fig_01.jpg", "foo")); // wrong ext
+                                                           // A different document's figures must not match this stem.
+        assert!(!is_figure_name("foo_bar_fig_01.png", "foo"));
+        assert!(!is_figure_name("other_fig_01.png", "foo"));
+    }
+
+    #[test]
+    fn re_export_prunes_orphans_when_the_diagram_count_shrinks() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let doc_path = dir.path().join("report.md");
+
+        // First export: two diagrams → report_fig_01/02.png.
+        std::fs::write(&doc_path, two_diagram_doc()).expect("write doc");
+        assert_eq!(
+            export_figures(two_diagram_doc(), &doc_path).unwrap().len(),
+            2
+        );
+        // Simulate a stale figure from a prior, larger export (and a different
+        // width) that the current run must not leave behind.
+        std::fs::write(dir.path().join("report_fig_03.png"), b"stale").unwrap();
+        std::fs::write(dir.path().join("report_fig_003.png"), b"stale-wide").unwrap();
+        // An unrelated sibling and another doc's figure must survive.
+        std::fs::write(dir.path().join("keepme.png"), b"keep").unwrap();
+        std::fs::write(dir.path().join("other_fig_01.png"), b"other").unwrap();
+
+        // Re-export with a single diagram → exactly report_fig_01.png, orphans gone.
+        let one = "# One\n\n```mermaid\ngraph TD; A-->B\n```\n";
+        let results = export_figures(one, &doc_path).expect("re-export");
+        assert_eq!(results.len(), 1);
+        assert!(dir.path().join("report_fig_01.png").exists());
+        assert!(
+            !dir.path().join("report_fig_02.png").exists(),
+            "shrunk orphan pruned"
+        );
+        assert!(
+            !dir.path().join("report_fig_03.png").exists(),
+            "stale orphan pruned"
+        );
+        assert!(
+            !dir.path().join("report_fig_003.png").exists(),
+            "wide-width orphan pruned"
+        );
+        assert!(
+            dir.path().join("keepme.png").exists(),
+            "unrelated file kept"
+        );
+        assert!(
+            dir.path().join("other_fig_01.png").exists(),
+            "other doc's figure kept"
+        );
+    }
+
+    #[test]
+    fn exporting_a_diagramless_document_never_deletes_siblings() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let doc_path = dir.path().join("notes.md");
+        std::fs::write(&doc_path, "# Notes\n\nNo diagrams here.\n").expect("write doc");
+        // A pre-existing figure-shaped sibling must NOT be deleted by a no-op export.
+        std::fs::write(dir.path().join("notes_fig_01.png"), b"preexisting").unwrap();
+
+        let results = export_figures("# Notes\n\nNo diagrams here.\n", &doc_path).expect("export");
+        assert!(results.is_empty(), "no diagrams → no figures written");
+        assert!(
+            dir.path().join("notes_fig_01.png").exists(),
+            "a diagram-less export must not delete siblings"
         );
     }
 }
