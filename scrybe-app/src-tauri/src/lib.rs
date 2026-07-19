@@ -31,6 +31,7 @@
 //! Full editor integration (P4.2–P4.11) builds on this IPC bridge.
 
 mod cli_rpc;
+mod menu;
 
 use std::collections::{HashMap, HashSet};
 use std::process::{Child, Command, Stdio};
@@ -101,6 +102,16 @@ fn render_markdown(source: String) -> String {
 #[tauri::command]
 fn get_version() -> &'static str {
     env!("CARGO_PKG_VERSION")
+}
+
+/// Open the OS print dialog (which also offers "Save as PDF") for the active
+/// window. WKWebView on macOS silently ignores JavaScript `window.print()`,
+/// so the frontend routes here; `WebviewWindow::print()` invokes the native
+/// print operation. The `@media print` stylesheet still applies, so only the
+/// rendered document prints. Mirrors the toolbar 🖨️ and File ▸ Print.
+#[tauri::command]
+fn print_document(window: tauri::WebviewWindow) -> Result<(), String> {
+    window.print().map_err(|e| e.to_string())
 }
 
 /// List the entries of a directory, returning name, path, and isDir for each.
@@ -883,6 +894,20 @@ fn export_docx(content: String, output: String, no_diagrams: bool) -> Result<Str
     }
 }
 
+/// Export every Mermaid diagram in the active buffer to sibling PNG figures.
+///
+/// Uses the LIVE buffer `content` (so unsaved edits are included) and the
+/// tab's on-disk `path` to place `<stem>_fig_NN.png` siblings next to the
+/// document, numbered in document order; each PNG embeds its Mermaid source.
+/// Returns the written figure paths. Mirrored by the MCP/CLI `export_figures`
+/// tool.
+#[tauri::command]
+fn export_figures(content: String, path: String) -> Result<Vec<String>, String> {
+    let results = scrybe_tools::export_figures(&content, std::path::Path::new(&path))
+        .map_err(|e| e.to_string())?;
+    Ok(results.into_iter().map(|r| r.path).collect())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -911,6 +936,7 @@ pub fn run() {
             poll_set_vim,
             poll_set_wrap,
             export_docx,
+            export_figures,
             watch_file,
             unwatch_file,
             note_autosave,
@@ -943,7 +969,11 @@ pub fn run() {
             get_initial_directory,
             get_initial_file,
             cli_rpc::cli_rpc_reply,
+            menu::menu_sync,
+            print_document,
         ])
+        .menu(menu::build)
+        .on_menu_event(|app, event| menu::handle_event(app, &event))
         .setup(|app| {
             use notify::EventKind;
 

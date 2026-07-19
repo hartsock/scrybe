@@ -13,28 +13,28 @@ use pulldown_cmark::{Event, HeadingLevel, Options, Parser, Tag, TagEnd};
 #[derive(Debug, Clone, PartialEq)]
 pub enum Node {
     /// A heading with a numeric level (1–6) and inline children.
-    Heading { level: u8, children: Vec<Node> },
+    Heading { level: u8, children: Vec<Self> },
     /// A block of inline content.
-    Paragraph { children: Vec<Node> },
+    Paragraph { children: Vec<Self> },
     /// A fenced code block with an optional language tag.
     FencedCode { lang: String, content: String },
     /// Inline code span.
     InlineCode { content: String },
     /// A block quote containing block children.
-    BlockQuote { children: Vec<Node> },
+    BlockQuote { children: Vec<Self> },
     /// An ordered or unordered list.
-    List { ordered: bool, items: Vec<Node> },
+    List { ordered: bool, items: Vec<Self> },
     /// A list item containing block children.
-    ListItem { children: Vec<Node> },
+    ListItem { children: Vec<Self> },
     /// Emphasised (italic) inline content.
-    Emphasis { children: Vec<Node> },
+    Emphasis { children: Vec<Self> },
     /// Strong (bold) inline content.
-    Strong { children: Vec<Node> },
+    Strong { children: Vec<Self> },
     /// A hyperlink.
     Link {
         href: String,
         title: String,
-        children: Vec<Node>,
+        children: Vec<Self>,
     },
     /// An image.
     Image { src: String, alt: String },
@@ -315,6 +315,21 @@ impl Ast {
         }
         None
     }
+
+    /// Returns the source of every Mermaid fenced-code block, in document
+    /// order.
+    ///
+    /// A block counts as Mermaid when the first whitespace-delimited token of
+    /// its info string is `mermaid` — so ```` ```mermaid title="Flow" ```` is
+    /// matched but ```` ```mermaidjs ```` is not. The walk recurses into
+    /// headings, lists, list items, blockquotes, and paragraphs, mirroring the
+    /// linter's `visit_nodes`, so a diagram nested inside a blockquote or list
+    /// item is never missed.
+    pub fn mermaid_blocks(&self) -> Vec<&str> {
+        let mut out = Vec::new();
+        collect_mermaid(&self.nodes, &mut out);
+        out
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -329,6 +344,32 @@ fn heading_level(level: HeadingLevel) -> u8 {
         HeadingLevel::H4 => 4,
         HeadingLevel::H5 => 5,
         HeadingLevel::H6 => 6,
+    }
+}
+
+/// Recursively collect Mermaid fenced-code sources in document order.
+fn collect_mermaid<'a>(nodes: &'a [Node], out: &mut Vec<&'a str>) {
+    for node in nodes {
+        match node {
+            Node::FencedCode { lang, content } => {
+                if lang.split_whitespace().next() == Some("mermaid") {
+                    out.push(content.as_str());
+                }
+            }
+            Node::Heading { children, .. }
+            | Node::Paragraph { children }
+            | Node::BlockQuote { children }
+            | Node::ListItem { children }
+            | Node::Emphasis { children }
+            | Node::Strong { children }
+            | Node::Link { children, .. } => {
+                collect_mermaid(children, out);
+            }
+            Node::List { items, .. } => {
+                collect_mermaid(items, out);
+            }
+            _ => {}
+        }
     }
 }
 
@@ -468,5 +509,58 @@ mod tests {
         let src = "---\n";
         let ast = Ast::parse(src);
         assert!(matches!(&ast.nodes[0], Node::HorizontalRule));
+    }
+
+    // -----------------------------------------------------------------------
+    // mermaid_blocks
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_mermaid_blocks_empty_when_none() {
+        let ast = Ast::parse("# Title\n\n```rust\nfn main() {}\n```\n");
+        assert!(ast.mermaid_blocks().is_empty());
+    }
+
+    #[test]
+    fn test_mermaid_blocks_ordered() {
+        let src = "```mermaid\ngraph TD; A-->B\n```\n\n\
+                   Some prose.\n\n\
+                   ```mermaid\nsequenceDiagram\n  A->>B: hi\n```\n";
+        let ast = Ast::parse(src);
+        let blocks = ast.mermaid_blocks();
+        assert_eq!(blocks.len(), 2);
+        assert_eq!(blocks[0], "graph TD; A-->B");
+        assert!(blocks[1].starts_with("sequenceDiagram"));
+    }
+
+    #[test]
+    fn test_mermaid_blocks_nested_in_blockquote() {
+        let src = "> ```mermaid\n> graph LR; X-->Y\n> ```\n";
+        let ast = Ast::parse(src);
+        assert_eq!(ast.mermaid_blocks(), vec!["graph LR; X-->Y"]);
+    }
+
+    #[test]
+    fn test_mermaid_blocks_nested_in_list() {
+        // A fenced block indented under a list item is a child of the item;
+        // a top-level-only filter would miss it.
+        let src = "- step one\n\n  ```mermaid\n  graph TD; P-->Q\n  ```\n";
+        let ast = Ast::parse(src);
+        assert_eq!(ast.mermaid_blocks(), vec!["graph TD; P-->Q"]);
+    }
+
+    #[test]
+    fn test_mermaid_blocks_info_string_with_attrs() {
+        // Only the first whitespace token of the info string must match.
+        let src = "```mermaid title=\"Flow\"\ngraph TD; A-->B\n```\n";
+        let ast = Ast::parse(src);
+        assert_eq!(ast.mermaid_blocks(), vec!["graph TD; A-->B"]);
+    }
+
+    #[test]
+    fn test_mermaid_blocks_ignores_lookalike_langs() {
+        // `mermaidjs` is a different language; a bare fence is not mermaid.
+        let src = "```mermaidjs\nnope\n```\n\n```\nplain\n```\n";
+        assert!(Ast::parse(src).mermaid_blocks().is_empty());
     }
 }

@@ -336,6 +336,20 @@ enum MermaidCmd {
         #[arg(short, long, value_name = "OUT")]
         out: std::path::PathBuf,
     },
+    /// Export every Mermaid diagram in a document to sibling PNG figures.
+    ///
+    /// For `foo.md`, writes `foo_fig_01.png`, `foo_fig_02.png`, … next to the
+    /// document in document order; each PNG embeds its Mermaid source (uuid +
+    /// sha256) so it round-trips via `scrybe mermaid extract`. Pure-Rust
+    /// rendering (no `mmdc`) via the shared `export_figures` tool.
+    Export {
+        /// Markdown document whose Mermaid diagrams to export.
+        #[arg(value_name = "FILE")]
+        input: std::path::PathBuf,
+        /// Output JSON (`{count, figures}`) instead of one path per line.
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 /// Known subcommand names. Anything else in argv[1] is treated as a path to open.
@@ -517,6 +531,28 @@ fn main() -> anyhow::Result<()> {
                 println!("  uuid   {}", d["uuid"].as_str().unwrap_or(""));
                 println!("  sha256 {}", d["sha256"].as_str().unwrap_or(""));
             }
+            MermaidCmd::Export { input, json } => {
+                let reg = scrybe_tools::Registry::default();
+                let outcome = reg.call(
+                    "export_figures",
+                    &scrybe_tools::Ctx::headless(),
+                    &serde_json::json!({ "path": input.to_string_lossy() }),
+                )?;
+                if let Some(err) = outcome.tool_error {
+                    eprintln!("scrybe mermaid export: {}", err.message);
+                    std::process::exit(1);
+                }
+                let d = &outcome.data;
+                if json {
+                    println!("{}", serde_json::to_string_pretty(d)?);
+                } else {
+                    let figures = d["figures"].as_array().cloned().unwrap_or_default();
+                    for f in &figures {
+                        println!("{}", f["path"].as_str().unwrap_or(""));
+                    }
+                    println!("{} figure(s)", d["count"].as_u64().unwrap_or(0));
+                }
+            }
         },
 
         Command::Open { path } => match path {
@@ -553,7 +589,22 @@ fn main() -> anyhow::Result<()> {
             let canon = path.canonicalize().unwrap_or_else(|_| path.clone());
             match rpc_client::send("save", serde_json::json!({"path": canon.to_string_lossy()})) {
                 Ok(resp) => match resp.error {
-                    None => println!("Saved {}", canon.display()),
+                    // Reply-correlated save reports { path, bytes, was_dirty };
+                    // an older app replies the legacy {applied} ack with no
+                    // byte count — don't fabricate one.
+                    None => {
+                        let bytes = resp
+                            .result
+                            .as_ref()
+                            .and_then(|r| r.get("bytes"))
+                            .and_then(serde_json::Value::as_u64);
+                        match bytes {
+                            Some(b) => println!("Saved {} ({b} bytes)", canon.display()),
+                            None => println!("Saved {}", canon.display()),
+                        }
+                    }
+                    // Not open: silent no-op per the documented CLI contract.
+                    Some(e) if e.code == scrybe_rpc::ERR_TAB_NOT_OPEN => {}
                     Some(e) => {
                         anyhow::bail!("scrybe save failed: {} ({})", e.message, e.code)
                     }

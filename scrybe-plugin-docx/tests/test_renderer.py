@@ -122,6 +122,34 @@ def test_mermaid_no_diagrams_fallback():
     assert any("A-->B" in p.text for p in paras)
 
 
+def test_embed_mermaid_source_warns_and_falls_back_on_failure(monkeypatch, capsys):
+    """When the scrybe_mermaid codec is unavailable or raises, degrade LOUDLY:
+    keep the raw PNG so export never crashes, but emit a warning to stderr so
+    the un-embedded (non-round-trippable) figure is visible, not silent."""
+    import sys
+    import types
+
+    import scrybe_plugin_docx.renderer as r
+
+    fake = types.ModuleType("scrybe_mermaid")
+
+    def _boom(_png, _source):
+        raise RuntimeError("codec unavailable")
+
+    fake.embed = _boom  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "scrybe_mermaid", fake)
+
+    raw = b"\x89PNG\r\n\x1a\n-rawbytes"
+    out = r._embed_mermaid_source(raw, "graph TD; A-->B")
+
+    # Graceful: the original PNG bytes come back unchanged (export never fails).
+    assert out == raw
+    # Loud: a warning naming the degradation reaches stderr.
+    err = capsys.readouterr().err
+    assert "WARNING" in err
+    assert "scrybe-mermaid" in err
+
+
 def test_mermaid_mmdc_unavailable_falls_back(monkeypatch):
     """When mmdc is not on PATH, mermaid block falls back to monospace text."""
     import scrybe_plugin_docx.mermaid as m
@@ -167,7 +195,9 @@ def test_inline_code():
 
 
 def test_cli_stdin(tmp_path, monkeypatch):
-    import io, sys
+    import io
+    import sys
+
     from scrybe_plugin_docx.main import main
 
     out = tmp_path / "out.docx"

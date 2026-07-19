@@ -19,6 +19,7 @@ pub(crate) fn register_defaults(reg: &mut Registry) {
     reg.register(render::spec());
     reg.register(lint::spec());
     reg.register(mermaid::spec());
+    reg.register(crate::figures::spec());
     reg.register(tabs::spec());
     for spec in editor::specs() {
         reg.register(spec);

@@ -15,7 +15,7 @@ import { save as saveDialog } from "@tauri-apps/plugin-dialog";
 import { showToast } from "./toast";
 import { AppState } from "./state";
 import { renderTabBar } from "./tabs";
-import { createEditor, swapDocument, shouldSuppressAutosave, setEditorTheme, setVim, setWrap } from "./editor";
+import { createEditor, swapDocument, shouldSuppressAutosave, setEditorTheme, setVim, setWrap, setEditorLanguage, classifyFile } from "./editor";
 import { PreviewPane } from "./preview";
 import { buildToolbar, setToolbarViewMode, setToolbarTheme, setToolbarVim, setToolbarWrap } from "./toolbar";
 import type { Theme } from "./toolbar";
@@ -89,7 +89,7 @@ const preview = new PreviewPane(previewEl);
 // per-tab) and are mirrored to the MCP `state` tool via `publishState`.
 let currentTheme: Theme = "default";
 let vimEnabled = false;
-let wrapEnabled = false;
+let wrapEnabled = true;
 
 function flashSidebar(dir: string): void {
   sidebar.loadDirectory(dir);
@@ -145,15 +145,10 @@ const vcsPanel = new VcsPanel(vcsContainer);
 
 // Sidebar — file browser + agent registration panel
 const sidebar = new Sidebar(sidebarEl, async (path) => {
-  try {
-    const content: string = await invoke("read_file", { path });
-    state.addTab(path, content);
-    swapDocument(view, content);
-    preview.render(content);
-    redrawTabs();
-  } catch (err) {
-    console.error("Failed to open file:", err);
-  }
+  // Route through openFileByPath so sidebar opens get the same
+  // language/kind classification, image/.mmd handling, and buffer-restore
+  // as every other open path.
+  await openFileByPath(path);
 }, async (dirPath) => {
   // When a folder is opened, also attempt to open as a git repo.
   vcsPanel.openRepo(dirPath).catch(() => { /* not a git repo — panel shows hint */ });
@@ -223,10 +218,20 @@ buildToolbar(toolbarEl, {
 async function printActiveTab(): Promise<void> {
   const tab = state.activeTab();
   if (!tab) return;
+  // Print renders the Markdown preview; a code/text tab has none.
+  if (tab.kind !== "markdown") {
+    showToast("Printing is available for Markdown documents", "info");
+    return;
+  }
   await preview.render(tab.content);
   // KaTeX/Mermaid post-processing is async; give it a beat before the snapshot.
   await new Promise((r) => setTimeout(r, 250));
-  window.print();
+  // WKWebView ignores JS window.print(); route to the native print dialog.
+  try {
+    await invoke("print_document");
+  } catch (err) {
+    showToast(`Print failed: ${err instanceof Error ? err.message : err}`);
+  }
 }
 
 /// Apply a theme to BOTH panes so the editor chrome matches the preview,
@@ -239,7 +244,7 @@ function applyTheme(theme: Theme): void {
   setEditorTheme(view, theme);
   setToolbarTheme(toolbarEl, theme);
   const tab = state.activeTab();
-  if (tab) preview.render(tab.content);
+  if (tab) renderPreview(tab.content);
   publishState();
 }
 
@@ -257,6 +262,15 @@ function cyclePreviewMode(): void {
 function setViewMode(mode: string): void {
   const tab = state.activeTab();
   if (!tab) return;
+  // A code/text tab has no rendered preview — it stays edit-only regardless of
+  // what an agent requests, mirroring the guard in state.cycleViewMode so the
+  // MCP concrete-mode path can't flip a source file into a blank preview.
+  if (tab.kind !== "markdown") {
+    tab.viewMode = "edit";
+    applyViewMode("edit");
+    redrawTabs();
+    return;
+  }
   if (mode === "both" || mode === "edit" || mode === "preview") {
     tab.viewMode = mode;
     applyViewMode(mode);
@@ -286,6 +300,7 @@ function setWrapEnabled(on: boolean): void {
 /// `state` tool can report what the human is looking at (active path,
 /// view mode, theme, vim). The human-side equivalents are the path bar,
 /// the tab mode icon, the theme dropdown, and the Vim toggle.
+let lastMenuSync = "";
 function publishState(): void {
   const tab = state.activeTab();
   invoke("publish_state", {
@@ -300,6 +315,16 @@ function publishState(): void {
       open_paths: state.tabs.map(t => t.path).filter((p): p is string => !!p),
     },
   }).catch(() => { /* state mirror is best-effort */ });
+  // Mirror the same state onto the native menu's check items (theme radio,
+  // Vim, Wrap) so menu, toolbar, and MCP can never disagree for long.
+  // publishState fires per keystroke (via redrawTabs), so skip the IPC and
+  // the five native menu mutations unless one of the three values changed.
+  const menuState = `${currentTheme}|${vimEnabled}|${wrapEnabled}`;
+  if (menuState !== lastMenuSync) {
+    lastMenuSync = menuState;
+    invoke("menu_sync", { theme: currentTheme, vim: vimEnabled, wrap: wrapEnabled })
+      .catch(() => { /* menu mirror is best-effort */ });
+  }
 }
 
 /// Update the selectable path bar to show the active tab's full path, and
@@ -329,6 +354,27 @@ async function exportActiveTabToWord(): Promise<void> {
   try {
     await invoke("export_docx", { content: tab.content, output: dest, noDiagrams: false });
     showToast(`Exported ${dest.split("/").pop()}`, "info");
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    showToast(`Export failed: ${msg}`);
+  }
+}
+
+/// Export every Mermaid diagram in the active tab to sibling PNG figures
+/// (`<stem>_fig_NN.png`) next to the document. Requires a saved tab — the
+/// figures are placed beside the file on disk, so an unsaved scratch buffer
+/// has nowhere to write them. Uses the live buffer so unsaved edits are
+/// included. The MCP/CLI `export_figures` tool is the agent-side equivalent.
+async function exportActiveTabFigures(): Promise<void> {
+  const tab = state.activeTab();
+  if (!tab) { showToast("No tab to export", "info"); return; }
+  if (!tab.path) { showToast("Save the document first", "info"); return; }
+  try {
+    const paths = await invoke<string[]>("export_figures", {
+      content: tab.content,
+      path: tab.path,
+    });
+    showToast(`Exported ${paths.length} diagram(s)`, "info");
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     showToast(`Export failed: ${msg}`);
@@ -380,7 +426,7 @@ const view = createEditor(editorEl, WELCOME, async (content) => {
   const saveId   = tab?.id   ?? null;
 
   const processed = await pluginManager.runAll(content);
-  preview.render(processed || content);
+  renderPreview(processed || content);
 
   // Programmatic loads must not schedule an autosave: doing so would
   // immediately call `note_autosave()` and open a 2 s self-write window
@@ -423,6 +469,16 @@ function applyViewMode(mode: string): void {
   publishState();
 }
 
+/// Render `content` into the preview pane — but ONLY for Markdown documents.
+/// Code/text tabs open edit-only and have no rendered preview, so this is a
+/// no-op for them; that stops source files from being parsed as Markdown into
+/// garbled HTML. The single gate every render-on-load/edit site routes through.
+function renderPreview(content: string): void {
+  if (state.activeTab()?.kind === "markdown") {
+    void preview.render(content);
+  }
+}
+
 function redrawTabs(): void {
   renderTabBar(tabBarEl, state,
     id => selectTab(id),
@@ -438,16 +494,20 @@ function selectTab(id: string): void {
   const tab = state.activeTab();
   if (tab) {
     swapDocument(view, tab.content);
-    preview.render(tab.content);
+    // Re-highlight for this tab's language (code vs Markdown) and restore its
+    // view mode; only Markdown tabs get a rendered preview.
+    void setEditorLanguage(view, tab.path);
+    renderPreview(tab.content);
     applyViewMode(tab.viewMode);
   }
   redrawTabs();
 }
 
 function newTab(content = WELCOME): void {
-  state.addTab(null, content);
+  state.addTab(null, content); // untitled → Markdown
   swapDocument(view, content);
-  preview.render(content);
+  void setEditorLanguage(view, null);
+  renderPreview(content);
   redrawTabs();
 }
 
@@ -511,7 +571,10 @@ function doCloseTab(id: string): void {
   const active = state.activeTab();
   const content = active?.content ?? "";
   swapDocument(view, content);
-  if (content) preview.render(content);
+  // The newly-active tab may be a different language/kind than the closed one.
+  void setEditorLanguage(view, active?.path ?? null);
+  applyViewMode(active?.viewMode ?? "both");
+  renderPreview(content);
   redrawTabs();
 }
 
@@ -578,7 +641,9 @@ async function openFileByPath(path: string): Promise<void> {
     if (existing) {
       state.activeTabId = existing.id;
       swapDocument(view, existing.content);
-      preview.render(ext === "mmd" ? "```mermaid\n" + existing.content + "\n```" : existing.content);
+      void setEditorLanguage(view, existing.path);
+      applyViewMode(existing.viewMode);
+      renderPreview(ext === "mmd" ? "```mermaid\n" + existing.content + "\n```" : existing.content);
       redrawTabs();
       return;
     }
@@ -616,10 +681,14 @@ async function openFileByPath(path: string): Promise<void> {
       }
     }
 
-    const newTabId = state.addTab(path, useContent);
+    const { kind } = classifyFile(path);
+    const newTabId = state.addTab(path, useContent, kind);
     invoke("watch_file", { path }).catch(() => {});
     swapDocument(view, useContent);
-    preview.render(ext === "mmd" ? "```mermaid\n" + useContent + "\n```" : useContent);
+    // Highlight for the file's language and open code/text edit-only.
+    void setEditorLanguage(view, path);
+    applyViewMode(state.activeTab()?.viewMode ?? "both");
+    renderPreview(ext === "mmd" ? "```mermaid\n" + useContent + "\n```" : useContent);
     // Restored buffer differs from disk → flag the tab dirty so the user
     // gets the dirty indicator and the save-on-close prompt next time.
     if (restoredFromBuffer) state.markDirty(newTabId);
@@ -650,6 +719,9 @@ newTab();
 applyViewMode(state.activeTab()?.viewMode ?? "both");
 setToolbarTheme(toolbarEl, currentTheme);
 setToolbarVim(toolbarEl, vimEnabled);
+// Word wrap defaults on — apply it to the editor (not just the toolbar), so
+// long lines wrap to the pane instead of scrolling off-screen out of the box.
+setWrap(view, wrapEnabled);
 setToolbarWrap(toolbarEl, wrapEnabled);
 invoke<string | null>("get_initial_directory").then(dir =>
   dir ? sidebar.loadDirectory(dir) : homeDir().then(home => sidebar.loadDirectory(home))
@@ -658,6 +730,42 @@ invoke<string | null>("get_initial_file").then(file => {
   console.log("get_initial_file:", file);
   if (file) openFileByPath(file);
 }).catch(err => console.error("get_initial_file failed:", err));
+
+// Native menu bar (#184). Each item id routes to the same single-entry-point
+// function its toolbar/keyboard twin uses, so the human ↔ MCP parity rule
+// holds with no new tools. Predefined items (Edit menu, quit, …) are handled
+// by the OS and never arrive here.
+listen<string>("scrybe://menu", event => {
+  switch (event.payload) {
+    case "new_tab":     newTab(); break;
+    case "open_file":   document.getElementById("open-file")?.click(); break;
+    case "open_folder": document.getElementById("open-folder")?.click(); break;
+    case "save":        void saveActiveTabNow(); break;
+    case "reload":      void reloadActiveTabNow(); break;
+    case "export_docx": void exportActiveTabToWord(); break;
+    case "export_figures": void exportActiveTabFigures(); break;
+    case "print":       void printActiveTab(); break;
+    case "close_tab":
+      // macOS convention: ⌘W closes the tab, and falls through to closing
+      // the window when there is no tab left to close.
+      if (state.activeTabId) {
+        closeTab(state.activeTabId);
+      } else {
+        void import("@tauri-apps/api/window").then(w => w.getCurrentWindow().close());
+      }
+      break;
+    case "cycle_view":  cyclePreviewMode(); break;
+    case "theme_default":   applyTheme("default"); break;
+    case "theme_dark":      applyTheme("dark"); break;
+    case "theme_solarized": applyTheme("solarized"); break;
+    case "toggle_vim":  setVimEnabled(!vimEnabled); break;
+    case "toggle_wrap": setWrapEnabled(!wrapEnabled); break;
+    case "close_window":
+      void import("@tauri-apps/api/window").then(w => w.getCurrentWindow().close());
+      break;
+    default: console.warn("unknown menu action:", event.payload);
+  }
+}).catch(console.error);
 
 // When a second `scrybe open <path>` is run, the single-instance plugin
 // forwards the path here instead of spawning a new window.
@@ -719,8 +827,10 @@ async function reloadTabFromDisk(path: string): Promise<void> {
     // Clean buffer — auto-reload and toast
     state.updateContent(tab.id, content);
     state.markClean(tab.id);
-    if (state.activeTabId === tab.id) swapDocument(view, content);
-    preview.render(content);
+    if (state.activeTabId === tab.id) {
+      swapDocument(view, content);
+      renderPreview(content);
+    }
     redrawTabs();
     showToast(`Reloaded ${path.split("/").pop()} (changed externally)`, "info");
   }
@@ -760,8 +870,10 @@ function applyConflictDisk(): void {
   if (!tab) return;
   state.updateContent(tab.id, content);
   state.markClean(tab.id);
-  if (state.activeTabId === tab.id) swapDocument(view, content);
-  preview.render(content);
+  if (state.activeTabId === tab.id) {
+    swapDocument(view, content);
+    renderPreview(content);
+  }
   redrawTabs();
 }
 
@@ -808,17 +920,35 @@ listen<{ id: number; data: string }>("scrybe://cli-open", async event => {
   }
 }).catch(console.error);
 
-// `scrybe save foo.md` — save if open, else silent no-op.
-listen<string>("scrybe://cli-save", async event => {
-  const tab = state.tabs.find(t => t.path === event.payload);
-  if (!tab) return; // not open: no-op per design
+// `scrybe save foo.md` / MCP `save` — write an open tab's buffer to its file.
+// Request-with-reply: reports `{ path, bytes, was_dirty }` or ERR_TAB_NOT_OPEN,
+// so callers learn whether the save actually happened. Presentation is per
+// surface: the CLI keeps its documented silent no-op for a not-open path; the
+// MCP tool surfaces it as a business tool_error.
+listen<{ id: number; data: string }>("scrybe://cli-save", async event => {
+  const { id, data: path } = event.payload;
+  const tab = state.tabs.find(t => t.path === path);
+  if (!tab || !tab.path) {
+    await reply(id, { error: { code: ERR_TAB_NOT_OPEN, message: `not open: ${path}` } });
+    return;
+  }
+  const wasDirty = tab.isDirty;
+  // Snapshot the buffer before the await: keystrokes and concurrent socket
+  // edits mutate tab.content in place while the write is in flight. The
+  // snapshot is what save_file writes, so bytes must come from it, and the
+  // tab may only be marked clean if the buffer still matches what was saved.
+  const content = tab.content;
   try {
-    await invoke("save_file", { path: tab.path, content: tab.content });
+    await invoke("save_file", { path: tab.path, content });
     invoke("note_autosave", { path: tab.path }).catch(() => {});
-    state.markClean(tab.id);
+    if (tab.content === content) state.markClean(tab.id);
     redrawTabs();
+    const bytes = new TextEncoder().encode(content).length;
+    await reply(id, { result: { path: tab.path, bytes, was_dirty: wasDirty } });
   } catch (err) {
-    console.error("scrybe://cli-save failed:", err);
+    await reply(id, {
+      error: { code: -32603, message: `save failed: ${err instanceof Error ? err.message : err}` },
+    });
   }
 }).catch(console.error);
 
@@ -863,6 +993,7 @@ async function reply(id: number, body: ReplyOk | ReplyErr): Promise<void> {
 
 const ERR_TAB_NOT_OPEN = -32001;
 const ERR_SECTION_NOT_FOUND = -32004;
+const ERR_DIRTY_RELOAD_REFUSED = -32005;
 
 // `scrybe read <path>` — return the in-memory buffer (which may differ
 // from disk if there are unsaved edits).
@@ -903,7 +1034,7 @@ listen<{ id: number; data: { path: string; force: boolean } }>("scrybe://cli-rel
   }
   const wasDirty = tab.isDirty;
   if (wasDirty && !data.force) {
-    await reply(id, { error: { code: -32005, message: `unsaved edits in ${data.path} — pass force to discard` } });
+    await reply(id, { error: { code: ERR_DIRTY_RELOAD_REFUSED, message: `unsaved edits in ${data.path} — pass force to discard` } });
     return;
   }
   try {
@@ -912,7 +1043,7 @@ listen<{ id: number; data: { path: string; force: boolean } }>("scrybe://cli-rel
     state.markClean(tab.id);
     if (state.activeTabId === tab.id) {
       swapDocument(view, content);
-      preview.render(content);
+      renderPreview(content);
     }
     redrawTabs();
     const bytes = new TextEncoder().encode(content).length;
@@ -1073,9 +1204,14 @@ listen<{ id: number; data: { path: string; start_line: number; end_line: number;
     state.updateContent(tab.id, merged);
     if (state.activeTabId === tab.id) {
       swapDocument(view, merged);
-      preview.render(merged);
+      renderPreview(merged);
+      // swapDocument fires onChange with the programmatic-load suppress flag
+      // up, whose handler marks the active tab clean — right for file loads
+      // (open/reload), wrong here: this buffer now differs from disk. The
+      // markClean runs synchronously inside the dispatch, so re-assert.
+      state.markDirty(tab.id);
     }
     redrawTabs();
-    await reply(id, { result: { applied: true, size_after: merged.length } });
+    await reply(id, { result: { applied: true, size_after: merged.length, is_dirty: true } });
   },
 ).catch(console.error);

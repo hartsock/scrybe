@@ -22,6 +22,7 @@ pub(crate) fn specs() -> Vec<ToolSpec> {
         find_spec(),
         section_spec(),
         edit_spec(),
+        save_spec(),
         reload_spec(),
     ]
 }
@@ -227,6 +228,41 @@ fn edit_spec() -> ToolSpec {
     }
 }
 
+// ── save ──────────────────────────────────────────────────────────────────────
+
+fn save_spec() -> ToolSpec {
+    ToolSpec {
+        name: "save",
+        description: "Write an open tab's buffer to its file on disk. Edits \
+            made with `edit` stay in the in-memory buffer (dirty) until saved — \
+            that is deliberate: review with `read`/`render` first, and leave the \
+            buffer dirty to defer or discard (`reload` with `force`). Call `save` \
+            only when the change should persist. Address the tab by `path`. \
+            Returns `{ path, bytes, was_dirty }`.",
+        input_schema: || {
+            json!({
+                "type": "object",
+                "properties": { "path": { "type": "string" } },
+                "required": ["path"]
+            })
+        },
+        data_schema: DataSchema {
+            version: DATA_VERSION,
+            schema: || json!({ "type": "object" }),
+        },
+        mutates: true,
+        facet: Facet::Editor,
+        handler: |ctx, args| {
+            dispatch(
+                ctx,
+                "save",
+                "save",
+                json!({ "path": str_arg(args, "path") }),
+            )
+        },
+    }
+}
+
 // ── reload ────────────────────────────────────────────────────────────────────
 
 fn reload_spec() -> ToolSpec {
@@ -315,9 +351,48 @@ mod tests {
     }
 
     #[test]
+    fn save_forwards_path_and_reports_persist_result() {
+        let spy = std::sync::Arc::new(Spy {
+            reply: json!({ "path": "/a.md", "bytes": 42, "was_dirty": true }),
+            seen: std::sync::Mutex::new(None),
+        });
+        struct Fwd(std::sync::Arc<Spy>);
+        impl Transport for Fwd {
+            fn call(&self, m: &str, p: Value) -> Result<Value, TransportError> {
+                self.0.call(m, p)
+            }
+            fn is_live(&self) -> bool {
+                true
+            }
+        }
+        let reg = Registry::default();
+        let out = reg
+            .call(
+                "save",
+                &Ctx::with_transport(Box::new(Fwd(spy.clone()))),
+                &json!({ "path": "/a.md" }),
+            )
+            .unwrap();
+        assert!(out.is_ok());
+        assert_eq!(out.data["kind"], "save");
+        assert_eq!(out.data["bytes"], 42);
+        assert_eq!(out.data["was_dirty"], true);
+        let (method, params) = spy.seen.lock().unwrap().clone().unwrap();
+        assert_eq!(method, "save");
+        assert_eq!(params["path"], "/a.md");
+    }
+
+    #[test]
+    fn save_is_a_mutating_editor_tool() {
+        let reg = Registry::default();
+        let spec = reg.get("save").expect("save registered");
+        assert!(spec.mutates);
+    }
+
+    #[test]
     fn all_editor_tools_are_registered_and_no_app_is_a_business_failure() {
         let reg = Registry::default();
-        for name in ["open", "read", "find", "section", "edit", "reload"] {
+        for name in ["open", "read", "find", "section", "edit", "save", "reload"] {
             assert!(reg.get(name).is_some(), "missing tool: {name}");
         }
         // No live app → business tool_error, never an engine fault.
