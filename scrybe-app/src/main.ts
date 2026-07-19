@@ -862,17 +862,35 @@ listen<{ id: number; data: string }>("scrybe://cli-open", async event => {
   }
 }).catch(console.error);
 
-// `scrybe save foo.md` — save if open, else silent no-op.
-listen<string>("scrybe://cli-save", async event => {
-  const tab = state.tabs.find(t => t.path === event.payload);
-  if (!tab) return; // not open: no-op per design
+// `scrybe save foo.md` / MCP `save` — write an open tab's buffer to its file.
+// Request-with-reply: reports `{ path, bytes, was_dirty }` or ERR_TAB_NOT_OPEN,
+// so callers learn whether the save actually happened. Presentation is per
+// surface: the CLI keeps its documented silent no-op for a not-open path; the
+// MCP tool surfaces it as a business tool_error.
+listen<{ id: number; data: string }>("scrybe://cli-save", async event => {
+  const { id, data: path } = event.payload;
+  const tab = state.tabs.find(t => t.path === path);
+  if (!tab || !tab.path) {
+    await reply(id, { error: { code: ERR_TAB_NOT_OPEN, message: `not open: ${path}` } });
+    return;
+  }
+  const wasDirty = tab.isDirty;
+  // Snapshot the buffer before the await: keystrokes and concurrent socket
+  // edits mutate tab.content in place while the write is in flight. The
+  // snapshot is what save_file writes, so bytes must come from it, and the
+  // tab may only be marked clean if the buffer still matches what was saved.
+  const content = tab.content;
   try {
-    await invoke("save_file", { path: tab.path, content: tab.content });
+    await invoke("save_file", { path: tab.path, content });
     invoke("note_autosave", { path: tab.path }).catch(() => {});
-    state.markClean(tab.id);
+    if (tab.content === content) state.markClean(tab.id);
     redrawTabs();
+    const bytes = new TextEncoder().encode(content).length;
+    await reply(id, { result: { path: tab.path, bytes, was_dirty: wasDirty } });
   } catch (err) {
-    console.error("scrybe://cli-save failed:", err);
+    await reply(id, {
+      error: { code: -32603, message: `save failed: ${err instanceof Error ? err.message : err}` },
+    });
   }
 }).catch(console.error);
 
@@ -917,6 +935,7 @@ async function reply(id: number, body: ReplyOk | ReplyErr): Promise<void> {
 
 const ERR_TAB_NOT_OPEN = -32001;
 const ERR_SECTION_NOT_FOUND = -32004;
+const ERR_DIRTY_RELOAD_REFUSED = -32005;
 
 // `scrybe read <path>` — return the in-memory buffer (which may differ
 // from disk if there are unsaved edits).
@@ -957,7 +976,7 @@ listen<{ id: number; data: { path: string; force: boolean } }>("scrybe://cli-rel
   }
   const wasDirty = tab.isDirty;
   if (wasDirty && !data.force) {
-    await reply(id, { error: { code: -32005, message: `unsaved edits in ${data.path} — pass force to discard` } });
+    await reply(id, { error: { code: ERR_DIRTY_RELOAD_REFUSED, message: `unsaved edits in ${data.path} — pass force to discard` } });
     return;
   }
   try {
@@ -1128,8 +1147,13 @@ listen<{ id: number; data: { path: string; start_line: number; end_line: number;
     if (state.activeTabId === tab.id) {
       swapDocument(view, merged);
       preview.render(merged);
+      // swapDocument fires onChange with the programmatic-load suppress flag
+      // up, whose handler marks the active tab clean — right for file loads
+      // (open/reload), wrong here: this buffer now differs from disk. The
+      // markClean runs synchronously inside the dispatch, so re-assert.
+      state.markDirty(tab.id);
     }
     redrawTabs();
-    await reply(id, { result: { applied: true, size_after: merged.length } });
+    await reply(id, { result: { applied: true, size_after: merged.length, is_dirty: true } });
   },
 ).catch(console.error);
