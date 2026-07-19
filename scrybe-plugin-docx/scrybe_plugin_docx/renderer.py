@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import io
 import os
+import sys
 from typing import TYPE_CHECKING
 
 from docx import Document
@@ -221,13 +222,22 @@ def _embed_mermaid_source(png: bytes, source: str) -> bytes:
     """Embed the Mermaid source into the PNG's iTXt metadata, round-trippable
     via `scrybe_mermaid.extract`. Falls back to the unmodified PNG if the
     `scrybe_mermaid` binding (or its embed step) is unavailable, so export
-    never fails just because the codec is missing.
+    never fails just because the codec is missing — but degrades LOUDLY: a
+    warning is written to stderr so the un-embedded (non-round-trippable)
+    figure is visible instead of a silent quality regression.
     """
     try:
         import scrybe_mermaid
 
         return scrybe_mermaid.embed(png, source)
-    except Exception:
+    except Exception as exc:  # noqa: BLE001 — degrade loudly, never crash export
+        print(
+            "scrybe-docx: WARNING — could not embed Mermaid source into the "
+            f"PNG ({exc!r}); writing the diagram WITHOUT its embedded source, "
+            "so it will not round-trip via `extract`. Install the "
+            "`scrybe-mermaid` wheel to restore lossless provenance.",
+            file=sys.stderr,
+        )
         return png
 
 
