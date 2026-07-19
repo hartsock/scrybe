@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "scrybe.ai"
-version = "0.5.0"
+version = "0.6.0"
 description = "Scrybe — MCP-native Markdown editor. Metapackage installing the full Python toolkit (library + CLI + MCP server + Mermaid codec + docx export)."
 license = { text = "Apache-2.0" }
 readme = "README.md"
@@ -26,11 +26,11 @@ classifiers = [
     "Topic :: Text Processing :: Markup :: Markdown",
 ]
 dependencies = [
-    "scrybe-py == 0.5.0",
-    "scrybe-cli == 0.5.0",
-    "scrybe-mcp-server == 0.5.0",
-    "scrybe-mermaid == 0.5.0",
-    "scrybe-plugin-docx == 0.5.0",
+    "scrybe-py == 0.6.0",
+    "scrybe-cli == 0.6.0",
+    "scrybe-mcp-server == 0.6.0",
+    "scrybe-mermaid == 0.6.0",
+    "scrybe-plugin-docx == 0.6.0",
 ]
 
 [project.urls]

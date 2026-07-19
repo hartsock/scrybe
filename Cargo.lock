@@ -3906,7 +3906,7 @@ checksum = "94143f37725109f92c262ed2cf5e59bce7498c01bcc1502d7b9afe439a4e9f49"
 
 [[package]]
 name = "scrybe-app"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "anyhow",
  "dirs 5.0.1",
@@ -3933,7 +3933,7 @@ dependencies = [
 
 [[package]]
 name = "scrybe-cli"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "anyhow",
  "clap",
@@ -3953,7 +3953,7 @@ dependencies = [
 
 [[package]]
 name = "scrybe-core"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "anyhow",
  "blake3",
@@ -3970,7 +3970,7 @@ dependencies = [
 
 [[package]]
 name = "scrybe-mcp-client"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "anyhow",
  "dirs 5.0.1",
@@ -3985,7 +3985,7 @@ dependencies = [
 
 [[package]]
 name = "scrybe-mcp-server"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "anyhow",
  "clap",
@@ -4006,7 +4006,7 @@ dependencies = [
 
 [[package]]
 name = "scrybe-mermaid"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -4023,7 +4023,7 @@ dependencies = [
 
 [[package]]
 name = "scrybe-mermaid-render"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "anyhow",
  "hex",
@@ -4033,7 +4033,7 @@ dependencies = [
 
 [[package]]
 name = "scrybe-py"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "anyhow",
  "pyo3",
@@ -4047,7 +4047,7 @@ dependencies = [
 
 [[package]]
 name = "scrybe-render"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "anyhow",
  "pulldown-cmark",
@@ -4060,7 +4060,7 @@ dependencies = [
 
 [[package]]
 name = "scrybe-rpc"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -4069,7 +4069,7 @@ dependencies = [
 
 [[package]]
 name = "scrybe-tools"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "scrybe-core",
  "scrybe-mermaid",
@@ -4084,7 +4084,7 @@ dependencies = [
 
 [[package]]
 name = "scrybe-tui"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "anyhow",
  "clap",
@@ -4095,7 +4095,7 @@ dependencies = [
 
 [[package]]
 name = "scrybe-vcs"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "anyhow",
  "chrono",

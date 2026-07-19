@@ -9,6 +9,27 @@ All notable changes to Scrybe are documented here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/); versions are the workspace
 lock-step version (`[workspace.package] version`).
 
+## [0.6.0] — 2026-07-19
+
+The app grows its native chrome, and the release machinery learns to ship
+everywhere it promised — this is the first version published to **npm**.
+
+### App
+- **Native menu bar** — File / Edit / View / Window (#184, #185): Tauri 2
+  menu with a unit-tested `MENU_IDS` id↔action contract; custom items route
+  over one `scrybe://menu` event.
+
+### Release machinery (v0.5.0 postmortem, #187)
+- **npm publishes again on macOS**: the tag-vs-version assert used a GNU-sed
+  construct BSD sed rejects, so both darwin npm-binary jobs failed spuriously
+  at v0.5.0 and the npm umbrella was skipped. npm (`scrybe-ai`,
+  `@scrybe-ai/cli` + platform packages) debuts at this version.
+- **The v0.5 crates join the crates.io publish matrix**: `scrybe-tools` and
+  `scrybe-mermaid-render` had no publish jobs, so `scrybe-mcp-server`'s
+  `=X.Y.Z` pin could never resolve and the chain broke; both now publish in
+  topological order before it. (crates.io consequently skips 0.5.0 for
+  `scrybe-mcp-server`/`scrybe-cli` — they jump 0.4.0 → 0.6.0.)
+
 ## [0.5.0] — 2026-07-19 — "Parity"
 
 One tool registry now serves every surface, and the Mermaid pipeline is pure
