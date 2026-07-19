@@ -9,6 +9,49 @@ All notable changes to Scrybe are documented here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/); versions are the workspace
 lock-step version (`[workspace.package] version`).
 
+## [0.5.0] — 2026-07-19 — "Parity"
+
+One tool registry now serves every surface, and the Mermaid pipeline is pure
+Rust end-to-end. Buffers stay dirty until an explicit `save` — the agent and
+the human share the same persist semantics.
+
+### One shared tool registry (#121, #122)
+- **`scrybe-tools`**: a single `ToolSpec` registry consumed by BOTH the MCP
+  server and the CLI (#169). Business failures are in-band `tool_error` data;
+  engine faults alone are MCP `isError`.
+- **The MCP server serves the shared registry** (#177), retiring the legacy
+  per-tool handlers from the dispatch path (dead shadow `Workspace` mapped in
+  #181, marked in-code in #182).
+- **Editor tools over the socket** (#176, #179): `open`/`read`/`find`/
+  `section`/`edit` dispatch to the *live app* via `scrybe-rpc` on the
+  path-addressed contract; headless returns a clean `no_live_app` tool_error.
+- **`list_tabs`** — the live tab set over the socket, CLI + MCP (#46, #178).
+- **`reload`** — re-read a tab from disk as a first-class socket method +
+  tool, replacing the old `/tmp` poke (#180); refusing to clobber unsaved
+  edits without `force` (`ERR_DIRTY_RELOAD_REFUSED`).
+- **`save`** — explicit persist as a first-class tool, the agent-side twin of
+  Cmd+S / 💾 (#183): reply-correlated `{path, bytes, was_dirty}` (no more
+  optimistic `applied: true`), plus two dirty-truthfulness fixes (socket
+  edits of the active tab stay dirty; mid-write keystrokes are never marked
+  clean). Autosave writes only the `.scrybe-buffer` crash-recovery sidecar —
+  the real file changes only on explicit save.
+
+### Pure-Rust Mermaid (#37, #119, #132)
+- **Adopted `mermaid-rs-renderer`** behind `scrybe-mermaid-render` (#171):
+  SVG with embedded `<metadata>` provenance; the #132 fidelity gate passed on
+  a real render drive.
+- **`render_png`** — SVG → PNG via the crate's resvg path (#172), and a
+  per-artifact **uuid in the iTXt payload** (#173) so every PNG carries
+  provenance (`source`, `sha256`, `uuid`).
+- **`mermaid_to_png` tool** + `scrybe mermaid png` CLI + skill (#174) — the
+  full headless diagram pipeline, no browser, no JS.
+
+### Fixed
+- Flaky parallel-test failures in `scrybe-mcp-client` (shared fixed temp
+  paths → unique per-spawn names); Windows CI job added and green.
+- `scrybe-vcs` status test made toolchain-portable (`Path::new` comparison —
+  compiles on the pinned 1.88 and current stable).
+
 ## [0.4.0] — 2026-07-14 — "Keystone"
 
 The MCP server now genuinely **drives the live editor**, and the release
