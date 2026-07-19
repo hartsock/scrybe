@@ -353,7 +353,9 @@ mod tests {
 
         // b.txt should still be untracked.
         let entries = repo.status().unwrap();
-        assert!(entries.iter().any(|e| e.path == std::path::Path::new("b.txt")));
+        assert!(entries
+            .iter()
+            .any(|e| e.path == std::path::Path::new("b.txt")));
     }
 
     // ── log ───────────────────────────────────────────────────────────────────
