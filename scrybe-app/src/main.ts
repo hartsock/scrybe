@@ -89,7 +89,7 @@ const preview = new PreviewPane(previewEl);
 // per-tab) and are mirrored to the MCP `state` tool via `publishState`.
 let currentTheme: Theme = "default";
 let vimEnabled = false;
-let wrapEnabled = false;
+let wrapEnabled = true;
 
 function flashSidebar(dir: string): void {
   sidebar.loadDirectory(dir);
@@ -226,7 +226,12 @@ async function printActiveTab(): Promise<void> {
   await preview.render(tab.content);
   // KaTeX/Mermaid post-processing is async; give it a beat before the snapshot.
   await new Promise((r) => setTimeout(r, 250));
-  window.print();
+  // WKWebView ignores JS window.print(); route to the native print dialog.
+  try {
+    await invoke("print_document");
+  } catch (err) {
+    showToast(`Print failed: ${err instanceof Error ? err.message : err}`);
+  }
 }
 
 /// Apply a theme to BOTH panes so the editor chrome matches the preview,
@@ -286,6 +291,7 @@ function setWrapEnabled(on: boolean): void {
 /// `state` tool can report what the human is looking at (active path,
 /// view mode, theme, vim). The human-side equivalents are the path bar,
 /// the tab mode icon, the theme dropdown, and the Vim toggle.
+let lastMenuSync = "";
 function publishState(): void {
   const tab = state.activeTab();
   invoke("publish_state", {
@@ -300,6 +306,16 @@ function publishState(): void {
       open_paths: state.tabs.map(t => t.path).filter((p): p is string => !!p),
     },
   }).catch(() => { /* state mirror is best-effort */ });
+  // Mirror the same state onto the native menu's check items (theme radio,
+  // Vim, Wrap) so menu, toolbar, and MCP can never disagree for long.
+  // publishState fires per keystroke (via redrawTabs), so skip the IPC and
+  // the five native menu mutations unless one of the three values changed.
+  const menuState = `${currentTheme}|${vimEnabled}|${wrapEnabled}`;
+  if (menuState !== lastMenuSync) {
+    lastMenuSync = menuState;
+    invoke("menu_sync", { theme: currentTheme, vim: vimEnabled, wrap: wrapEnabled })
+      .catch(() => { /* menu mirror is best-effort */ });
+  }
 }
 
 /// Update the selectable path bar to show the active tab's full path, and
@@ -650,6 +666,9 @@ newTab();
 applyViewMode(state.activeTab()?.viewMode ?? "both");
 setToolbarTheme(toolbarEl, currentTheme);
 setToolbarVim(toolbarEl, vimEnabled);
+// Word wrap defaults on — apply it to the editor (not just the toolbar), so
+// long lines wrap to the pane instead of scrolling off-screen out of the box.
+setWrap(view, wrapEnabled);
 setToolbarWrap(toolbarEl, wrapEnabled);
 invoke<string | null>("get_initial_directory").then(dir =>
   dir ? sidebar.loadDirectory(dir) : homeDir().then(home => sidebar.loadDirectory(home))
@@ -658,6 +677,41 @@ invoke<string | null>("get_initial_file").then(file => {
   console.log("get_initial_file:", file);
   if (file) openFileByPath(file);
 }).catch(err => console.error("get_initial_file failed:", err));
+
+// Native menu bar (#184). Each item id routes to the same single-entry-point
+// function its toolbar/keyboard twin uses, so the human ↔ MCP parity rule
+// holds with no new tools. Predefined items (Edit menu, quit, …) are handled
+// by the OS and never arrive here.
+listen<string>("scrybe://menu", event => {
+  switch (event.payload) {
+    case "new_tab":     newTab(); break;
+    case "open_file":   document.getElementById("open-file")?.click(); break;
+    case "open_folder": document.getElementById("open-folder")?.click(); break;
+    case "save":        void saveActiveTabNow(); break;
+    case "reload":      void reloadActiveTabNow(); break;
+    case "export_docx": void exportActiveTabToWord(); break;
+    case "print":       void printActiveTab(); break;
+    case "close_tab":
+      // macOS convention: ⌘W closes the tab, and falls through to closing
+      // the window when there is no tab left to close.
+      if (state.activeTabId) {
+        closeTab(state.activeTabId);
+      } else {
+        void import("@tauri-apps/api/window").then(w => w.getCurrentWindow().close());
+      }
+      break;
+    case "cycle_view":  cyclePreviewMode(); break;
+    case "theme_default":   applyTheme("default"); break;
+    case "theme_dark":      applyTheme("dark"); break;
+    case "theme_solarized": applyTheme("solarized"); break;
+    case "toggle_vim":  setVimEnabled(!vimEnabled); break;
+    case "toggle_wrap": setWrapEnabled(!wrapEnabled); break;
+    case "close_window":
+      void import("@tauri-apps/api/window").then(w => w.getCurrentWindow().close());
+      break;
+    default: console.warn("unknown menu action:", event.payload);
+  }
+}).catch(console.error);
 
 // When a second `scrybe open <path>` is run, the single-instance plugin
 // forwards the path here instead of spawning a new window.
