@@ -32,6 +32,7 @@ pub const MENU_IDS: &[&str] = &[
     "save",
     "reload",
     "export_docx",
+    "export_figures",
     "print",
     "close_tab",
     "cycle_view",
@@ -77,6 +78,13 @@ pub fn build(app: &AppHandle<Wry>) -> tauri::Result<Menu<Wry>> {
     let save = MenuItem::with_id(app, "save", "Save", true, Some("CmdOrCtrl+S"))?;
     let reload = MenuItem::with_id(app, "reload", "Reload from Disk", true, Some("CmdOrCtrl+R"))?;
     let export_docx = MenuItem::with_id(app, "export_docx", "Export to Word…", true, None::<&str>)?;
+    let export_figures = MenuItem::with_id(
+        app,
+        "export_figures",
+        "Export Diagrams…",
+        true,
+        None::<&str>,
+    )?;
     let print = MenuItem::with_id(app, "print", "Print…", true, Some("CmdOrCtrl+P"))?;
     let close_tab = MenuItem::with_id(app, "close_tab", "Close Tab", true, Some("CmdOrCtrl+W"))?;
 
@@ -93,6 +101,7 @@ pub fn build(app: &AppHandle<Wry>) -> tauri::Result<Menu<Wry>> {
             &reload,
             &PredefinedMenuItem::separator(app)?,
             &export_docx,
+            &export_figures,
             &print,
             &PredefinedMenuItem::separator(app)?,
             &close_tab,

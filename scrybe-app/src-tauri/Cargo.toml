@@ -21,6 +21,7 @@ scrybe-core.workspace = true
 scrybe-render.workspace = true
 scrybe-mcp-client.workspace = true
 scrybe-mcp-server.workspace = true
+scrybe-tools.workspace = true
 scrybe-vcs.workspace = true
 scrybe-rpc.workspace = true
 anyhow.workspace = true

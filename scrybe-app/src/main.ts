@@ -351,6 +351,27 @@ async function exportActiveTabToWord(): Promise<void> {
   }
 }
 
+/// Export every Mermaid diagram in the active tab to sibling PNG figures
+/// (`<stem>_fig_NN.png`) next to the document. Requires a saved tab — the
+/// figures are placed beside the file on disk, so an unsaved scratch buffer
+/// has nowhere to write them. Uses the live buffer so unsaved edits are
+/// included. The MCP/CLI `export_figures` tool is the agent-side equivalent.
+async function exportActiveTabFigures(): Promise<void> {
+  const tab = state.activeTab();
+  if (!tab) { showToast("No tab to export", "info"); return; }
+  if (!tab.path) { showToast("Save the document first", "info"); return; }
+  try {
+    const paths = await invoke<string[]>("export_figures", {
+      content: tab.content,
+      path: tab.path,
+    });
+    showToast(`Exported ${paths.length} diagram(s)`, "info");
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    showToast(`Export failed: ${msg}`);
+  }
+}
+
 // Keyboard shortcuts for save + reload (mirrors the toolbar buttons).
 window.addEventListener("keydown", (e) => {
   const mod = e.metaKey || e.ctrlKey;
@@ -690,6 +711,7 @@ listen<string>("scrybe://menu", event => {
     case "save":        void saveActiveTabNow(); break;
     case "reload":      void reloadActiveTabNow(); break;
     case "export_docx": void exportActiveTabToWord(); break;
+    case "export_figures": void exportActiveTabFigures(); break;
     case "print":       void printActiveTab(); break;
     case "close_tab":
       // macOS convention: ⌘W closes the tab, and falls through to closing

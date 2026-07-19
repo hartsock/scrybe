@@ -3916,6 +3916,7 @@ dependencies = [
  "scrybe-mcp-server",
  "scrybe-render",
  "scrybe-rpc",
+ "scrybe-tools",
  "scrybe-vcs",
  "serde",
  "serde_json",
