@@ -4,12 +4,13 @@
 //! and accepts JSON-RPC 2.0 requests. Each request is dispatched onto a
 //! Tauri event broadcast to the frontend, which already owns tab state.
 //!
-//! Phase 1 methods (fire-and-forget): `save`, `close`, `quit`.
+//! Fire-and-forget methods: `close`, `quit`.
 //! Each emits a typed event to the frontend and acks the caller.
 //!
-//! Phase 2 methods (request-with-reply): `open`, `read`, `find`, `section`,
-//! `edit`. (`open` moved here so the caller blocks until the tab is actually
-//! created — removing the open→edit race, #141.)
+//! Request-with-reply methods: `open`, `save`, `read`, `find`, `section`,
+//! `edit`, `list_tabs`, `reload`. (`open` moved here so the caller blocks
+//! until the tab is actually created — removing the open→edit race, #141;
+//! `save` moved here so callers learn whether the write really happened.)
 //! These need data BACK from the frontend (buffer content, search hits,
 //! etc.). Pattern:
 //!   1. Server registers a oneshot channel keyed by request id in
@@ -217,12 +218,12 @@ fn handle_connection(stream: UnixStream, app: AppHandle) {
 
 fn dispatch(app: &AppHandle, req: &Request) -> Response {
     match req.method.as_str() {
-        // Phase 1 — fire-and-forget GUI mutations.
-        "open" => handle_open(app, req),
-        "save" => handle_save(app, req),
+        // Fire-and-forget GUI mutations.
         "close" => handle_close(app, req),
         "quit" => handle_quit(app, req),
-        // Phase 2 — request-with-reply read-side commands.
+        // Request-with-reply commands.
+        "open" => handle_open(app, req),
+        "save" => handle_save(app, req),
         "read" => handle_read(app, req),
         "find" => handle_find(app, req),
         "section" => handle_section(app, req),
@@ -285,6 +286,10 @@ fn handle_reload(app: &AppHandle, req: &Request) -> Response {
     )
 }
 
+/// `save` — write an open tab's buffer to its file. Request-with-reply: the
+/// frontend performs the write and replies `{ path, bytes, was_dirty }`, or
+/// `ERR_TAB_NOT_OPEN` — so callers learn whether the save actually happened
+/// (the old fire-and-forget ack said `applied: true` unconditionally).
 fn handle_save(app: &AppHandle, req: &Request) -> Response {
     let params: SaveParams = match parse_params(req) {
         Ok(p) => p,
@@ -294,16 +299,7 @@ fn handle_save(app: &AppHandle, req: &Request) -> Response {
         Ok(p) => p,
         Err(r) => return Response::err(req.id, ERR_INVALID_PARAMS, r),
     };
-    if let Err(e) = app.emit("scrybe://cli-save", path) {
-        return Response::err(req.id, ERR_INTERNAL, format!("emit failed: {e}"));
-    }
-    // Frontend decides applied vs no-op; until reply correlation lands
-    // (Phase 2) we ack `applied: true` optimistically. The CLI human-mode
-    // output explains this is fire-and-forget.
-    Response::ok(
-        req.id,
-        serde_json::to_value(AckResult { applied: true }).unwrap(),
-    )
+    dispatch_with_reply(app, req, "scrybe://cli-save", path)
 }
 
 fn handle_close(app: &AppHandle, req: &Request) -> Response {

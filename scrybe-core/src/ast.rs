@@ -13,28 +13,28 @@ use pulldown_cmark::{Event, HeadingLevel, Options, Parser, Tag, TagEnd};
 #[derive(Debug, Clone, PartialEq)]
 pub enum Node {
     /// A heading with a numeric level (1–6) and inline children.
-    Heading { level: u8, children: Vec<Node> },
+    Heading { level: u8, children: Vec<Self> },
     /// A block of inline content.
-    Paragraph { children: Vec<Node> },
+    Paragraph { children: Vec<Self> },
     /// A fenced code block with an optional language tag.
     FencedCode { lang: String, content: String },
     /// Inline code span.
     InlineCode { content: String },
     /// A block quote containing block children.
-    BlockQuote { children: Vec<Node> },
+    BlockQuote { children: Vec<Self> },
     /// An ordered or unordered list.
-    List { ordered: bool, items: Vec<Node> },
+    List { ordered: bool, items: Vec<Self> },
     /// A list item containing block children.
-    ListItem { children: Vec<Node> },
+    ListItem { children: Vec<Self> },
     /// Emphasised (italic) inline content.
-    Emphasis { children: Vec<Node> },
+    Emphasis { children: Vec<Self> },
     /// Strong (bold) inline content.
-    Strong { children: Vec<Node> },
+    Strong { children: Vec<Self> },
     /// A hyperlink.
     Link {
         href: String,
         title: String,
-        children: Vec<Node>,
+        children: Vec<Self>,
     },
     /// An image.
     Image { src: String, alt: String },

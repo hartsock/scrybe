@@ -21,6 +21,7 @@ scrybe-mcp-server tools
 | `read` | Read Markdown source (the LIVE buffer when the app is running) | `id` |
 | `section` | Extract a heading section by heading text (substring) | `id`, `heading` |
 | `edit` | Replace an inclusive 1-indexed LINE RANGE with new content (live buffer) | `id`, `start_line`, `end_line`, `content` |
+| `save` | Write an open tab's buffer to its file (explicit persist; buffers stay dirty until saved) | `path` |
 | `find` | Search for a string with line context (live buffer) | `id`, `query` |
 | `render` | Render document to HTML | `id`, `theme?` |
 | `embed` | Embed Mermaid source into a PNG (iTXt) | `png_path`, `source` |
@@ -81,20 +82,24 @@ Co-Authored-By: Beaver (MacBook, Claude Sonnet 4.6) <noreply@anthropic.com>
 
 ## Editing Documents via MCP
 
-Preferred workflow for modifying a document:
+Preferred workflow for modifying a document (tabs are addressed by `path`):
 
 ```
-1. open(path)           → get doc ID
-2. read(id)             → inspect current content
-3. find(id, query)      → locate target text
-4. edit(id, old, new)   → make change (first occurrence only)
-5. render(id)           → verify rendered output
+1. open(path)                                  → tab is live in the editor
+2. read(path)                                  → inspect the buffer (+ is_dirty)
+3. find(pattern, paths?)                       → locate target text
+4. edit(path, start_line, end_line, content)   → change the buffer (stays dirty)
+5. read(path) / render                         → verify the result
+6. save(path)                                  → persist to disk — or don't
 ```
 
-The file is **not written to disk** via MCP tools — `edit` updates the
-in-memory workspace. The running GUI writes to disk via autosave (1 s
-debounce). If running headlessly, call `render` or `lint` but manage disk
-writes yourself.
+`edit` changes only the **in-memory buffer** and leaves the tab dirty —
+deliberately. The dirty buffer is the review step: verify first, then call
+`save(path)` to write the file, or skip `save` (and `reload` with `force`)
+to discard. Autosave only writes a `<path>.scrybe-buffer` crash-recovery
+sidecar, never the real file. The human's Cmd+S / 💾 and the agent's `save`
+are the same explicit act. Headless (no running app), the editor tools
+return a `no_live_app` tool_error — manage disk writes yourself.
 
 ## Swarm Participation (scrybe-swarm)
 

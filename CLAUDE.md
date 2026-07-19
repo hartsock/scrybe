@@ -21,7 +21,7 @@ not make the toolchain more impressive.
 |---|---|---|
 | `scrybe-core/` | Rust | AST, Document, ContentAddressable (BLAKE3+CBOR), Plugin trait, Workspace |
 | `scrybe-render/` | Rust | HTML pipeline, syntect highlighting, KaTeX/Mermaid |
-| `scrybe-mcp-server/` | Rust | Inbound MCP server — tools: open/read/section/edit/find/render/embed/extract/lint/logs/reload/quit/close_tab + UI-parity tools state/set_theme/view_mode/set_vim/export |
+| `scrybe-mcp-server/` | Rust | Inbound MCP server — tools: open/read/section/edit/save/find/render/embed/extract/lint/list_tabs/mermaid_to_png/logs/reload/quit/close_tab + UI-parity tools state/set_theme/view_mode/set_vim/export |
 | `scrybe-mcp-client/` | Rust | Outbound MCP — registers external agent servers |
 | `scrybe-mermaid/` | Rust | PNG iTXt codec (Mermaid source embedded in PNG metadata) |
 | `scrybe-panels/` | Rust | Bake-off orchestrator + SQLite calibration log |
@@ -158,9 +158,13 @@ Scrybe is itself an MCP server. To connect Claude Code:
 claude mcp add scrybe -- scrybe-mcp-server stdio
 ```
 
-Available tools: `open`, `read`, `section`, `edit`, `find`, `render`,
-`embed`, `extract`, `lint`, `logs`, `reload`, `quit`, `close_tab`,
-`state`, `set_theme`, `view_mode`, `set_vim`, `export`
+Available tools: `open`, `read`, `section`, `edit`, `save`, `find`,
+`render`, `embed`, `extract`, `lint`, `list_tabs`, `mermaid_to_png`,
+`logs`, `reload`, `quit`, `close_tab`, `state`, `set_theme`,
+`view_mode`, `set_vim`, `export`
+
+Edits land in the in-memory buffer and leave the tab dirty; `save` is the
+explicit persist (the agent-side twin of Cmd+S / 💾).
 
 Every human control in scrybe-app has an MCP equivalent and vice versa
 (`state`/`set_theme`/`view_mode`/`set_vim`/`export` mirror the path bar,

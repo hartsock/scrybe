@@ -355,7 +355,7 @@ mod tests {
         let entries = repo.status().unwrap();
         assert!(entries
             .iter()
-            .any(|e| e.path == std::path::PathBuf::from("b.txt")));
+            .any(|e| e.path == std::path::Path::new("b.txt")));
     }
 
     // ── log ───────────────────────────────────────────────────────────────────
