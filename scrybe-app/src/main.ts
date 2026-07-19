@@ -15,7 +15,7 @@ import { save as saveDialog } from "@tauri-apps/plugin-dialog";
 import { showToast } from "./toast";
 import { AppState } from "./state";
 import { renderTabBar } from "./tabs";
-import { createEditor, swapDocument, shouldSuppressAutosave, setEditorTheme, setVim, setWrap } from "./editor";
+import { createEditor, swapDocument, shouldSuppressAutosave, setEditorTheme, setVim, setWrap, setEditorLanguage, classifyFile } from "./editor";
 import { PreviewPane } from "./preview";
 import { buildToolbar, setToolbarViewMode, setToolbarTheme, setToolbarVim, setToolbarWrap } from "./toolbar";
 import type { Theme } from "./toolbar";
@@ -145,15 +145,10 @@ const vcsPanel = new VcsPanel(vcsContainer);
 
 // Sidebar — file browser + agent registration panel
 const sidebar = new Sidebar(sidebarEl, async (path) => {
-  try {
-    const content: string = await invoke("read_file", { path });
-    state.addTab(path, content);
-    swapDocument(view, content);
-    preview.render(content);
-    redrawTabs();
-  } catch (err) {
-    console.error("Failed to open file:", err);
-  }
+  // Route through openFileByPath so sidebar opens get the same
+  // language/kind classification, image/.mmd handling, and buffer-restore
+  // as every other open path.
+  await openFileByPath(path);
 }, async (dirPath) => {
   // When a folder is opened, also attempt to open as a git repo.
   vcsPanel.openRepo(dirPath).catch(() => { /* not a git repo — panel shows hint */ });
@@ -223,6 +218,11 @@ buildToolbar(toolbarEl, {
 async function printActiveTab(): Promise<void> {
   const tab = state.activeTab();
   if (!tab) return;
+  // Print renders the Markdown preview; a code/text tab has none.
+  if (tab.kind !== "markdown") {
+    showToast("Printing is available for Markdown documents", "info");
+    return;
+  }
   await preview.render(tab.content);
   // KaTeX/Mermaid post-processing is async; give it a beat before the snapshot.
   await new Promise((r) => setTimeout(r, 250));
@@ -244,7 +244,7 @@ function applyTheme(theme: Theme): void {
   setEditorTheme(view, theme);
   setToolbarTheme(toolbarEl, theme);
   const tab = state.activeTab();
-  if (tab) preview.render(tab.content);
+  if (tab) renderPreview(tab.content);
   publishState();
 }
 
@@ -262,6 +262,15 @@ function cyclePreviewMode(): void {
 function setViewMode(mode: string): void {
   const tab = state.activeTab();
   if (!tab) return;
+  // A code/text tab has no rendered preview — it stays edit-only regardless of
+  // what an agent requests, mirroring the guard in state.cycleViewMode so the
+  // MCP concrete-mode path can't flip a source file into a blank preview.
+  if (tab.kind !== "markdown") {
+    tab.viewMode = "edit";
+    applyViewMode("edit");
+    redrawTabs();
+    return;
+  }
   if (mode === "both" || mode === "edit" || mode === "preview") {
     tab.viewMode = mode;
     applyViewMode(mode);
@@ -396,7 +405,7 @@ const view = createEditor(editorEl, WELCOME, async (content) => {
   const saveId   = tab?.id   ?? null;
 
   const processed = await pluginManager.runAll(content);
-  preview.render(processed || content);
+  renderPreview(processed || content);
 
   // Programmatic loads must not schedule an autosave: doing so would
   // immediately call `note_autosave()` and open a 2 s self-write window
@@ -439,6 +448,16 @@ function applyViewMode(mode: string): void {
   publishState();
 }
 
+/// Render `content` into the preview pane — but ONLY for Markdown documents.
+/// Code/text tabs open edit-only and have no rendered preview, so this is a
+/// no-op for them; that stops source files from being parsed as Markdown into
+/// garbled HTML. The single gate every render-on-load/edit site routes through.
+function renderPreview(content: string): void {
+  if (state.activeTab()?.kind === "markdown") {
+    void preview.render(content);
+  }
+}
+
 function redrawTabs(): void {
   renderTabBar(tabBarEl, state,
     id => selectTab(id),
@@ -454,16 +473,20 @@ function selectTab(id: string): void {
   const tab = state.activeTab();
   if (tab) {
     swapDocument(view, tab.content);
-    preview.render(tab.content);
+    // Re-highlight for this tab's language (code vs Markdown) and restore its
+    // view mode; only Markdown tabs get a rendered preview.
+    void setEditorLanguage(view, tab.path);
+    renderPreview(tab.content);
     applyViewMode(tab.viewMode);
   }
   redrawTabs();
 }
 
 function newTab(content = WELCOME): void {
-  state.addTab(null, content);
+  state.addTab(null, content); // untitled → Markdown
   swapDocument(view, content);
-  preview.render(content);
+  void setEditorLanguage(view, null);
+  renderPreview(content);
   redrawTabs();
 }
 
@@ -527,7 +550,10 @@ function doCloseTab(id: string): void {
   const active = state.activeTab();
   const content = active?.content ?? "";
   swapDocument(view, content);
-  if (content) preview.render(content);
+  // The newly-active tab may be a different language/kind than the closed one.
+  void setEditorLanguage(view, active?.path ?? null);
+  applyViewMode(active?.viewMode ?? "both");
+  renderPreview(content);
   redrawTabs();
 }
 
@@ -594,7 +620,9 @@ async function openFileByPath(path: string): Promise<void> {
     if (existing) {
       state.activeTabId = existing.id;
       swapDocument(view, existing.content);
-      preview.render(ext === "mmd" ? "```mermaid\n" + existing.content + "\n```" : existing.content);
+      void setEditorLanguage(view, existing.path);
+      applyViewMode(existing.viewMode);
+      renderPreview(ext === "mmd" ? "```mermaid\n" + existing.content + "\n```" : existing.content);
       redrawTabs();
       return;
     }
@@ -632,10 +660,14 @@ async function openFileByPath(path: string): Promise<void> {
       }
     }
 
-    const newTabId = state.addTab(path, useContent);
+    const { kind } = classifyFile(path);
+    const newTabId = state.addTab(path, useContent, kind);
     invoke("watch_file", { path }).catch(() => {});
     swapDocument(view, useContent);
-    preview.render(ext === "mmd" ? "```mermaid\n" + useContent + "\n```" : useContent);
+    // Highlight for the file's language and open code/text edit-only.
+    void setEditorLanguage(view, path);
+    applyViewMode(state.activeTab()?.viewMode ?? "both");
+    renderPreview(ext === "mmd" ? "```mermaid\n" + useContent + "\n```" : useContent);
     // Restored buffer differs from disk → flag the tab dirty so the user
     // gets the dirty indicator and the save-on-close prompt next time.
     if (restoredFromBuffer) state.markDirty(newTabId);
@@ -773,8 +805,10 @@ async function reloadTabFromDisk(path: string): Promise<void> {
     // Clean buffer — auto-reload and toast
     state.updateContent(tab.id, content);
     state.markClean(tab.id);
-    if (state.activeTabId === tab.id) swapDocument(view, content);
-    preview.render(content);
+    if (state.activeTabId === tab.id) {
+      swapDocument(view, content);
+      renderPreview(content);
+    }
     redrawTabs();
     showToast(`Reloaded ${path.split("/").pop()} (changed externally)`, "info");
   }
@@ -814,8 +848,10 @@ function applyConflictDisk(): void {
   if (!tab) return;
   state.updateContent(tab.id, content);
   state.markClean(tab.id);
-  if (state.activeTabId === tab.id) swapDocument(view, content);
-  preview.render(content);
+  if (state.activeTabId === tab.id) {
+    swapDocument(view, content);
+    renderPreview(content);
+  }
   redrawTabs();
 }
 
@@ -985,7 +1021,7 @@ listen<{ id: number; data: { path: string; force: boolean } }>("scrybe://cli-rel
     state.markClean(tab.id);
     if (state.activeTabId === tab.id) {
       swapDocument(view, content);
-      preview.render(content);
+      renderPreview(content);
     }
     redrawTabs();
     const bytes = new TextEncoder().encode(content).length;
@@ -1146,7 +1182,7 @@ listen<{ id: number; data: { path: string; start_line: number; end_line: number;
     state.updateContent(tab.id, merged);
     if (state.activeTabId === tab.id) {
       swapDocument(view, merged);
-      preview.render(merged);
+      renderPreview(merged);
       // swapDocument fires onChange with the programmatic-load suppress flag
       // up, whose handler marks the active tab clean — right for file loads
       // (open/reload), wrong here: this buffer now differs from disk. The

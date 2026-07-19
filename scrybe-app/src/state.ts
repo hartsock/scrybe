@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
+import type { DocKind } from "./editor";
+
 export type ViewMode = "both" | "edit" | "preview";
 const VIEW_CYCLE: ViewMode[] = ["both", "edit", "preview"];
 
@@ -9,13 +11,16 @@ export interface TabEntry {
   isDirty: boolean;
   content: string;
   viewMode: ViewMode;
+  /// How this document is treated. `code`/`text` tabs have no Markdown
+  /// preview, so they open (and stay) in edit-only view.
+  kind: DocKind;
 }
 
 export class AppState {
   tabs: TabEntry[] = [];
   activeTabId: string | null = null;
 
-  addTab(path: string | null, content: string): string {
+  addTab(path: string | null, content: string, kind: DocKind = "markdown"): string {
     if (path) {
       const existing = this.tabs.find(t => t.path === path);
       if (existing) {
@@ -25,7 +30,9 @@ export class AppState {
     }
     const id = crypto.randomUUID();
     const title = path ? path.split("/").pop() ?? "Untitled" : "Untitled";
-    this.tabs.push({ id, path, title, isDirty: false, content, viewMode: "both" });
+    // Code/text documents have no Markdown preview — open edit-only.
+    const viewMode: ViewMode = kind === "markdown" ? "both" : "edit";
+    this.tabs.push({ id, path, title, isDirty: false, content, viewMode, kind });
     this.activeTabId = id;
     return id;
   }
@@ -52,6 +59,11 @@ export class AppState {
   cycleViewMode(id: string): ViewMode {
     const tab = this.tabs.find(t => t.id === id);
     if (!tab) return "both";
+    // A code/text document has no rendered preview to cycle to — stay edit-only.
+    if (tab.kind !== "markdown") {
+      tab.viewMode = "edit";
+      return "edit";
+    }
     tab.viewMode = VIEW_CYCLE[(VIEW_CYCLE.indexOf(tab.viewMode) + 1) % VIEW_CYCLE.length];
     return tab.viewMode;
   }
