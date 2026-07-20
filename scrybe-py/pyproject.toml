@@ -4,7 +4,7 @@ build-backend = "maturin"
 
 [project]
 name = "scrybe-py"
-version = "0.6.0"
+version = "0.6.1"
 description = "Scrybe — MCP-native Markdown editor library (Rust-backed). Provides the `scrybe` import package."
 license = {text = "Apache-2.0"}
 readme = "README.md"
