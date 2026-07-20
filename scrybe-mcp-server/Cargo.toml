@@ -28,7 +28,6 @@ tracing.workspace = true
 tracing-subscriber.workspace = true
 tokio.workspace = true
 clap.workspace = true
-which.workspace = true
 
 [dev-dependencies]
 tempfile = "3"

@@ -4000,7 +4000,6 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber",
- "which",
 ]
 
 [[package]]
@@ -4081,6 +4080,7 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.18",
  "uuid",
+ "which",
 ]
 
 [[package]]

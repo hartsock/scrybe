@@ -15,27 +15,33 @@ scrybe-mcp-server tools
 
 ## MCP Tools Reference
 
+Every tool is served by the ONE shared `scrybe-tools` registry (the same
+handlers the CLI uses), so this table is also the CLI surface. Tabs are
+addressed by canonical `path`.
+
 | Tool | Description | Key Args |
 |---|---|---|
-| `open` | Open a file (returns doc ID); also launches GUI | `path` |
-| `read` | Read Markdown source (the LIVE buffer when the app is running) | `id` |
-| `section` | Extract a heading section by heading text (substring) | `id`, `heading` |
-| `edit` | Replace an inclusive 1-indexed LINE RANGE with new content (live buffer) | `id`, `start_line`, `end_line`, `content` |
+| `open` | Open (or refresh) a file as a tab in the running editor | `path` |
+| `read` | Read an open tab's buffer (sees unsaved edits) | `path` |
+| `section` | Extract a heading section by heading text (substring) | `path`, `heading` |
+| `edit` | Replace an inclusive 1-indexed LINE RANGE with new content (live buffer) | `path`, `start_line`, `end_line`, `content` |
 | `save` | Write an open tab's buffer to its file (explicit persist; buffers stay dirty until saved) | `path` |
-| `find` | Search for a string with line context (live buffer) | `id`, `query` |
-| `render` | Render document to HTML | `id`, `theme?` |
-| `embed` | Embed Mermaid source into a PNG (iTXt) | `png_path`, `source` |
-| `extract` | Extract Mermaid source from a PNG, verifying its sha256 (mismatch → error; `verification: "verified"` or `"no-digest"`) | `png_path` |
-| `lint` | Word count, headings, code blocks, links | `id` |
+| `find` | Regex/literal search over open tabs (or named paths, falling back to disk) | `pattern`, `paths?`, `literal?` |
+| `render` | Render Markdown to HTML | `source`, `theme?` |
+| `embed` | Embed Mermaid source into an existing PNG (iTXt), in place | `png_path`, `source` |
+| `extract` | Extract Mermaid source from a PNG, verifying its sha256 (mismatch → `verification_failed`; `verification: "verified"` or `"no-digest"`) | `png_path` |
+| `lint` | Word count, headings, code blocks, links | `source` |
+| `list_tabs` | List the running app's open tabs | — |
+| `mermaid_to_png` | Render a Mermaid diagram to PNG + embed its source | `source`, `output_path` |
 | `logs` | Read recent console log entries from the GUI | `tail?` |
-| `reload` | Re-read an open document from disk into the GUI | `id`, `force?` |
-| `close_tab` | Close a tab by path (omit path = close active tab) | `path?` |
-| `quit` | Gracefully close the Scrybe GUI window | — |
+| `reload` | Re-read an open tab from disk into its live buffer | `path`, `force?` |
+| `close_tab` | Close a tab by its canonical path | `path` |
+| `quit` | Gracefully close the Scrybe GUI window | `force?` |
 | `state` | Report the GUI's active path, view mode, theme, and Vim state | — |
 | `set_theme` | Set editor + preview theme (human: theme dropdown) | `theme` |
 | `view_mode` | Set active tab view mode (human: View button) | `mode` |
 | `set_vim` | Toggle Vim keybindings (human: Vim toggle) | `enabled` |
-| `export` | Export Markdown to Word (.docx) with Mermaid PNGs | `input`, `output?`, `no_diagrams?` |
+| `export` | Export Markdown to Word (.docx) with Mermaid PNGs | `path`, `output?`, `no_diagrams?` |
 | `export_figures` | Export every Mermaid diagram in a document to sibling `<stem>_fig_NN.png` files (each embeds its source) | `path` |
 
 > **Parity rule:** every human control in scrybe-app has an MCP equivalent
@@ -44,19 +50,10 @@ scrybe-mcp-server tools
 > Vim toggle, the Export button, and the "Export Diagrams…" menu item
 > respectively.
 
-### Document IDs
-
-The `open` tool returns a `DocumentId(uuid)` string. Pass the full string
-(including `DocumentId(...)`) to subsequent tools. IDs are scoped to the
-current MCP server process session.
-
-```json
-// open returns:
-{"id": "DocumentId(4ec5463d-9f3f-487b-83bc-e0e6ab586388)", "path": "/path/to/file.md"}
-
-// use full string in subsequent calls:
-{"id": "DocumentId(4ec5463d-9f3f-487b-83bc-e0e6ab586388)"}
-```
+> `embed`, `extract`, `export`, `mermaid_to_png`, `export_figures`, `render`,
+> and `lint` are **in-process** — they work headless, no running app needed.
+> The stateful editor/UI tools return a `no_live_app` tool_error when no app
+> is running.
 
 ## Opening Files in the GUI
 
