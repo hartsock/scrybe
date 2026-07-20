@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Chocolatey package TEMPLATE for the Scrybe desktop app (Windows).
+
+  The release workflow (.github/workflows/release.yml, job `chocolatey-package`)
+  substitutes @VERSION@ here and @VERSION@ + @SHA256_WINDOWS_X64_SETUP@ in
+  tools/chocolateyinstall.ps1.tmpl, runs `choco pack`, stages the .nupkg as a
+  workflow artifact, and — when the CHOCO_API_KEY secret is provisioned —
+  pushes it to the chocolatey.org community feed. The first push goes through
+  community moderation before `choco install scrybe` resolves publicly.
+
+  No binaries are embedded: the install script downloads the NSIS installer
+  (Scrybe_<version>_x64-setup.exe) from the GitHub release and verifies its
+  SHA256 at install time.
+-->
+<package xmlns="http://schemas.microsoft.com/packaging/2015/06/nuspec.xsd">
+  <metadata>
+    <id>scrybe</id>
+    <version>@VERSION@</version>
+    <title>Scrybe</title>
+    <authors>Shawn Hartsock</authors>
+    <owners>hartsock</owners>
+    <projectUrl>https://github.com/hartsock/scrybe</projectUrl>
+    <projectSourceUrl>https://github.com/hartsock/scrybe</projectSourceUrl>
+    <packageSourceUrl>https://github.com/hartsock/scrybe/tree/main/packaging/chocolatey</packageSourceUrl>
+    <licenseUrl>https://github.com/hartsock/scrybe/blob/main/LICENSE</licenseUrl>
+    <requireLicenseAcceptance>false</requireLicenseAcceptance>
+    <docsUrl>https://github.com/hartsock/scrybe#readme</docsUrl>
+    <bugTrackerUrl>https://github.com/hartsock/scrybe/issues</bugTrackerUrl>
+    <releaseNotes>https://github.com/hartsock/scrybe/blob/main/CHANGELOG.md</releaseNotes>
+    <tags>scrybe markdown editor mcp ai agent tauri</tags>
+    <summary>MCP-native cross-platform Markdown editor.</summary>
+    <description>
+Scrybe — an MCP-native Markdown editor. The document is the conversation:
+the desktop app, the CLI, and AI agents all drive the same live document
+through one tool contract.
+
+This package installs the Scrybe desktop app via the official NSIS installer
+downloaded from GitHub Releases (SHA256-verified, silent install). The
+`scrybe` CLI and `scrybe-mcp-server` are also available via npm (`scrybe-ai`),
+PyPI (`scrybe.ai`), and crates.io (`scrybe-cli`, `scrybe-mcp-server`).
+    </description>
+  </metadata>
+  <files>
+    <file src="tools\**" target="tools" />
+  </files>
+</package>

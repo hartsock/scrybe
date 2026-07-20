@@ -1,0 +1,44 @@
+# Homebrew CASK TEMPLATE for the Scrybe desktop app.
+#
+# The release workflow (.github/workflows/release.yml, job `homebrew-cask`)
+# renders this into `scrybe.rb` by substituting the release version and the
+# sha256 of the macOS arm64 DMG, stages it as a workflow artifact, and — when
+# the TAP_GITHUB_TOKEN secret is provisioned — pushes it to the tap repo
+# (hartsock/homebrew-scrybe, Casks/scrybe.rb). Install:
+#
+#   brew tap hartsock/scrybe
+#   brew install --cask scrybe
+#
+# Scrybe is a GUI app, so this is a CASK (mounts the DMG and installs
+# Scrybe.app), not a formula. The `scrybe` CLI and MCP server binaries ship
+# separately via npm (scrybe-ai), PyPI (scrybe.ai), and crates.io.
+#
+# arm64-only for now: the Tauri release matrix builds an Apple Silicon DMG
+# only (GitHub-hosted Intel Mac runners have multi-hour queues — see the
+# build-app matrix note in release.yml). When the matrix grows an x86_64 DMG,
+# switch to `arch arm: ..., intel: ...` interpolation with per-arch sha256
+# and drop the `depends_on arch:` line.
+cask "scrybe" do
+  version "@VERSION@"
+  sha256 "@SHA256_MACOS_ARM64_DMG@"
+
+  url "https://github.com/hartsock/scrybe/releases/download/v#{version}/Scrybe_#{version}_aarch64.dmg"
+  name "Scrybe"
+  desc "MCP-native Markdown editor — the document is the conversation"
+  homepage "https://github.com/hartsock/scrybe"
+
+  depends_on arch: :arm64
+
+  app "Scrybe.app"
+
+  # Conservative cleanup hints: `brew uninstall --zap scrybe` moves these to
+  # the Trash only (no delete:, no pkgutil:). ~/.scrybe is the CLI/GUI shared
+  # state dir; the Library paths follow the Tauri bundle identifier.
+  zap trash: [
+    "~/.scrybe",
+    "~/Library/Application Support/io.github.hartsock.scrybe",
+    "~/Library/Caches/io.github.hartsock.scrybe",
+    "~/Library/Saved Application State/io.github.hartsock.scrybe.savedState",
+    "~/Library/WebKit/io.github.hartsock.scrybe",
+  ]
+end
