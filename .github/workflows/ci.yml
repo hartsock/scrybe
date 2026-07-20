@@ -43,6 +43,12 @@ jobs:
         run: cargo fmt -- --check
       - name: clippy
         run: cargo clippy --all-targets -- -D warnings
+      - name: Check feature-gated python bindings
+        # The `python` feature only compiles under maturin wheel builds, so
+        # `cargo test/clippy --workspace` never sees it — a broken binding
+        # ships straight to the release run (v0.6.0: E0382 in py_extract).
+        # HOOK PARITY: mirrored by .githooks/pre-push.
+        run: cargo check -p scrybe-mermaid --features python
 
   test-rust:
     name: Rust tests

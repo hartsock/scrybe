@@ -28,6 +28,10 @@ fi
 # this hook runs on Linux/macOS dev boxes and cannot run a Windows build. Windows
 # parity is enforced by CI at PR time, not by this hook.
 just check
+# Feature-gated python bindings — only compiled by maturin wheel builds, so
+# `just check` misses them (v0.6.0: E0382 shipped to the release run).
+# PIPELINE PARITY: mirrors the ci.yml "Check feature-gated python bindings" step.
+cargo check -p scrybe-mermaid --features python
 just test
 
 if command -v npm >/dev/null 2>&1; then
