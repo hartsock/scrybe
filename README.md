@@ -11,13 +11,15 @@ document through one tool contract.
 ## Install
 
 ```bash
-npm install -g scrybe-ai        # CLI via npm (no Rust or Python needed)
-pip install scrybe.ai           # full Python toolkit (library + CLI + MCP server + extras)
-cargo install scrybe-cli scrybe-mcp-server   # build the binaries from crates.io
+brew install --cask hartsock/scrybe/scrybe    # macOS (Apple silicon)
+npm install -g scrybe-ai                      # CLI via npm
+pip install scrybe.ai                         # Python toolkit
+cargo install scrybe-cli scrybe-mcp-server    # from source via crates.io
 ```
 
-The **desktop app** (macOS / Windows / Linux) ships via
-[GitHub Releases](https://github.com/hartsock/scrybe/releases).
+Windows: `choco install scrybe` (pending community moderation).
+All installers are on [GitHub Releases](https://github.com/hartsock/scrybe/releases):
+dmg · setup.exe/msi · AppImage · deb · rpm.
 
 All packages version in lock-step: one release, one version, every channel.
 

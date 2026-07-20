@@ -1,0 +1,18 @@
+$ErrorActionPreference = 'Stop'
+
+# Installer-based install: download the Windows NSIS setup from the GitHub
+# release, verify its SHA256, and run it silently (/S is the NSIS silent
+# flag). @VERSION@ / @SHA256_WINDOWS_X64_SETUP@ are substituted by the
+# release workflow at pack time (.github/workflows/release.yml, job
+# `chocolatey-package`). No binaries are embedded in the package itself.
+$packageArgs = @{
+  packageName    = 'scrybe'
+  fileType       = 'exe'
+  url64bit       = 'https://github.com/hartsock/scrybe/releases/download/v@VERSION@/Scrybe_@VERSION@_x64-setup.exe'
+  checksum64     = '@SHA256_WINDOWS_X64_SETUP@'
+  checksumType64 = 'sha256'
+  silentArgs     = '/S'
+  validExitCodes = @(0)
+}
+
+Install-ChocolateyPackage @packageArgs

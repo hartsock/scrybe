@@ -115,6 +115,151 @@ jobs:
           prerelease: false
           args: ${{ matrix.args }}
 
+  # ── OS package channels (tag-only) ────────────────────────────────────────
+  #
+  # Two packaging jobs turn the desktop-app installers built above into
+  # package-manager channels: a Homebrew cask (macOS) and a Chocolatey package
+  # (Windows). Templates live in packaging/. These are RELEASE-ONLY jobs — no
+  # pre-push-hook parity required (the hook mirrors the per-PR lint/test tier;
+  # these jobs only run on tag pushes and build no code). See the HOOK PARITY
+  # note at the top of this file.
+  #
+  # Both jobs ALWAYS render and stage their artifact; publishing to the
+  # external channel is conditional on a secret being provisioned:
+  #   - homebrew-cask:      TAP_GITHUB_TOKEN → push Casks/scrybe.rb to
+  #                         hartsock/homebrew-scrybe (else skip with notice)
+  #   - chocolatey-package: CHOCO_API_KEY    → choco push to the community
+  #                         feed (else skip with notice)
+
+  homebrew-cask:
+    name: Homebrew cask (macOS arm64)
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: [build-app]
+    # A packaging failure must NOT sink the release: reported red, but the
+    # installers uploaded by build-app still ship.
+    continue-on-error: true
+    runs-on: ubuntu-latest
+    env:
+      # The `secrets` context is not available in step-level `if:` — surface
+      # the secret as env and branch on that instead.
+      TAP_GITHUB_TOKEN: ${{ secrets.TAP_GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download macOS arm64 DMG from the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        # tauri-action uploads assets to a DRAFT release, not workflow
+        # artifacts; `gh` resolves draft releases by tag with the repo token.
+        run: |
+          set -eu
+          VER="${GITHUB_REF_NAME#v}"
+          gh release download "${GITHUB_REF_NAME}" \
+            --pattern "Scrybe_${VER}_aarch64.dmg" --dir incoming
+
+      - name: Render Casks/scrybe.rb
+        # POSIX shell + POSIX sed only (no -i, no GNU extensions) — same
+        # BSD/GNU portability rule as the "Assert tag matches" step below.
+        run: |
+          set -eu
+          VER="${GITHUB_REF_NAME#v}"
+          SHA="$(sha256sum "incoming/Scrybe_${VER}_aarch64.dmg" | awk '{print $1}')"
+          mkdir -p dist
+          sed -e "s/@VERSION@/${VER}/g" \
+              -e "s/@SHA256_MACOS_ARM64_DMG@/${SHA}/g" \
+              packaging/homebrew/scrybe.rb.tmpl > dist/scrybe.rb
+          echo "── rendered scrybe.rb ──"
+          cat dist/scrybe.rb
+
+      - name: Upload cask artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: scrybe-homebrew-cask
+          path: dist/scrybe.rb
+          if-no-files-found: error
+
+      - name: Push cask to hartsock/homebrew-scrybe
+        if: env.TAP_GITHUB_TOKEN != ''
+        run: |
+          set -eu
+          VER="${GITHUB_REF_NAME#v}"
+          git clone "https://x-access-token:${TAP_GITHUB_TOKEN}@github.com/hartsock/homebrew-scrybe.git" tap
+          mkdir -p tap/Casks
+          cp dist/scrybe.rb tap/Casks/scrybe.rb
+          cd tap
+          git config user.name "scrybe-release[bot]"
+          git config user.email "hartsock@users.noreply.github.com"
+          git add Casks/scrybe.rb
+          git diff --cached --quiet || git commit -m "scrybe ${VER}"
+          git push origin HEAD:main
+
+      - name: Tap publish skipped (no TAP_GITHUB_TOKEN)
+        if: env.TAP_GITHUB_TOKEN == ''
+        run: |
+          echo "::notice::TAP_GITHUB_TOKEN is not provisioned — cask rendered and staged as a workflow artifact, but NOT pushed to hartsock/homebrew-scrybe. Provision a PAT with repo scope on that repo to enable auto-publish."
+
+  chocolatey-package:
+    name: Chocolatey package (Windows x64)
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: [build-app]
+    continue-on-error: true
+    runs-on: windows-latest
+    env:
+      # Same rule as homebrew-cask: secrets aren't visible in step `if:`.
+      CHOCO_API_KEY: ${{ secrets.CHOCO_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download Windows setup.exe from the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $ver = $env:GITHUB_REF_NAME -replace '^v', ''
+          gh release download $env:GITHUB_REF_NAME `
+            --pattern "Scrybe_${ver}_x64-setup.exe" --dir incoming
+
+      - name: Render nuspec + install script and pack
+        shell: pwsh
+        # No LICENSE.txt in tools/ on purpose: community moderation pairs an
+        # embedded LICENSE.txt with a VERIFICATION.txt requirement, and this
+        # package embeds no binaries — the nuspec licenseUrl covers licensing.
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $ver = $env:GITHUB_REF_NAME -replace '^v', ''
+          $sha = (Get-FileHash "incoming/Scrybe_${ver}_x64-setup.exe" -Algorithm SHA256).Hash.ToLower()
+          New-Item -ItemType Directory -Force -Path pack/tools | Out-Null
+          (Get-Content packaging/chocolatey/scrybe.nuspec.tmpl) `
+            -replace '@VERSION@', $ver | Set-Content pack/scrybe.nuspec
+          (Get-Content packaging/chocolatey/tools/chocolateyinstall.ps1.tmpl) `
+            -replace '@VERSION@', $ver -replace '@SHA256_WINDOWS_X64_SETUP@', $sha |
+            Set-Content pack/tools/chocolateyinstall.ps1
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          choco pack pack/scrybe.nuspec --outputdirectory dist
+          Get-ChildItem dist
+
+      - name: Upload nupkg artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: scrybe-chocolatey
+          path: dist/*.nupkg
+          if-no-files-found: error
+
+      - name: Push to chocolatey.org
+        if: env.CHOCO_API_KEY != ''
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $pkg = (Get-ChildItem dist/*.nupkg | Select-Object -First 1).FullName
+          choco push $pkg --source https://push.chocolatey.org/ --api-key $env:CHOCO_API_KEY
+
+      - name: Choco push skipped (no CHOCO_API_KEY)
+        if: env.CHOCO_API_KEY == ''
+        shell: pwsh
+        run: |
+          Write-Host "::notice::CHOCO_API_KEY is not provisioned - .nupkg staged as a workflow artifact, but NOT pushed to the chocolatey.org community feed."
+
   # ── Python wheels (maturin — Rust-backed crates) ─────────────────────────
 
   build-wheels:
