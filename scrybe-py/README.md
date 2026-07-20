@@ -11,7 +11,7 @@ inside — this crate is the seam between the two.
 
 ## What it does
 
-Wraps the Rust `Document`, `ContentId`, and `render_html` in Python-callable
+Wraps the Rust `Document`, `ContentDigest`, and `render_html` in Python-callable
 classes and functions. Python code (the `scrybe` package, plugins, and the
 `gila scrybe` CLI integration) calls these via the compiled extension module
 without any Rust toolchain at runtime.
@@ -27,8 +27,8 @@ installed as `scrybe/_rust.so` (Linux/macOS) or `scrybe/_rust.pyd` (Windows).
 
 | Python name | Rust source | Description |
 |-------------|-------------|-------------|
-| `scrybe._rust.Document` | `scrybe_core::Document` | Load, inspect, and render Markdown; `content_id()`, `render_html(theme?)`, `ast_title()` |
-| `scrybe._rust.ContentId` | `scrybe_core::ContentId` | `ContentId.of(bytes)`, `verify(bytes)`, `as_hex()` |
+| `scrybe._rust.Document` | `scrybe_core::Document` | Load, inspect, and render Markdown; `content_digest()` (deprecated `content_id()` retained), `render_html(theme?)`, `ast_title()` |
+| `scrybe._rust.ContentDigest` | `scrybe_core::ContentDigest` | `ContentDigest.of(bytes)`, `verify(bytes)`, `as_hex()`; bare BLAKE3 hex digest, not a CID. `ContentId` remains as a deprecated alias |
 | `scrybe._rust.render_markdown(source, theme?)` | `scrybe_render::render_html` | One-shot render without opening a Document object |
 
 The `python` feature gate controls whether PyO3 bindings are compiled in. The
@@ -45,7 +45,7 @@ maturin develop --features python,extension-module
 cargo test -p scrybe-py
 
 # Smoke test from Python
-python -c "from scrybe._rust import Document; d = Document('# Hi'); print(d.content_id())"
+python -c "from scrybe._rust import Document; d = Document('# Hi'); print(d.content_digest())"
 ```
 
 Requires `maturin` (`pip install maturin`) and a Rust toolchain. The workspace

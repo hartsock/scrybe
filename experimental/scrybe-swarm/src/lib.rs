@@ -5,7 +5,7 @@
 //!
 //! The swarm sidebar shows live activity from other agents working on
 //! the same document or workspace. Messages are scoped to the open
-//! document's ContentId.
+//! document's ContentDigest (BLAKE3 hex).
 //!
 
 pub mod activity;

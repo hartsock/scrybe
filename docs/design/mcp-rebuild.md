@@ -296,7 +296,7 @@ live app — the semantic half of the #108 fix.
 {
   "v": 1,
   "kind": "lint",
-  "content_id": "b3:…",          // scrybe-core ContentAddressable CID
+  "content_id": "af1349b9…",     // scrybe-core ContentAddressable BLAKE3 content digest (lowercase hex)
   "word_count": 812,
   "heading_count": 14,
   "max_heading_depth": 3,

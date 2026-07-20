@@ -6,7 +6,7 @@
 //! Provides the building blocks all other scrybe crates depend on:
 //!
 //! - [`Document`] — the central editing unit: parsed AST + metadata
-//! - [`ContentId`] — BLAKE3 content identifier (CIDv1, raw codec)
+//! - [`ContentDigest`] — bare BLAKE3 digest of raw content bytes, lowercase hex
 //! - [`ContentAddressable`] — trait for content-addressed storage
 //! - [`Plugin`] — trait for Python and native plugins
 //! - [`Workspace`] — collection of open documents + shared state
@@ -23,7 +23,9 @@ pub mod workspace;
 
 pub use ast::{Ast, Node};
 pub use change::{DocumentChange, DocumentHistory, TextRange};
-pub use content::{ContentAddressable, ContentId};
+#[allow(deprecated)] // compat shim: keep the old name importable downstream
+pub use content::ContentId;
+pub use content::{ContentAddressable, ContentDigest};
 pub use document::Document;
 pub use error::ScrybeError;
 pub use plugin::Plugin;

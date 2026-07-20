@@ -25,15 +25,18 @@ depend on `scrybe-core` and never on each other for core types.
 | Symbol | Description |
 |--------|-------------|
 | `Document` | Central editing unit: raw Markdown source + parsed AST + optional title |
-| `ContentId` | BLAKE3 content identifier (lowercase hex); stable across serialization formats |
-| `ContentAddressable` | Trait: `fn content_id(&self) -> ContentId` |
+| `ContentDigest` | Bare BLAKE3 digest of raw content bytes (32 bytes, 64 lowercase hex chars); stable across serialization formats. Not an IPFS/IPLD CID — no multibase/multicodec/multihash framing. `ContentId` remains as a deprecated alias |
+| `ContentAddressable` | Trait: `fn content_digest(&self) -> ContentDigest` (deprecated `content_id` wrapper retained) |
 | `Ast` / `Node` | Markdown AST types produced by the parser |
 | `DocumentChange` / `DocumentHistory` / `TextRange` | Fine-grained change tracking |
 | `Plugin` | Trait for Python and native extension plugins |
 | `Workspace` | Collection of open documents keyed by `DocumentId` |
 | `ScrybeError` | Unified error type for the workspace |
 
-`ContentId::of(bytes)` computes BLAKE3 and encodes as hex. `ContentId::verify`
+`ContentDigest::of(bytes)` computes BLAKE3 over exactly the given bytes
+(for a `Document`, the raw Markdown source — never path, title, or other
+metadata) and encodes it as lowercase hex. `ContentDigest::from_hex`
+parses/validates an existing digest string. `ContentDigest::verify`
 confirms integrity without re-hashing the full payload externally.
 
 ## Build and test

@@ -8,12 +8,13 @@ use std::path::PathBuf;
 use serde::{Deserialize, Serialize};
 
 use crate::ast::Ast;
-use crate::content::{ContentAddressable, ContentId};
+use crate::content::{ContentAddressable, ContentDigest};
 use crate::error::ScrybeError;
 
 /// A Scrybe document — Markdown source with associated metadata.
 ///
-/// Holds raw source text and a lazily-computed content identifier.
+/// Holds raw source text and a lazily-computed content digest
+/// (BLAKE3 over the source bytes only — path and title are not hashed).
 /// Rendering happens in `scrybe-render` (P1.3).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Document {
@@ -90,8 +91,10 @@ impl Document {
 }
 
 impl ContentAddressable for Document {
-    fn content_id(&self) -> ContentId {
-        ContentId::of(self.source.as_bytes())
+    /// Digest of the raw Markdown source bytes. Path, title, and other
+    /// metadata are deliberately excluded.
+    fn content_digest(&self) -> ContentDigest {
+        ContentDigest::of(self.source.as_bytes())
     }
 }
 
@@ -100,11 +103,27 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_document_content_id_stable() {
+    fn test_document_content_digest_stable() {
         let doc = Document::new("# Hello\n\nWorld.");
-        let id1 = doc.content_id();
-        let id2 = doc.content_id();
-        assert_eq!(id1, id2);
+        let d1 = doc.content_digest();
+        let d2 = doc.content_digest();
+        assert_eq!(d1, d2);
+    }
+
+    #[test]
+    fn test_document_digest_covers_source_only() {
+        // Same source, different path/title metadata → identical digest.
+        let plain = Document::new("# Same\n\nBody.");
+        let with_path = Document::from_file(PathBuf::from("/tmp/other.md"), "# Same\n\nBody.");
+        assert_eq!(plain.content_digest(), with_path.content_digest());
+    }
+
+    #[test]
+    #[allow(deprecated)]
+    fn test_document_deprecated_content_id_matches_digest() {
+        // Compat shim: the deprecated trait method returns the same value.
+        let doc = Document::new("# Hello\n\nWorld.");
+        assert_eq!(doc.content_id(), doc.content_digest());
     }
 
     #[test]
