@@ -22,7 +22,9 @@ pub mod plugin;
 pub mod workspace;
 
 pub use ast::{Ast, Node};
-pub use change::{DocumentChange, DocumentHistory, TextRange};
+pub use change::{
+    AppliedChange, DocumentChange, DocumentHistory, EditError, RangeError, TextRange,
+};
 #[allow(deprecated)] // compat shim: keep the old name importable downstream
 pub use content::ContentId;
 pub use content::{ContentAddressable, ContentDigest};
