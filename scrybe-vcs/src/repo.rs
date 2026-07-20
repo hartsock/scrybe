@@ -11,7 +11,7 @@ use scrybe_core::error::{Result, ScrybeError};
 
 use crate::{
     auth,
-    remote::{RemoteEntry, RemoteRole},
+    remote::{RemoteEntry, RemoteRolePolicy},
     types::{CommitSummary, FileStatus, GitAuthor, StatusEntry},
 };
 
@@ -152,8 +152,14 @@ impl ScrybeRepo {
         Ok(summaries)
     }
 
-    /// Lists all configured remotes with URLs and inferred roles.
+    /// Lists all configured remotes with URLs and roles assigned by the
+    /// default [`RemoteRolePolicy`] (conventional remote names only).
     pub fn remotes(&self) -> Result<Vec<RemoteEntry>> {
+        self.remotes_with_policy(&RemoteRolePolicy::default())
+    }
+
+    /// Lists all configured remotes, classifying each with *policy*.
+    pub fn remotes_with_policy(&self, policy: &RemoteRolePolicy) -> Result<Vec<RemoteEntry>> {
         let remote_names = self
             .inner
             .remotes()
@@ -166,7 +172,7 @@ impl ScrybeRepo {
                 .find_remote(name)
                 .map_err(|e| ScrybeError::msg(e.to_string()))?;
             let url = remote.url().unwrap_or("").to_owned();
-            let role = RemoteRole::from_url(&url);
+            let role = policy.classify(name, &url);
             entries.push(RemoteEntry {
                 name: name.to_owned(),
                 url,
@@ -268,7 +274,7 @@ mod tests {
     use std::fs;
 
     use super::*;
-    use crate::remote::RemoteRole;
+    use crate::remote::{RemoteMatcher, RemoteRole, RemoteRule};
     use tempfile::TempDir;
 
     fn setup_repo() -> (TempDir, ScrybeRepo) {
@@ -406,32 +412,6 @@ mod tests {
         assert!(branch.is_some());
     }
 
-    // ── remote role inference ─────────────────────────────────────────────────
-
-    #[test]
-    fn test_remote_role_inference() {
-        assert_eq!(
-            RemoteRole::from_url("ssh://git@gitea.example.lan:30222/user/repo.git"),
-            RemoteRole::Origin
-        );
-        assert_eq!(
-            RemoteRole::from_url("http://gitea.local/user/repo.git"),
-            RemoteRole::Origin
-        );
-        assert_eq!(
-            RemoteRole::from_url("git@github.com:user/repo.git"),
-            RemoteRole::Mirror
-        );
-        assert_eq!(
-            RemoteRole::from_url("https://github.com/user/repo.git"),
-            RemoteRole::Mirror
-        );
-        assert_eq!(
-            RemoteRole::from_url("https://gitlab.com/user/repo.git"),
-            RemoteRole::Other
-        );
-    }
-
     // ── remotes list ─────────────────────────────────────────────────────────
 
     #[test]
@@ -439,5 +419,55 @@ mod tests {
         let (_dir, repo) = setup_repo();
         let remotes = repo.remotes().unwrap();
         assert!(remotes.is_empty());
+    }
+
+    #[test]
+    fn test_remotes_default_policy_uses_conventional_names() {
+        let (_dir, repo) = setup_repo();
+        repo.inner
+            .remote("origin", "git@example.invalid:x/y.git")
+            .unwrap();
+        repo.inner
+            .remote("mirror", "https://example.invalid/x/y.git")
+            .unwrap();
+        repo.inner
+            .remote("upstream", "ssh://git@example.invalid/x/y.git")
+            .unwrap();
+
+        let remotes = repo.remotes().unwrap();
+        assert_eq!(remotes.len(), 3);
+
+        let role_of = |name: &str| {
+            remotes
+                .iter()
+                .find(|r| r.name == name)
+                .map(|r| r.role.clone())
+                .unwrap()
+        };
+        assert_eq!(role_of("origin"), RemoteRole::Origin);
+        assert_eq!(role_of("mirror"), RemoteRole::Mirror);
+        assert_eq!(
+            role_of("upstream"),
+            RemoteRole::Other("upstream".to_owned())
+        );
+    }
+
+    #[test]
+    fn test_remotes_with_custom_policy() {
+        let (_dir, repo) = setup_repo();
+        repo.inner
+            .remote("forge", "git@example.invalid:x/y.git")
+            .unwrap();
+
+        // Without a rule, "forge" is Other; with an explicit rule it is Origin.
+        let default_roles = repo.remotes().unwrap();
+        assert_eq!(default_roles[0].role, RemoteRole::Other("forge".to_owned()));
+
+        let policy = crate::remote::RemoteRolePolicy::new(vec![RemoteRule {
+            matcher: RemoteMatcher::Name("forge".to_owned()),
+            role: RemoteRole::Origin,
+        }]);
+        let remotes = repo.remotes_with_policy(&policy).unwrap();
+        assert_eq!(remotes[0].role, RemoteRole::Origin);
     }
 }
