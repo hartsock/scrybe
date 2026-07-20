@@ -157,11 +157,19 @@ mod python {
     #[pyo3(name = "extract")]
     fn py_extract(png_bytes: &[u8]) -> PyResult<PyMermaidPayload> {
         crate::codec::extract(png_bytes)
-            .map(|p| PyMermaidPayload {
-                source: p.source,
-                sha256: p.sha256().unwrap_or_default().to_string(),
-                uuid: p.uuid,
-                verified: p.is_verified(),
+            .map(|p| {
+                // Borrow-derived fields BEFORE moving `p.source`/`p.uuid` out —
+                // the struct literal's field order otherwise partially moves
+                // `p` and then borrows it (E0382; only compiled under the
+                // `python` feature, which is why cargo-test CI missed it).
+                let sha256 = p.sha256().unwrap_or_default().to_string();
+                let verified = p.is_verified();
+                PyMermaidPayload {
+                    source: p.source,
+                    sha256,
+                    uuid: p.uuid,
+                    verified,
+                }
             })
             .map_err(|e| PyValueError::new_err(e.to_string()))
     }
