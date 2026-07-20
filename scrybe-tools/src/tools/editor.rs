@@ -29,7 +29,7 @@ pub(crate) fn specs() -> Vec<ToolSpec> {
 
 /// Round-trip a socket `method` and wrap its result under `data` (kind = the
 /// tool name). A live-app failure becomes a business `tool_error`.
-fn dispatch(ctx: &Ctx, method: &str, kind: &'static str, params: Value) -> ToolOutcome {
+pub(crate) fn dispatch(ctx: &Ctx, method: &str, kind: &'static str, params: Value) -> ToolOutcome {
     let base = || json!({ "v": DATA_VERSION, "kind": kind });
     match ctx.transport.call(method, params) {
         Ok(value) => {
@@ -52,7 +52,7 @@ fn dispatch(ctx: &Ctx, method: &str, kind: &'static str, params: Value) -> ToolO
     }
 }
 
-fn str_arg<'a>(args: &'a Value, key: &str) -> &'a str {
+pub(crate) fn str_arg<'a>(args: &'a Value, key: &str) -> &'a str {
     args.get(key).and_then(Value::as_str).unwrap_or_default()
 }
 

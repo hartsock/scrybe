@@ -29,6 +29,11 @@ JSON-RPC 2.0, newline-delimited, one line per request and one per response. Tran
 | `find` | `{pattern, paths, literal, case_sensitive}` | `{hits: [{path, line, column, text}]}` |
 | `section` | `{path, heading}` | `{heading, level, content}` |
 | `edit` | `{path, start_line, end_line, content}` | `{applied, size_after, is_dirty}` |
+| `state` | `{}` | `{active_path, active_title, is_dirty, view_mode, theme, vim, wrap, open_paths}` |
+| `set_theme` | `{theme}` | `{theme}` (applied) |
+| `view_mode` | `{mode}` (`both`/`edit`/`preview`/`cycle`) | `{mode}` (the CONCRETE mode now active) |
+| `set_vim` | `{enabled}` | `{enabled}` (applied) |
+| `logs` | `{tail?}` | `{lines}` (newest-last, from the app's in-memory ring) |
 
 `find` paths is optional (empty = search all open tabs). `section` heading match is case-insensitive substring; the section runs from the matched heading to the next heading of the same or shallower level.
 
@@ -147,3 +152,9 @@ All non-dispatch-glue files clear the 80% target. `main.rs`'s dispatch arms are 
 2. **Windows named-pipe support.** Currently a `cfg(unix)` story. Phase 2 or later will add a named-pipe transport sharing the same JSON-RPC framing.
 3. **Linux `scrybe-app` discovery.** `scrybe foo.md` with no GUI running on Linux uses `$SCRYBE_APP_BIN` first, then `scrybe-app` on `PATH`. macOS uses `open -a Scrybe`. Windows is deferred.
 4. **Coverage of `main.rs` dispatch arms.** Adding `assert_cmd`-based subprocess tests in Phase 2.
+
+
+A2 note: the UI-parity methods above replaced the `/tmp` signal files
+(`scrybe-state.json`, theme/view/vim pokes, `scrybe-close-tab.txt`,
+`scrybe-debug.log`) and the `pkill` quit fallback — every control is a typed
+socket method served by the same code path as the human toolbar.
