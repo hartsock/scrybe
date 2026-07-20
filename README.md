@@ -4,128 +4,52 @@
 
 # Scrybe
 
-**MCP-native cross-platform Markdown editor.**
-
-The document is the conversation. Connect AI agents (Claude, Codex, Ollama, and more)
-as MCP peers. Scrybe is itself an MCP server, drivable by external agents.
+**MCP-native cross-platform Markdown editor.** The document is the
+conversation: the desktop app, the CLI, and AI agents all drive the same live
+document through one tool contract.
 
 ## Install
 
-### Python (PyPI)
-
 ```bash
-pip install scrybe.ai          # full Python toolkit (library + CLI + MCP server + mermaid + docx)
+npm install -g scrybe-ai        # CLI via npm (no Rust or Python needed)
+pip install scrybe.ai           # full Python toolkit (library + CLI + MCP server + extras)
+cargo install scrybe-cli scrybe-mcp-server   # build the binaries from crates.io
 ```
 
-Or pick individual components:
+The **desktop app** (macOS / Windows / Linux) ships via
+[GitHub Releases](https://github.com/hartsock/scrybe/releases).
 
-```bash
-pip install scrybe-py          # PyO3 library — exposes `import scrybe`
-pip install scrybe-cli         # `scrybe` command-line tool
-pip install scrybe-mcp-server  # standalone MCP server binary
-pip install scrybe-mermaid     # PNG iTXt codec for embedded Mermaid sources
-pip install scrybe-plugin-docx # Word (.docx) exporter
-```
-
-### Rust (crates.io)
-
-```bash
-cargo install scrybe-cli scrybe-mcp-server
-```
-
-That gets you the same two binaries (`scrybe`, `scrybe-mcp-server`) the
-PyPI wheels carry. The supporting library crates — `scrybe-core`,
-`scrybe-render`, `scrybe-mermaid`, `scrybe-rpc` — are available for
-direct dependency in Rust projects:
-
-```toml
-[dependencies]
-scrybe-core    = "0.1"
-scrybe-render  = "0.1"
-scrybe-mermaid = "0.1"
-```
-
-Crates.io has no metapackage equivalent of `scrybe.ai`; the bare name
-`scrybe` is held by an unrelated project. Install the binaries you want
-explicitly.
-
-### Desktop app
-
-The **desktop app** (Tauri 2 — macOS / Windows / Linux) ships via
-[GitHub Releases](https://github.com/hartsock/scrybe/releases), not PyPI
-or crates.io.
-
-macOS (coming soon): `brew install scrybe` — see [issue #1](https://github.com/hartsock/scrybe/issues/1)  
-Windows (coming soon): `choco install scrybe` — see [issue #2](https://github.com/hartsock/scrybe/issues/2)
+All packages version in lock-step: one release, one version, every channel.
 
 ## Quick start
 
 ```bash
 scrybe file.md          # open a file in the GUI
 scrybe ./               # open a directory
-scrybe                  # open the welcome screen
+scrybe --help           # everything the CLI can do
 
 # Connect to Claude Code as an MCP server
 claude mcp add scrybe -- scrybe-mcp-server stdio
 ```
 
-MCP tools: `open` · `read` · `section` · `edit` · `find` · `render` · `embed` · `extract` · `lint` · `logs` · `reload` · `close_tab` · `quit` · `state` · `set_theme` · `view_mode` · `set_vim` · `export`
+Every human control has an agent equivalent and vice versa. The full MCP tool
+surface — names, schemas, semantics — is frozen per release in
+[`docs/mcp-contract-0.6.json`](docs/mcp-contract-0.6.json); the CLI↔GUI socket
+contract lives in [`docs/rpc-contract-0.6.md`](docs/rpc-contract-0.6.md).
+Agent workflow guide: [`AGENTS.md`](AGENTS.md).
 
 ## Development
 
 ```bash
-git clone https://github.com/hartsock/scrybe
-cd scrybe
-just build          # all crates
-just dev            # Tauri dev server (requires Node)
-just install        # build + install the app and runtime tools to ~/Applications and ~/venv/bin
-just install-app    # same app install path, including the Word exporter
-just check          # full lint + test suite
+git clone https://github.com/hartsock/scrybe && cd scrybe
+just check              # full lint + test suite
+just dev                # Tauri dev server
 ```
 
-## Architecture
-
-Python on the outside, Rust on the inside.
-
-| Crate | Role |
-|---|---|
-| [`scrybe-core`](scrybe-core/README.md) | AST, `Document`, `ContentAddressable` (BLAKE3+CBOR), `Plugin` trait, `Workspace` |
-| [`scrybe-render`](scrybe-render/README.md) | HTML pipeline, syntect syntax highlighting, KaTeX/Mermaid |
-| [`scrybe-mcp-server`](scrybe-mcp-server/README.md) | Inbound MCP — 12 tools for agent document editing |
-| [`scrybe-mcp-client`](scrybe-mcp-client/README.md) | Outbound MCP — registers external agent servers |
-| [`scrybe-mermaid`](scrybe-mermaid/README.md) | Standalone PNG iTXt codec (Mermaid source in PNG metadata) |
-| [`scrybe-rpc`](scrybe-rpc/README.md) | JSON-RPC 2.0 wire protocol — CLI ↔ GUI over Unix socket |
-| [`scrybe-vcs`](scrybe-vcs/README.md) | git2 multi-remote VCS wrapper |
-| [`scrybe-py`](scrybe-py/README.md) | Python library — `import scrybe` for plugins and tooling |
-| [`scrybe-cli`](scrybe-cli/README.md) | Headless CLI binary (maturin wheel) |
-| [`scrybe-app`](scrybe-app/README.md) | Tauri 2 desktop app (Rust + TypeScript + CodeMirror 6) |
-
-## Published packages
-
-### PyPI
-
-| Package | Install | What |
-|---|---|---|
-| `scrybe.ai` | `pip install scrybe.ai` | Metapackage — pulls in the packages below |
-| `scrybe-py` | `pip install scrybe-py` | PyO3 library — `import scrybe` |
-| `scrybe-cli` | `pip install scrybe-cli` | `scrybe` CLI binary |
-| `scrybe-mcp-server` | `pip install scrybe-mcp-server` | `scrybe-mcp-server` binary |
-| `scrybe-mermaid` | `pip install scrybe-mermaid` | PNG iTXt codec |
-| `scrybe-plugin-docx` | `pip install scrybe-plugin-docx` | Word (.docx) exporter |
-
-### crates.io
-
-| Crate | Install / depend | What |
-|---|---|---|
-| `scrybe-cli` | `cargo install scrybe-cli` | `scrybe` CLI binary |
-| `scrybe-mcp-server` | `cargo install scrybe-mcp-server` | `scrybe-mcp-server` binary |
-| `scrybe-core` | dep | AST, Document, ContentAddressable, Plugin trait |
-| `scrybe-render` | dep | Markdown→HTML pipeline (syntect / KaTeX / Mermaid) |
-| `scrybe-mermaid` | dep | PNG iTXt codec |
-| `scrybe-rpc` | dep | CLI ↔ GUI JSON-RPC 2.0 wire types |
+Architecture, crate map, and conventions: [`CLAUDE.md`](CLAUDE.md).
+Direction: [`ROADMAP.md`](ROADMAP.md) — GitHub issues are the ground truth.
 
 ## License
 
-Apache-2.0. See [LICENSE](LICENSE).
-
-Free and open source — Apache-2.0 licensed. Use it, build on it, ship it.
+Apache-2.0. Use it, build on it, ship it. Your documents stay plain text and
+belong to you.
