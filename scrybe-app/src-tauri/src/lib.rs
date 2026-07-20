@@ -684,7 +684,9 @@ fn vcs_log(max: usize) -> Result<Vec<serde_json::Value>, String> {
         .collect())
 }
 
-/// Return the configured remotes with their names, URLs, and inferred roles.
+/// Return the configured remotes with their names, URLs, and roles assigned
+/// by the default [`scrybe_vcs::RemoteRolePolicy`] (conventional remote
+/// names: `origin` / `mirror` / `backup`; anything else is `Other`).
 #[tauri::command]
 fn vcs_remotes() -> Result<Vec<serde_json::Value>, String> {
     let guard = VCS.lock().unwrap();
