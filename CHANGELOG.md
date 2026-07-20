@@ -9,7 +9,58 @@ All notable changes to Scrybe are documented here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/); versions are the workspace
 lock-step version (`[workspace.package] version`).
 
-## [Unreleased]
+## [0.6.0] — 2026-07-20 — "Contract"
+
+The first release published across **every** channel — GitHub installers,
+PyPI, crates.io, and (new) **npm** (`scrybe-ai` + `@scrybe-ai/cli`). Before
+freezing that public surface, an adversarial architecture review drove a
+contract purge: one tool registry, one socket contract, typed errors, honest
+schemas, verified provenance, and no ambient local-control channels.
+
+### Added
+- **Native menu bar** — File / Edit / View / Window (#184, #185): Tauri 2 menu
+  with a unit-tested id↔action contract.
+- **Export Diagrams** — every Mermaid diagram in a document to source-embedded
+  sibling PNGs (`foo_fig_NN.png`) via `export_figures` (#191).
+- **Open source files** with syntax highlighting, edit-only view (#44, #193).
+- **`scrybe-ratatui`** (#194, #195): the Markdown→terminal renderer as a
+  standalone publishable crate (deps: `scrybe-core` + `ratatui` only) — drop
+  `MarkdownView` into any ratatui app; `scrybe-tui` re-exports for
+  compatibility.
+- **Typed UI-parity socket methods** — `state`, `set_theme`, `view_mode`,
+  `set_vim`, `logs` join the socket contract (frozen in
+  `docs/rpc-contract-0.6.md`), each driving the same code path as the human
+  toolbar and replying with what actually happened.
+
+### Changed — the contract purge (adversarial-review mandate)
+- **One tool registry.** The MCP server's legacy hand-rolled registry — its
+  shadow `Workspace`, id-map, duplicate schemas, and fallback dispatch — is
+  deleted (#181, #205, #207, #209). All 22 tools are served by the shared
+  `scrybe-tools` registry the CLI uses; the surface is pinned by snapshot
+  tests and frozen as `docs/mcp-contract-0.6.json`.
+- **No ambient control channels.** The `/tmp` signal files (state mirror,
+  theme/view/vim pokes, close-tab, reload, debug log) and the `pkill`
+  process-name quit fallback are gone; `logs` serves from an in-memory ring,
+  and `quit` is socket-only with dirty-buffer checks (#207).
+- **Typed socket errors, end-to-end** (#210, #211). Every client call returns
+  `ClientError`; "no app running" is `is_not_running()` — never message-text
+  matching; replies are validated against the JSON-RPC 2.0 envelope (version,
+  id echo, one-of result/error, 16 MiB frame cap); transport failures are
+  engine faults, never business results.
+- **Checked text edits** (#200, #204). `TextRange::try_new` /
+  `DocumentChange::try_apply` validate bounds, UTF-8 boundaries, and
+  `old_text` preconditions; undo evidence is derived from the document, not
+  trusted from the caller; the panicking paths are deprecated.
+- **`ContentId` → `ContentDigest`** (#201, #202). The BLAKE3 hex digest no
+  longer claims to be a CID; the serialized representation is unchanged and
+  deprecated aliases keep old code compiling; parsing now validates.
+- **Configurable VCS remote roles** (#199, #203). `RemoteRolePolicy` (ordered
+  rules + conventional-name fallback) replaces hard-coded host/port
+  inference — and removes a private infrastructure detail from public source.
+- **Image alt/title are distinct** (#197, #198). The Markdown AST carries alt
+  (from the bracket text) and title (the title attribute) separately; the
+  HTML pipeline no longer emits `alt=""` while leaking alt text into the
+  body; the terminal renderer labels images by alt.
 
 ### Changed — BREAKING (A4: honest MCP contract)
 - **Failed MCP invocations now read as failed.** A business `tool_error`
