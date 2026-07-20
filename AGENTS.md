@@ -25,7 +25,7 @@ scrybe-mcp-server tools
 | `find` | Search for a string with line context (live buffer) | `id`, `query` |
 | `render` | Render document to HTML | `id`, `theme?` |
 | `embed` | Embed Mermaid source into a PNG (iTXt) | `png_path`, `source` |
-| `extract` | Extract Mermaid source from a PNG | `png_path` |
+| `extract` | Extract Mermaid source from a PNG, verifying its sha256 (mismatch → error; `verification: "verified"` or `"no-digest"`) | `png_path` |
 | `lint` | Word count, headings, code blocks, links | `id` |
 | `logs` | Read recent console log entries from the GUI | `tail?` |
 | `reload` | Re-read an open document from disk into the GUI | `id`, `force?` |

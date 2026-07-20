@@ -288,10 +288,17 @@ enum Command {
 
     /// Extract Mermaid source from a PNG iTXt metadata chunk.
     ///
-    /// Top-level shortcut for `scrybe mermaid extract`. Same args.
+    /// Top-level shortcut for `scrybe mermaid extract`. Same args and exit
+    /// codes: 0 = success, 1 = extraction failed (no payload / unreadable
+    /// PNG), 2 = verification failed (stored sha256 does not match the
+    /// extracted source).
     Extract {
         #[arg(value_name = "PNG")]
         png: std::path::PathBuf,
+        /// Skip digest verification and print the raw stored source
+        /// (forensics on tampered payloads).
+        #[arg(long)]
+        unverified: bool,
     },
 
     /// Print version and active feature flags.
@@ -309,10 +316,21 @@ enum MermaidCmd {
         #[arg(short, long)]
         out: Option<std::path::PathBuf>,
     },
-    /// Extract Mermaid source from a PNG.
+    /// Extract Mermaid source from a PNG, verifying its sha256 by default.
+    ///
+    /// The stored digest is checked against a freshly-computed hash of the
+    /// extracted source. Exit codes: 0 = success (a payload with no stored
+    /// digest prints a note to stderr), 1 = extraction failed (no payload /
+    /// unreadable PNG), 2 = verification failed (tampered — stored sha256
+    /// does not match the extracted source). Use --unverified to skip the
+    /// check and print the raw stored source for forensics.
     Extract {
         #[arg(value_name = "PNG")]
         png: std::path::PathBuf,
+        /// Skip digest verification and print the raw stored source
+        /// (forensics on tampered payloads).
+        #[arg(long)]
+        unverified: bool,
     },
     /// Verify the sha256 integrity of the embedded Mermaid source in a PNG.
     ///
@@ -479,35 +497,42 @@ fn main() -> anyhow::Result<()> {
                 std::fs::write(&dest, &embedded)?;
                 println!("Embedded into {}", dest.display());
             }
-            MermaidCmd::Extract { png } => {
-                let bytes = std::fs::read(&png)?;
-                let payload = scrybe_mermaid::extract(&bytes)?;
-                println!("{}", payload.source);
+            MermaidCmd::Extract { png, unverified } => {
+                run_mermaid_extract(&png, unverified)?;
             }
             MermaidCmd::Verify { png } => {
                 let bytes = std::fs::read(&png)?;
+                // `extract` verifies by default — a mismatch is a typed error.
                 match scrybe_mermaid::extract(&bytes) {
-                    Err(e) => {
-                        eprintln!("scrybe mermaid verify: failed to extract payload: {e}");
-                        std::process::exit(1);
-                    }
-                    Ok(payload) => {
-                        // Recompute the sha256 of the extracted source.
-                        use sha2::{Digest, Sha256};
-                        let mut hasher = Sha256::new();
-                        hasher.update(payload.source.as_bytes());
-                        let computed = hex::encode(hasher.finalize());
-
-                        if computed == payload.sha256 {
-                            println!("OK — sha256 {} matches embedded source", &computed[..16]);
-                        } else {
+                    Ok(payload) => match &payload.verification {
+                        scrybe_mermaid::VerificationStatus::Verified { digest, .. } => {
+                            println!(
+                                "OK — sha256 {} matches embedded source",
+                                digest_short(digest)
+                            );
+                        }
+                        scrybe_mermaid::VerificationStatus::NoDigest => {
                             eprintln!(
-                                "TAMPERED — stored sha256 {} does not match computed {}",
-                                &payload.sha256[..16],
-                                &computed[..16]
+                                "MISSING — payload carries no sha256 digest; nothing to verify"
                             );
                             std::process::exit(1);
                         }
+                    },
+                    Err(scrybe_mermaid::MermaidError::VerificationFailed {
+                        expected,
+                        actual,
+                        ..
+                    }) => {
+                        eprintln!(
+                            "TAMPERED — stored sha256 {} does not match computed {}",
+                            digest_short(&expected),
+                            digest_short(&actual)
+                        );
+                        std::process::exit(1);
+                    }
+                    Err(e) => {
+                        eprintln!("scrybe mermaid verify: failed to extract payload: {e}");
+                        std::process::exit(1);
                     }
                 }
             }
@@ -723,11 +748,9 @@ fn main() -> anyhow::Result<()> {
             std::fs::write(&dest, &embedded)?;
             println!("Embedded into {}", dest.display());
         }
-        Command::Extract { png } => {
+        Command::Extract { png, unverified } => {
             // Top-level alias for `mermaid extract` — same code path.
-            let bytes = std::fs::read(&png)?;
-            let payload = scrybe_mermaid::extract(&bytes)?;
-            println!("{}", payload.source);
+            run_mermaid_extract(&png, unverified)?;
         }
 
         Command::Version => {
@@ -736,6 +759,49 @@ fn main() -> anyhow::Result<()> {
         }
     }
     Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Mermaid extract handler (shared by `mermaid extract` and top-level `extract`)
+// ---------------------------------------------------------------------------
+
+/// First 16 hex chars of a digest for display — safe on short or garbage
+/// stored values (attacker-controlled input must never panic the CLI).
+fn digest_short(d: &str) -> &str {
+    d.get(..16).unwrap_or(d)
+}
+
+/// Extract embedded Mermaid source from `png` and print it.
+///
+/// Verifies the stored sha256 against the extracted source by default.
+/// Exit codes: 0 = success (no-digest payloads print a stderr note),
+/// 1 = extraction failure (no payload / unreadable PNG, via the returned
+/// error), 2 = verification failure (tampered).
+fn run_mermaid_extract(png: &std::path::Path, unverified: bool) -> anyhow::Result<()> {
+    let bytes = std::fs::read(png)?;
+
+    if unverified {
+        // Forensics path: raw stored fields, no digest check.
+        let payload = scrybe_mermaid::extract_unverified(&bytes)?;
+        println!("{}", payload.source);
+        return Ok(());
+    }
+
+    match scrybe_mermaid::extract(&bytes) {
+        Ok(payload) => {
+            if !payload.is_verified() {
+                eprintln!("note: payload carries no sha256 digest — source is unverified");
+            }
+            println!("{}", payload.source);
+            Ok(())
+        }
+        Err(e @ scrybe_mermaid::MermaidError::VerificationFailed { .. }) => {
+            eprintln!("scrybe mermaid extract: {e}");
+            eprintln!("(use --unverified to print the stored source anyway)");
+            std::process::exit(2);
+        }
+        Err(e) => Err(e.into()),
+    }
 }
 
 // ---------------------------------------------------------------------------

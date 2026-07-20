@@ -35,11 +35,13 @@ scrybe mermaid png diagram.mmd --out diagram.png
 #     uuid   b84e7f72-a050-4f7a-926e-e95f298d7da8
 #     sha256 be689150b4c5c5fd...
 
-# 2. Recover the source from any such PNG — no .md needed.
+# 2. Recover the source from any such PNG — no .md needed. Extraction
+#    verifies the stored sha256 by default: exit 2 + no output if tampered
+#    (use --unverified for forensics on a tampered file).
 scrybe mermaid extract diagram.png        # prints the Mermaid source
 
-# 3. Verify integrity: does the stored sha256 still match the embedded source?
-scrybe mermaid verify diagram.png         # "OK — sha256 … matches" (exit 0) or "TAMPERED" (exit 1)
+# 3. Explicit integrity check: does the stored sha256 match the embedded source?
+scrybe mermaid verify diagram.png         # "OK — sha256 … matches" (exit 0) or "TAMPERED"/"MISSING" (exit 1)
 ```
 
 ## From an agent (MCP)

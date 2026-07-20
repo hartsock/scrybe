@@ -11,7 +11,7 @@ use serde_json::json;
 use sha2::{Digest, Sha256};
 
 use crate::error::{MermaidError, Result};
-use crate::MermaidPayload;
+use crate::{MermaidPayload, VerificationStatus, VerifiedPayload};
 
 const ITXT_KEY: &str = "scrybe-mermaid";
 const PNG_SIG: &[u8] = b"\x89PNG\r\n\x1a\n";
@@ -149,10 +149,66 @@ pub fn embed_with_uuid(png_bytes: &[u8], source: &str, uuid: &str) -> Result<Vec
     Ok(out)
 }
 
-/// Extracts Mermaid source from a PNG's iTXt metadata.
+/// Extracts Mermaid source from a PNG's iTXt metadata, verifying its digest.
+///
+/// The SHA-256 of the extracted source is recomputed and compared against
+/// the digest stored at embed time. Three outcomes are distinguished:
+///
+/// 1. **Verified** — digest present and matching:
+///    `Ok(VerifiedPayload { verification: VerificationStatus::Verified { .. }, .. })`
+/// 2. **Verification failed** — digest present but mismatched (the source or
+///    the digest was modified after embedding):
+///    `Err(MermaidError::VerificationFailed { expected, actual, .. })`
+/// 3. **No digest** — the payload carries no `sha256` field (older or
+///    foreign embedder): `Ok` with [`VerificationStatus::NoDigest`], which
+///    is explicitly *not* "verified".
+///
+/// Returns `Err(MermaidError::NotFound)` if the chunk is absent. Use
+/// [`extract_unverified`] to read the raw stored fields without any check.
+pub fn extract(png_bytes: &[u8]) -> Result<VerifiedPayload> {
+    let raw = extract_unverified(png_bytes)?;
+
+    if raw.sha256.is_empty() {
+        // No digest stored — nothing to verify. Surface that explicitly
+        // rather than pretending the payload was checked.
+        return Ok(VerifiedPayload {
+            source: raw.source,
+            uuid: raw.uuid,
+            verification: VerificationStatus::NoDigest,
+        });
+    }
+
+    let mut hasher = Sha256::new();
+    hasher.update(raw.source.as_bytes());
+    let actual = hex::encode(hasher.finalize());
+
+    if actual != raw.sha256 {
+        return Err(MermaidError::VerificationFailed {
+            algorithm: "sha256",
+            expected: raw.sha256,
+            actual,
+        });
+    }
+
+    Ok(VerifiedPayload {
+        source: raw.source,
+        uuid: raw.uuid,
+        verification: VerificationStatus::Verified {
+            algorithm: "sha256",
+            digest: actual,
+        },
+    })
+}
+
+/// Extracts the raw stored payload from a PNG's iTXt metadata WITHOUT
+/// verifying the digest — for forensics on tampered or foreign payloads.
+///
+/// The returned [`MermaidPayload`] is exactly what is stored in the PNG:
+/// `sha256` may be wrong or empty, and no claim is made that `source`
+/// matches it. Prefer [`extract`], which verifies by default.
 ///
 /// Returns `Err(MermaidError::NotFound)` if the chunk is absent.
-pub fn extract(png_bytes: &[u8]) -> Result<MermaidPayload> {
+pub fn extract_unverified(png_bytes: &[u8]) -> Result<MermaidPayload> {
     if png_bytes.len() < PNG_SIG.len() || &png_bytes[..PNG_SIG.len()] != PNG_SIG {
         return Err(MermaidError::Png("invalid PNG signature".into()));
     }
@@ -321,7 +377,147 @@ mod tests {
         hasher.update(source.as_bytes());
         let expected = hex::encode(hasher.finalize());
 
-        assert_eq!(extracted.sha256, expected);
+        assert!(extracted.is_verified(), "roundtrip payload must verify");
+        assert_eq!(extracted.sha256(), Some(expected.as_str()));
+        assert_eq!(
+            extracted.verification,
+            VerificationStatus::Verified {
+                algorithm: "sha256",
+                digest: expected,
+            }
+        );
+    }
+
+    /// Rebuild `png` with one byte of the stored iTXt payload flipped:
+    /// every occurrence of `from` in the payload text becomes `to`. Chunk
+    /// lengths and CRCs are re-encoded so the PNG still parses.
+    fn tamper_itxt(png: &[u8], from: &str, to: &str) -> Vec<u8> {
+        let mut out = PNG_SIG.to_vec();
+        for (t, d) in &parse_chunks(png).unwrap() {
+            if t == b"iTXt" {
+                let text = String::from_utf8(d.clone()).unwrap();
+                let tampered = text.replace(from, to);
+                assert_ne!(text, tampered, "tamper target must be present");
+                out.extend_from_slice(&encode_chunk(t, tampered.as_bytes()));
+            } else {
+                out.extend_from_slice(&encode_chunk(t, d));
+            }
+        }
+        out
+    }
+
+    /// Regression test for the doc-vs-behavior gap: shipped docs promised
+    /// that extraction fails on a sha256 mismatch, but `extract` returned
+    /// the stored fields without ever checking. A byte flipped in the
+    /// stored source must now be a deterministic verification failure with
+    /// both digests populated.
+    #[test]
+    fn tampered_source_fails_verification_with_both_digests() {
+        let png = minimal_png();
+        let source = "graph TD; A-->B";
+        let embedded = embed(&png, source).unwrap();
+
+        // Flip one byte of the *stored source* (digest left untouched).
+        let tampered = tamper_itxt(&embedded, "A-->B", "A-->X");
+
+        let mut hasher = sha2::Sha256::new();
+        hasher.update(source.as_bytes());
+        let stored = hex::encode(hasher.finalize());
+        let mut hasher = sha2::Sha256::new();
+        hasher.update("graph TD; A-->X".as_bytes());
+        let recomputed = hex::encode(hasher.finalize());
+
+        match extract(&tampered) {
+            Err(MermaidError::VerificationFailed {
+                algorithm,
+                expected,
+                actual,
+            }) => {
+                assert_eq!(algorithm, "sha256");
+                assert_eq!(expected, stored, "expected = digest stored at embed");
+                assert_eq!(actual, recomputed, "actual = digest of tampered source");
+                assert_ne!(expected, actual);
+            }
+            other => panic!("expected VerificationFailed, got {other:?}"),
+        }
+    }
+
+    /// Flipping a byte of the stored *digest* (source untouched) must fail
+    /// verification just the same.
+    #[test]
+    fn tampered_digest_fails_verification() {
+        let png = minimal_png();
+        let source = "graph TD; A-->B";
+        let embedded = embed(&png, source).unwrap();
+
+        let mut hasher = sha2::Sha256::new();
+        hasher.update(source.as_bytes());
+        let stored = hex::encode(hasher.finalize());
+        // Flip the first hex nibble of the stored digest.
+        let flipped_first = if stored.starts_with('0') { "1" } else { "0" };
+        let bad_digest = format!("{flipped_first}{}", &stored[1..]);
+
+        let tampered = tamper_itxt(&embedded, &stored, &bad_digest);
+        match extract(&tampered) {
+            Err(MermaidError::VerificationFailed {
+                expected, actual, ..
+            }) => {
+                assert_eq!(expected, bad_digest);
+                assert_eq!(actual, stored);
+            }
+            other => panic!("expected VerificationFailed, got {other:?}"),
+        }
+    }
+
+    /// Regression test: a payload that carries no `sha256` field (older or
+    /// foreign embedder) must surface an explicit no-digest outcome — never
+    /// a false "verified", and never a spurious failure.
+    #[test]
+    fn payload_without_digest_is_no_digest_not_verified() {
+        let png = minimal_png();
+        let source = "graph TD; A-->B";
+        // Craft a payload with no sha256 field at all.
+        let payload = serde_json::json!({ "source": source }).to_string();
+        let mut out = PNG_SIG.to_vec();
+        for (t, d) in &parse_chunks(&png).unwrap() {
+            if t == b"IEND" {
+                out.extend_from_slice(&encode_itxt(ITXT_KEY, &payload));
+            }
+            out.extend_from_slice(&encode_chunk(t, d));
+        }
+
+        let p = extract(&out).expect("no-digest payload still extracts");
+        assert_eq!(p.source, source);
+        assert_eq!(p.verification, VerificationStatus::NoDigest);
+        assert!(!p.is_verified(), "no digest must never count as verified");
+        assert_eq!(p.sha256(), None);
+    }
+
+    /// `extract_unverified` is the forensics path: it returns the raw stored
+    /// fields even when the digest does not match the source.
+    #[test]
+    fn extract_unverified_returns_raw_fields_even_when_tampered() {
+        let png = minimal_png();
+        let source = "graph TD; A-->B";
+        let embedded = embed(&png, source).unwrap();
+        let tampered = tamper_itxt(&embedded, "A-->B", "A-->X");
+
+        // Verified extraction refuses…
+        assert!(matches!(
+            extract(&tampered),
+            Err(MermaidError::VerificationFailed { .. })
+        ));
+
+        // …the forensics path hands back exactly what is stored.
+        let raw = extract_unverified(&tampered).expect("raw extraction succeeds");
+        assert_eq!(raw.source, "graph TD; A-->X");
+        let mut hasher = sha2::Sha256::new();
+        hasher.update(source.as_bytes());
+        assert_eq!(
+            raw.sha256,
+            hex::encode(hasher.finalize()),
+            "stored digest is the original (pre-tamper) one"
+        );
     }
 
     #[test]
