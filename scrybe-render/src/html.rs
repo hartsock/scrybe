@@ -62,9 +62,32 @@ fn render_with_highlighting(source: &str) -> String {
     let mut in_code_block = false;
     let mut current_lang: Option<String> = None;
     let mut code_buf = String::new();
+    // Events between Start(Image) and its matching End(Image) must reach
+    // push_html as ONE sequence: the HTML writer drains the iterator after
+    // Start(Image) to build the alt attribute. Fed one event at a time it
+    // emits alt="" and the real alt text leaks out as visible body text.
+    // Depth-tracked because alt text may itself contain images.
+    let mut image_buf: Vec<Event> = Vec::new();
+    let mut image_depth: usize = 0;
 
     for event in parser {
         match event {
+            Event::Start(Tag::Image { .. }) => {
+                image_depth += 1;
+                image_buf.push(event);
+            }
+            Event::End(TagEnd::Image) => {
+                image_buf.push(event);
+                image_depth -= 1;
+                if image_depth == 0 {
+                    let mut fragment = String::new();
+                    pulldown_cmark::html::push_html(&mut fragment, image_buf.drain(..));
+                    output.push_str(&fragment);
+                }
+            }
+            other if image_depth > 0 => {
+                image_buf.push(other);
+            }
             Event::Start(Tag::CodeBlock(kind)) => {
                 in_code_block = true;
                 current_lang = match kind {
@@ -229,6 +252,43 @@ mod tests {
             out.body_html
         );
         assert!(!out.body_html.contains("<pre>"));
+    }
+
+    #[test]
+    fn test_image_alt_and_title_attributes() {
+        // Guard the alt/title contract end-to-end: the bracket text is the
+        // alt attribute; the Markdown title attribute is emitted as title.
+        let out = render_html(
+            &doc("![diagram](image.png \"Architecture\")\n"),
+            Theme::Default,
+        );
+        assert!(
+            out.body_html.contains(r#"alt="diagram""#),
+            "body_html: {}",
+            out.body_html
+        );
+        assert!(
+            out.body_html.contains(r#"title="Architecture""#),
+            "body_html: {}",
+            out.body_html
+        );
+    }
+
+    #[test]
+    fn test_image_empty_alt_no_title() {
+        // A decorative image keeps its (meaningful) empty alt and gains no
+        // title attribute.
+        let out = render_html(&doc("![](decorative.png)\n"), Theme::Default);
+        assert!(
+            out.body_html.contains(r#"alt="""#),
+            "body_html: {}",
+            out.body_html
+        );
+        assert!(
+            !out.body_html.contains("title="),
+            "body_html: {}",
+            out.body_html
+        );
     }
 
     #[test]
