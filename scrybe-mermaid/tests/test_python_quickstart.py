@@ -51,3 +51,27 @@ graph TD
     assert (tmp_path / "diagram-with-source.png").exists()
     assert payload.source == source
     assert len(payload.sha256) == 64  # SHA-256 hex is always 64 chars
+    assert payload.verified is True  # extract verified the digest
+
+
+def test_extract_raises_on_tampered_source() -> None:
+    """Regression: the shipped docstring promised `ValueError` on a sha256
+    mismatch, but extract never verified. Flipping a byte of the stored
+    source must now raise."""
+    if not scrybe_mermaid._RUST_AVAILABLE:
+        pytest.skip("Rust extension not built — run: maturin develop --release")
+
+    png_out = scrybe_mermaid.embed(_minimal_png(), "graph TD; A-->B")
+    # The iTXt payload is stored uncompressed, so the source appears
+    # literally in the bytes. A same-length flip keeps chunk lengths valid
+    # (the codec does not validate chunk CRCs on read).
+    tampered = png_out.replace(b"A-->B", b"A-->X")
+    assert tampered != png_out
+
+    with pytest.raises(ValueError, match="verification failed"):
+        scrybe_mermaid.extract(tampered)
+
+    # Forensics path still hands back the raw stored fields.
+    raw = scrybe_mermaid.extract_unverified(tampered)
+    assert raw.source == "graph TD; A-->X"
+    assert raw.verified is False

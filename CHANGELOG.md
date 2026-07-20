@@ -9,6 +9,22 @@ All notable changes to Scrybe are documented here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/); versions are the workspace
 lock-step version (`[workspace.package] version`).
 
+## [Unreleased]
+
+### Fixed
+- **`scrybe_mermaid::extract` verifies the embedded digest by default** —
+  shipped docs (the PyPI-facing `extract` docstring) promised a `ValueError`
+  on sha256 mismatch, but extraction never checked the digest. `extract` now
+  recomputes the SHA-256 of the extracted source and distinguishes three
+  outcomes: verified (`VerificationStatus::Verified`), tampered
+  (`MermaidError::VerificationFailed { expected, actual, .. }`), and
+  no-digest-present (`VerificationStatus::NoDigest` — never a false
+  "verified"). `extract_unverified` returns the raw stored fields for
+  forensics. Python gains `payload.verified` and `extract_unverified`;
+  `scrybe mermaid extract` exits 2 on a tampered PNG (1 = no payload,
+  0 = success) and takes `--unverified`; the MCP `extract` tool reports
+  `verification: "verified" | "no-digest"` and errors on mismatch.
+
 ## [0.5.0] — 2026-07-19 — "Parity"
 
 One tool registry now serves every surface, and the Mermaid pipeline is pure

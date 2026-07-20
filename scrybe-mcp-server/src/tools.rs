@@ -120,7 +120,10 @@ impl ToolRegistry {
             },
             {
                 "name": "extract",
-                "description": "Extract Mermaid source from a PNG file.",
+                "description": "Extract Mermaid source from a PNG file, verifying the \
+                     embedded sha256 against the extracted source. Returns \
+                     `verification`: \"verified\" (digest matched) or \"no-digest\" \
+                     (payload stored none); a digest mismatch is an error.",
                 "inputSchema": {
                     "type": "object",
                     "properties": {"png_path": {"type": "string"}},
@@ -260,8 +263,16 @@ impl ToolRegistry {
             Ok(b) => b,
             Err(e) => return json!({"error": e.to_string()}),
         };
+        // Verifies the stored sha256 by default; a mismatch surfaces as an
+        // error (the Display carries both digests) rather than silently
+        // returning tampered source.
         match scrybe_mermaid::extract(&bytes) {
-            Ok(payload) => json!({"source": payload.source, "sha256": payload.sha256}),
+            Ok(payload) => json!({
+                "source": payload.source,
+                "sha256": payload.sha256().unwrap_or_default(),
+                "uuid": payload.uuid,
+                "verification": if payload.is_verified() { "verified" } else { "no-digest" },
+            }),
             Err(e) => json!({"error": e.to_string()}),
         }
     }
