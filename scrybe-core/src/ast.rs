@@ -36,8 +36,14 @@ pub enum Node {
         title: String,
         children: Vec<Self>,
     },
-    /// An image.
-    Image { src: String, alt: String },
+    /// An image. `alt` is the flattened inline content of the bracket text
+    /// (`![alt](src)`); `title` is the optional Markdown title attribute
+    /// (`![alt](src "title")`), empty when absent.
+    Image {
+        src: String,
+        alt: String,
+        title: String,
+    },
     /// A thematic break (`---` / `***`).
     HorizontalRule,
     /// A hard line break (`\\\n`).
@@ -65,7 +71,7 @@ enum Frame {
     Emphasis,
     Strong,
     Link { href: String, title: String },
-    Image { src: String, alt: String },
+    Image { src: String, title: String },
     FencedCode { lang: String },
 }
 
@@ -138,12 +144,14 @@ impl Ast {
                     Tag::Image {
                         dest_url, title, ..
                     } => {
-                        // pulldown-cmark puts alt text as Text events before End(Image).
-                        // We collect them as the alt string.
+                        // pulldown-cmark emits the alt text as inline child
+                        // events between Start(Image) and End(Image); `title`
+                        // here is the Markdown title attribute
+                        // (`![alt](src "title")`), carried separately.
                         stack.push((
                             Frame::Image {
                                 src: dest_url.to_string(),
-                                alt: title.to_string(),
+                                title: title.to_string(),
                             },
                             Vec::new(),
                         ));
@@ -224,10 +232,11 @@ impl Ast {
                             }
                         }
                         TagEnd::Image => {
-                            if let Some((Frame::Image { src, alt }, _children)) = stack.pop() {
-                                // For images the alt text came through as Text events;
-                                // ignore those children and use the title as alt.
-                                Some(Node::Image { src, alt })
+                            if let Some((Frame::Image { src, title }, children)) = stack.pop() {
+                                // The image's alt text is its collected inline
+                                // children, flattened to plain text.
+                                let alt = collect_text(&children);
+                                Some(Node::Image { src, alt, title })
                             } else {
                                 None
                             }
@@ -509,6 +518,113 @@ mod tests {
         let src = "---\n";
         let ast = Ast::parse(src);
         assert!(matches!(&ast.nodes[0], Node::HorizontalRule));
+    }
+
+    // -----------------------------------------------------------------------
+    // Images: alt comes from child content, title is carried separately.
+    // Regression tests for the alt/title conflation bug (accessibility data
+    // loss): the parser used to store the Markdown title attribute as `alt`
+    // and discard the real bracket text.
+    // -----------------------------------------------------------------------
+
+    /// Collect every `Node::Image` in document order as (src, alt, title).
+    fn images(ast: &Ast) -> Vec<(String, String, String)> {
+        fn walk(nodes: &[Node], out: &mut Vec<(String, String, String)>) {
+            for node in nodes {
+                match node {
+                    Node::Image { src, alt, title } => {
+                        out.push((src.clone(), alt.clone(), title.clone()));
+                    }
+                    Node::Heading { children, .. }
+                    | Node::Paragraph { children }
+                    | Node::BlockQuote { children }
+                    | Node::ListItem { children }
+                    | Node::Emphasis { children }
+                    | Node::Strong { children }
+                    | Node::Link { children, .. } => walk(children, out),
+                    Node::List { items, .. } => walk(items, out),
+                    _ => {}
+                }
+            }
+        }
+        let mut out = Vec::new();
+        walk(&ast.nodes, &mut out);
+        out
+    }
+
+    #[test]
+    fn test_image_alt_from_child_content_no_title() {
+        let ast = Ast::parse("![diagram](image.png)\n");
+        assert_eq!(
+            images(&ast),
+            vec![(
+                "image.png".to_string(),
+                "diagram".to_string(),
+                String::new()
+            )]
+        );
+    }
+
+    #[test]
+    fn test_image_alt_and_title_carried_separately() {
+        let ast = Ast::parse("![diagram](image.png \"Architecture\")\n");
+        assert_eq!(
+            images(&ast),
+            vec![(
+                "image.png".to_string(),
+                "diagram".to_string(),
+                "Architecture".to_string()
+            )]
+        );
+    }
+
+    #[test]
+    fn test_image_empty_alt_with_title() {
+        // Empty alt is valid and meaningful (decorative image); the title
+        // must NOT leak into it.
+        let ast = Ast::parse("![](decorative.png \"Decoration\")\n");
+        assert_eq!(
+            images(&ast),
+            vec![(
+                "decorative.png".to_string(),
+                String::new(),
+                "Decoration".to_string()
+            )]
+        );
+    }
+
+    #[test]
+    fn test_image_alt_flattens_nested_inline_formatting() {
+        let ast = Ast::parse("![**bold** label](image.png \"Title\")\n");
+        assert_eq!(
+            images(&ast),
+            vec![(
+                "image.png".to_string(),
+                "bold label".to_string(),
+                "Title".to_string()
+            )]
+        );
+    }
+
+    #[test]
+    fn test_two_images_in_one_paragraph() {
+        let ast = Ast::parse("![first](a.png \"A\") and ![second](b.png)\n");
+        assert_eq!(
+            images(&ast),
+            vec![
+                ("a.png".to_string(), "first".to_string(), "A".to_string()),
+                ("b.png".to_string(), "second".to_string(), String::new()),
+            ]
+        );
+    }
+
+    #[test]
+    fn test_image_empty_alt_no_title() {
+        let ast = Ast::parse("![](plain.png)\n");
+        assert_eq!(
+            images(&ast),
+            vec![("plain.png".to_string(), String::new(), String::new())]
+        );
     }
 
     // -----------------------------------------------------------------------
