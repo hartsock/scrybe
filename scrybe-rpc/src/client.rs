@@ -243,16 +243,22 @@ pub fn try_connect() -> Result<(), ClientError> {
 }
 
 #[cfg(not(unix))]
-pub fn try_connect_at(_path: &Path) -> Result<(), ClientError> {
-    Err(unsupported())
+pub fn try_connect_at(path: &Path) -> Result<(), ClientError> {
+    Err(unsupported(path))
 }
 
+/// Non-unix has no socket transport (Phase 1), so no live app is ever
+/// reachable — the honest outcome is the typed not-running condition
+/// (`is_not_running() == true`), NOT a transport engine fault: callers get
+/// the same business-level `no_live_app` / headless behavior they would on a
+/// unix host with no app running. (Windows named-pipe transport is a
+/// documented follow-up in `docs/rpc-contract-0.6.md`.)
 #[cfg(not(unix))]
-fn unsupported() -> ClientError {
-    ClientError::Io(std::io::Error::new(
-        std::io::ErrorKind::Unsupported,
-        "scrybe-rpc client is unix-only in Phase 1",
-    ))
+fn unsupported(path: &Path) -> ClientError {
+    ClientError::SocketUnavailable {
+        path: path.to_path_buf(),
+        kind: UnavailableKind::NotFound,
+    }
 }
 
 // ── Request/response ─────────────────────────────────────────────────────────
@@ -287,11 +293,11 @@ pub fn send_to(
 
 #[cfg(not(unix))]
 pub fn send_to(
-    _socket: &Path,
+    socket: &Path,
     _method: &str,
     _params: serde_json::Value,
 ) -> Result<serde_json::Value, ClientError> {
-    Err(unsupported())
+    Err(unsupported(socket))
 }
 
 /// Read one newline-terminated reply frame, enforcing [`MAX_FRAME_BYTES`]
