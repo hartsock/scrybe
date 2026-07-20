@@ -12,6 +12,7 @@ members = [
     "scrybe-cli",
     "scrybe-rpc",
     "scrybe-tools",
+    "scrybe-ratatui",
     "scrybe-tui",
     "scrybe-app/src-tauri",
 ]
@@ -83,6 +84,7 @@ scrybe-vcs        = { path = "scrybe-vcs",        version = "=0.5.0" }
 scrybe-py         = { path = "scrybe-py",         version = "=0.5.0" }
 scrybe-rpc        = { path = "scrybe-rpc",        version = "=0.5.0" }
 scrybe-tools      = { path = "scrybe-tools",      version = "=0.5.0" }
+scrybe-ratatui    = { path = "scrybe-ratatui",    version = "=0.5.0" }
 scrybe-mermaid-render = { path = "scrybe-mermaid-render", version = "=0.5.0" }
 
 # Adopted pure-Rust Mermaid → SVG renderer (#132 spike-Pass, 2026-07-17).
