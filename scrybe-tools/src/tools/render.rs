@@ -9,7 +9,7 @@ use scrybe_core::Document;
 use scrybe_render::{render_html, Theme};
 use serde_json::{json, Value};
 
-use crate::{Ctx, DataSchema, Facet, ToolOutcome, ToolSpec};
+use crate::{Ctx, DataSchema, EngineFault, Facet, ToolOutcome, ToolSpec};
 
 /// Version of this tool's `data` payload.
 const DATA_VERSION: u32 = 1;
@@ -67,7 +67,7 @@ fn data_schema() -> Value {
     })
 }
 
-fn handler(_ctx: &Ctx, args: &Value) -> ToolOutcome {
+fn handler(_ctx: &Ctx, args: &Value) -> Result<ToolOutcome, EngineFault> {
     // `source` is guaranteed present by the dispatcher's required-args gate.
     let source = args
         .get("source")
@@ -76,14 +76,14 @@ fn handler(_ctx: &Ctx, args: &Value) -> ToolOutcome {
     let theme = parse_theme(args.get("theme").and_then(Value::as_str));
     let doc = Document::new(source);
     let out = render_html(&doc, theme);
-    ToolOutcome::ok(json!({
+    Ok(ToolOutcome::ok(json!({
         "v": DATA_VERSION,
         "kind": "render",
         "html": out.html,
         "body_html": out.body_html,
         "theme": theme_name(theme),
         "bytes": out.html.len(),
-    }))
+    })))
 }
 
 /// Map the `theme` argument to a [`Theme`]; unknown/absent falls back to default.

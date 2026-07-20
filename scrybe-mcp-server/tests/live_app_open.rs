@@ -55,9 +55,11 @@ fn open_dials_live_app_over_socket() {
                     req["params"]["path"].is_string(),
                     "open request must carry a path: {req}"
                 );
+                // Echo the request id — the typed client (A3) verifies it.
+                let id = req["id"].as_u64().expect("request carries an id");
                 let mut w = stream;
                 let resp = format!(
-                    r#"{{"jsonrpc":"2.0","id":1,"result":{{"tab_id":"{md_tab}","reloaded":false}}}}"#
+                    r#"{{"jsonrpc":"2.0","id":{id},"result":{{"tab_id":"{md_tab}","reloaded":false}}}}"#
                 );
                 writeln!(w, "{resp}").expect("write response");
                 return;

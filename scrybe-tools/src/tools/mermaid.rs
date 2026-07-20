@@ -17,7 +17,7 @@ use scrybe_mermaid::MermaidError;
 use scrybe_mermaid_render::{render_png, source_sha256};
 use serde_json::{json, Value};
 
-use crate::{Ctx, DataSchema, Facet, ToolError, ToolOutcome, ToolSpec};
+use crate::{Ctx, DataSchema, EngineFault, Facet, ToolError, ToolOutcome, ToolSpec};
 
 /// Version of these tools' `data` payloads.
 const DATA_VERSION: u32 = 1;
@@ -75,7 +75,7 @@ fn data_schema() -> Value {
     })
 }
 
-fn handler(_ctx: &Ctx, args: &Value) -> ToolOutcome {
+fn handler(_ctx: &Ctx, args: &Value) -> Result<ToolOutcome, EngineFault> {
     // Required args are gated by the dispatcher.
     let source = args
         .get("source")
@@ -92,10 +92,10 @@ fn handler(_ctx: &Ctx, args: &Value) -> ToolOutcome {
     let png = match render_png(source) {
         Ok(bytes) => bytes,
         Err(e) => {
-            return ToolOutcome::fail(
+            return Ok(ToolOutcome::fail(
                 base,
                 ToolError::new("render_failed", format!("could not render diagram: {e}")),
-            )
+            ))
         }
     };
 
@@ -104,32 +104,32 @@ fn handler(_ctx: &Ctx, args: &Value) -> ToolOutcome {
     let embedded = match scrybe_mermaid::embed_with_uuid(&png, source, &uuid) {
         Ok(bytes) => bytes,
         Err(e) => {
-            return ToolOutcome::fail(
+            return Ok(ToolOutcome::fail(
                 base,
                 ToolError::new("embed_failed", format!("could not embed source: {e}")),
-            )
+            ))
         }
     };
 
     // 3. Write the PNG.
     if let Err(e) = std::fs::write(output_path, &embedded) {
-        return ToolOutcome::fail(
+        return Ok(ToolOutcome::fail(
             base,
             ToolError::new(
                 "write_failed",
                 format!("could not write {output_path}: {e}"),
             ),
-        );
+        ));
     }
 
-    ToolOutcome::ok(json!({
+    Ok(ToolOutcome::ok(json!({
         "v": DATA_VERSION,
         "kind": "mermaid_to_png",
         "png_path": output_path,
         "uuid": uuid,
         "sha256": source_sha256(source),
         "bytes": embedded.len(),
-    }))
+    })))
 }
 
 fn new_uuid() -> String {
@@ -185,7 +185,7 @@ fn embed_data_schema() -> Value {
     })
 }
 
-fn embed_handler(_ctx: &Ctx, args: &Value) -> ToolOutcome {
+fn embed_handler(_ctx: &Ctx, args: &Value) -> Result<ToolOutcome, EngineFault> {
     // Required args are gated by the dispatcher.
     let png_path = args
         .get("png_path")
@@ -201,10 +201,10 @@ fn embed_handler(_ctx: &Ctx, args: &Value) -> ToolOutcome {
     let bytes = match std::fs::read(png_path) {
         Ok(b) => b,
         Err(e) => {
-            return ToolOutcome::fail(
+            return Ok(ToolOutcome::fail(
                 base,
                 ToolError::new("read_failed", format!("could not read {png_path}: {e}")),
-            )
+            ))
         }
     };
 
@@ -214,28 +214,28 @@ fn embed_handler(_ctx: &Ctx, args: &Value) -> ToolOutcome {
     let embedded = match scrybe_mermaid::embed_with_uuid(&bytes, source, &uuid) {
         Ok(out) => out,
         Err(e) => {
-            return ToolOutcome::fail(
+            return Ok(ToolOutcome::fail(
                 base,
                 ToolError::new("embed_failed", format!("could not embed source: {e}")),
-            )
+            ))
         }
     };
 
     if let Err(e) = std::fs::write(png_path, &embedded) {
-        return ToolOutcome::fail(
+        return Ok(ToolOutcome::fail(
             base,
             ToolError::new("write_failed", format!("could not write {png_path}: {e}")),
-        );
+        ));
     }
 
-    ToolOutcome::ok(json!({
+    Ok(ToolOutcome::ok(json!({
         "v": DATA_VERSION,
         "kind": "embed",
         "png_path": png_path,
         "uuid": uuid,
         "sha256": source_sha256(source),
         "bytes": embedded.len(),
-    }))
+    })))
 }
 
 // ── extract ──────────────────────────────────────────────────────────────────
@@ -290,7 +290,7 @@ fn extract_data_schema() -> Value {
     })
 }
 
-fn extract_handler(_ctx: &Ctx, args: &Value) -> ToolOutcome {
+fn extract_handler(_ctx: &Ctx, args: &Value) -> Result<ToolOutcome, EngineFault> {
     let png_path = args
         .get("png_path")
         .and_then(Value::as_str)
@@ -301,16 +301,16 @@ fn extract_handler(_ctx: &Ctx, args: &Value) -> ToolOutcome {
     let bytes = match std::fs::read(png_path) {
         Ok(b) => b,
         Err(e) => {
-            return ToolOutcome::fail(
+            return Ok(ToolOutcome::fail(
                 base,
                 ToolError::new("read_failed", format!("could not read {png_path}: {e}")),
-            )
+            ))
         }
     };
 
     // Verified extraction (B5): a stored-digest mismatch is an Err — the tool
     // ran and said "no" (business failure), the engine did its job.
-    match scrybe_mermaid::extract(&bytes) {
+    Ok(match scrybe_mermaid::extract(&bytes) {
         Ok(payload) => ToolOutcome::ok(json!({
             "v": DATA_VERSION,
             "kind": "extract",
@@ -347,7 +347,7 @@ fn extract_handler(_ctx: &Ctx, args: &Value) -> ToolOutcome {
             base,
             ToolError::new("no_payload", format!("no embedded Mermaid payload: {e}")),
         ),
-    }
+    })
 }
 
 #[cfg(test)]

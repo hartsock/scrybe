@@ -112,8 +112,10 @@ pub struct ToolSpec {
     pub mutates: bool,
     /// Tool group for progressive disclosure + feature gating.
     pub facet: Facet,
-    /// The one implementation, shared by both front ends.
-    pub handler: fn(&Ctx, &Value) -> ToolOutcome,
+    /// The one implementation, shared by both front ends. `Ok(outcome)` even
+    /// for business failures (a `tool_error` inside the outcome); `Err` is
+    /// reserved for [`EngineFault`]s — e.g. the transport failing mid-request.
+    pub handler: fn(&Ctx, &Value) -> Result<ToolOutcome, EngineFault>,
 }
 
 /// Engine fault: the dispatcher could not even run the tool (unknown tool, bad
@@ -128,20 +130,34 @@ pub enum EngineFault {
     /// Arguments failed validation before the handler ran.
     #[error("invalid arguments: {0}")]
     BadArgs(String),
-    /// The transport to the live app failed.
+    /// The transport to the live app failed mid-request — socket I/O,
+    /// timeouts, oversized/garbled frames, or a malformed JSON-RPC envelope.
+    /// The app did NOT answer, so there is no business outcome to report:
+    /// this is an engine fault, never a `tool_error`. (The two conditions the
+    /// app *does* answer for stay business outcomes: no app at all →
+    /// `no_live_app`, and an in-band remote error → `app_error`.)
     #[error("transport error: {0}")]
     Transport(String),
 }
 
-/// Failure talking to the live app over the socket.
+/// Failure talking to the live app over the socket, in three semantic classes
+/// that mirror [`scrybe_rpc::ClientError`]'s taxonomy.
 #[derive(Debug, thiserror::Error)]
 pub enum TransportError {
-    /// No Scrybe app is running to service the request.
+    /// No Scrybe app is running to service the request
+    /// ([`scrybe_rpc::ClientError::is_not_running`]). A business condition —
+    /// tools report it as the `no_live_app` `tool_error`.
     #[error("no Scrybe app is running")]
     NoApp,
-    /// An I/O or protocol error on the socket.
+    /// The app ANSWERED with an in-band JSON-RPC error object. The transport
+    /// worked; this is a business outcome (tools report it as `app_error`).
+    #[error("app error {}: {}", .0.code, .0.message)]
+    Remote(scrybe_rpc::RpcError),
+    /// The transport itself failed: socket I/O, timeouts, frame/UTF-8/JSON
+    /// problems, or an envelope violation. The app did not answer — dispatch
+    /// maps this to [`EngineFault::Transport`], never to a business outcome.
     #[error("{0}")]
-    Io(String),
+    Transport(String),
 }
 
 /// Round-trips scrybe-rpc requests to the live app (design §2.3). The only place
@@ -177,13 +193,14 @@ pub struct LiveApp;
 impl Transport for LiveApp {
     fn call(&self, method: &str, params: Value) -> Result<Value, TransportError> {
         match scrybe_rpc::client::send(method, params) {
-            Ok(resp) => match resp.error {
-                Some(err) => Err(TransportError::Io(format!("{}: {}", err.code, err.message))),
-                None => Ok(resp.result.unwrap_or(Value::Null)),
-            },
-            // The client says "no Scrybe running" when the socket isn't there.
-            Err(e) if e.contains("no Scrybe running") => Err(TransportError::NoApp),
-            Err(e) => Err(TransportError::Io(e)),
+            Ok(result) => Ok(result),
+            // The one blessed no-app check — never message-text matching.
+            Err(e) if e.is_not_running() => Err(TransportError::NoApp),
+            // In-band remote error: the app answered. Business, not engine.
+            Err(scrybe_rpc::ClientError::Remote(err)) => Err(TransportError::Remote(err)),
+            // Everything else (I/O, timeouts, frame/UTF-8/JSON, envelope,
+            // mismatched id): the transport failed — an engine-fault class.
+            Err(e) => Err(TransportError::Transport(e.to_string())),
         }
     }
 
@@ -261,15 +278,15 @@ impl Registry {
         self.tools.is_empty()
     }
 
-    /// Dispatch a call. An unknown tool or a missing required argument is an
-    /// [`EngineFault`] (`Err`); a business failure is
-    /// `Ok(ToolOutcome { tool_error: Some(..) })`.
+    /// Dispatch a call. An unknown tool, a missing required argument, or a
+    /// transport failure mid-request is an [`EngineFault`] (`Err`); a business
+    /// failure is `Ok(ToolOutcome { tool_error: Some(..) })`.
     pub fn call(&self, name: &str, ctx: &Ctx, args: &Value) -> Result<ToolOutcome, EngineFault> {
         let spec = self
             .get(name)
             .ok_or_else(|| EngineFault::UnknownTool(name.to_string()))?;
         require_args(&(spec.input_schema)(), args)?;
-        Ok((spec.handler)(ctx, args))
+        (spec.handler)(ctx, args)
     }
 }
 
