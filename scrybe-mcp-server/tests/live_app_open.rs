@@ -6,8 +6,11 @@
 //! Before the fix, `open` `spawn()`ed a second `scrybe-app` process (swallowed
 //! by the single-instance guard) instead of dialing the running app. This test
 //! stands up a mock `scrybe-rpc` server on a unix socket and proves that MCP
-//! `open` now DIALS it (sends an `open` request) and reports `live: true` —
-//! i.e. it drives the live app.
+//! `open` DIALS it (sends an `open` request) — i.e. it drives the live app.
+//!
+//! Ported off the deleted legacy `ToolRegistry` path (#181): the request now
+//! enters through `McpServer::handle` (the real JSON-RPC surface) and is
+//! served by the shared `scrybe-tools` registry over the socket.
 
 #![cfg(unix)]
 
@@ -16,7 +19,7 @@ use std::os::unix::net::UnixListener;
 use std::thread;
 use std::time::Duration;
 
-use scrybe_mcp_server::ToolRegistry;
+use scrybe_mcp_server::McpServer;
 
 #[test]
 fn open_dials_live_app_over_socket() {
@@ -25,9 +28,9 @@ fn open_dials_live_app_over_socket() {
     let md = dir.path().join("note.md");
     std::fs::write(&md, "# Hello\n").expect("write md");
 
-    // Mock live app: bind the socket, then serve connections. The MCP client
-    // makes two connections — a liveness probe (opens then drops, no bytes)
-    // and the real `open` request — so accept in a loop and reply to `open`.
+    // Mock live app: bind the socket, then serve connections. The client side
+    // may probe liveness (connect then drop, no bytes) before the real `open`
+    // request — accept in a loop and reply to `open`.
     let listener = UnixListener::bind(&sock).expect("bind socket");
     let md_tab = md.to_string_lossy().into_owned();
     let server = thread::spawn(move || {
@@ -65,22 +68,45 @@ fn open_dials_live_app_over_socket() {
     // Point the shared scrybe-rpc client at the mock socket.
     std::env::set_var("SCRYBE_SOCK", &sock);
 
-    let mut reg = ToolRegistry::new();
-    let result = reg.call_tool("open", &serde_json::json!({ "path": md.to_string_lossy() }));
+    // Drive the REAL MCP surface: a JSON-RPC `tools/call` through the server.
+    let mut mcp = McpServer::new();
+    let request = serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": 7,
+        "method": "tools/call",
+        "params": {
+            "name": "open",
+            "arguments": { "path": md.to_string_lossy() }
+        }
+    });
+    let response = mcp.handle(&request).expect("tools/call yields a response");
 
     server.join().expect("server thread");
     std::env::remove_var("SCRYBE_SOCK");
 
-    assert_eq!(
-        result["live"], true,
-        "open should dispatch to the live app, got: {result}"
+    // The response is a JSON-RPC success whose tool result is NOT an engine
+    // error, and whose data payload proves the socket round-trip: the shared
+    // `open` tool wraps the live app's reply under {kind: "open", tab_id, …}.
+    assert!(
+        response.get("error").is_none(),
+        "tools/call must not be a protocol error: {response}"
+    );
+    let result = &response["result"];
+    assert_ne!(
+        result["isError"], true,
+        "open must not be an engine error: {response}"
+    );
+    let text = result["content"][0]["text"]
+        .as_str()
+        .expect("tool result carries a text content block");
+    let data: serde_json::Value = serde_json::from_str(text).expect("data payload is JSON");
+    assert_eq!(data["kind"], "open", "payload kind: {data}");
+    assert!(
+        data.get("tool_error").is_none(),
+        "open against the live mock must not be a business failure: {data}"
     );
     assert!(
-        result.get("error").is_none(),
-        "unexpected error from open: {result}"
-    );
-    assert!(
-        result["tab_id"].is_string(),
-        "live open should return a tab_id: {result}"
+        data["tab_id"].is_string(),
+        "live open should return a tab_id: {data}"
     );
 }
