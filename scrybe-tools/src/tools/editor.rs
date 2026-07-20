@@ -95,7 +95,17 @@ fn open_spec() -> ToolSpec {
         },
         data_schema: DataSchema {
             version: DATA_VERSION,
-            schema: || json!({ "type": "object" }),
+            schema: || {
+                crate::schema::envelope(
+                    "open",
+                    DATA_VERSION,
+                    json!({
+                        "tab_id": { "type": "string", "description": "Stable id of the tab." },
+                        "reloaded": { "type": "boolean", "description": "True when an existing tab was refreshed from disk." }
+                    }),
+                    &["tab_id", "reloaded"],
+                )
+            },
         },
         mutates: true,
         facet: Facet::Core,
@@ -127,7 +137,18 @@ fn read_spec() -> ToolSpec {
         },
         data_schema: DataSchema {
             version: DATA_VERSION,
-            schema: || json!({ "type": "object" }),
+            schema: || {
+                crate::schema::envelope(
+                    "read",
+                    DATA_VERSION,
+                    json!({
+                        "path": { "type": "string" },
+                        "content": { "type": "string", "description": "The in-memory buffer (may differ from disk)." },
+                        "is_dirty": { "type": "boolean" }
+                    }),
+                    &["path", "content", "is_dirty"],
+                )
+            },
         },
         mutates: false,
         facet: Facet::Core,
@@ -164,7 +185,28 @@ fn find_spec() -> ToolSpec {
         },
         data_schema: DataSchema {
             version: DATA_VERSION,
-            schema: || json!({ "type": "object" }),
+            schema: || {
+                crate::schema::envelope(
+                    "find",
+                    DATA_VERSION,
+                    json!({
+                        "hits": {
+                            "type": "array",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "path": { "type": "string" },
+                                    "line": { "type": "integer", "description": "1-indexed line of the match." },
+                                    "column": { "type": "integer", "description": "1-indexed column where the match starts." },
+                                    "text": { "type": "string", "description": "The full line text." }
+                                },
+                                "required": ["path", "line", "column", "text"]
+                            }
+                        }
+                    }),
+                    &["hits"],
+                )
+            },
         },
         mutates: false,
         facet: Facet::Editor,
@@ -197,7 +239,18 @@ fn section_spec() -> ToolSpec {
         },
         data_schema: DataSchema {
             version: DATA_VERSION,
-            schema: || json!({ "type": "object" }),
+            schema: || {
+                crate::schema::envelope(
+                    "section",
+                    DATA_VERSION,
+                    json!({
+                        "heading": { "type": "string", "description": "The matched heading text." },
+                        "level": { "type": "integer", "description": "Heading level (1-6)." },
+                        "content": { "type": "string", "description": "The section's Markdown content." }
+                    }),
+                    &["heading", "level", "content"],
+                )
+            },
         },
         mutates: false,
         facet: Facet::Editor,
@@ -234,7 +287,18 @@ fn edit_spec() -> ToolSpec {
         },
         data_schema: DataSchema {
             version: DATA_VERSION,
-            schema: || json!({ "type": "object" }),
+            schema: || {
+                crate::schema::envelope(
+                    "edit",
+                    DATA_VERSION,
+                    json!({
+                        "applied": { "type": "boolean" },
+                        "size_after": { "type": "integer", "description": "Buffer size in bytes after the edit." },
+                        "is_dirty": { "type": "boolean", "description": "True until an explicit `save` persists the buffer." }
+                    }),
+                    &["applied", "size_after", "is_dirty"],
+                )
+            },
         },
         mutates: true,
         facet: Facet::Editor,
@@ -270,7 +334,18 @@ fn save_spec() -> ToolSpec {
         },
         data_schema: DataSchema {
             version: DATA_VERSION,
-            schema: || json!({ "type": "object" }),
+            schema: || {
+                crate::schema::envelope(
+                    "save",
+                    DATA_VERSION,
+                    json!({
+                        "path": { "type": "string" },
+                        "bytes": { "type": "integer", "description": "Bytes written to disk." },
+                        "was_dirty": { "type": "boolean", "description": "Whether the buffer had unsaved edits at save time." }
+                    }),
+                    &["path", "bytes", "was_dirty"],
+                )
+            },
         },
         mutates: true,
         facet: Facet::Editor,
@@ -306,7 +381,18 @@ fn reload_spec() -> ToolSpec {
         },
         data_schema: DataSchema {
             version: DATA_VERSION,
-            schema: || json!({ "type": "object" }),
+            schema: || {
+                crate::schema::envelope(
+                    "reload",
+                    DATA_VERSION,
+                    json!({
+                        "path": { "type": "string" },
+                        "bytes": { "type": "integer", "description": "Bytes re-read from disk." },
+                        "was_dirty": { "type": "boolean", "description": "Whether the buffer had unsaved edits at reload time." }
+                    }),
+                    &["path", "bytes", "was_dirty"],
+                )
+            },
         },
         mutates: true,
         facet: Facet::Editor,
@@ -439,7 +525,7 @@ mod tests {
     #[test]
     fn remote_app_error_is_a_business_outcome() {
         // The app answered with an in-band JSON-RPC error: business, not
-        // an engine fault — `isError` stays false on the MCP surface.
+        // an engine fault — the outcome carries an `app_error` tool_error.
         let ctx = Ctx::with_transport(Box::new(Failing(|| {
             TransportError::Remote(scrybe_rpc::RpcError {
                 code: scrybe_rpc::ERR_TAB_NOT_OPEN,

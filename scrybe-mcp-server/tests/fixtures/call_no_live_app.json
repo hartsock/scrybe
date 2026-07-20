@@ -1,0 +1,30 @@
+{
+  "request": {
+    "id": 44,
+    "jsonrpc": "2.0",
+    "method": "tools/call",
+    "params": {
+      "arguments": {},
+      "name": "state"
+    }
+  },
+  "response": {
+    "id": 44,
+    "jsonrpc": "2.0",
+    "result": {
+      "content": [
+        {
+          "text": "no Scrybe app is running for `state`",
+          "type": "text"
+        }
+      ],
+      "isError": true,
+      "structuredContent": {
+        "code": "no_live_app",
+        "kind": "state",
+        "message": "no Scrybe app is running for `state`",
+        "v": 1
+      }
+    }
+  }
+}

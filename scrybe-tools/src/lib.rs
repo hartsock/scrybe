@@ -15,6 +15,7 @@ use serde_json::Value;
 
 pub mod figures;
 pub mod lint;
+pub mod schema;
 pub mod tools;
 
 pub use figures::{export_figures, plan_figures, FigurePlan, FigureResult};
@@ -41,8 +42,11 @@ pub struct DataSchema {
 }
 
 /// A business-level failure: the tool ran and said "no" (e.g. "heading not
-/// found"). This is DATA carried inside the outcome, not an engine fault —
-/// the MCP `isError` flag stays `false`.
+/// found"). This is DATA carried inside the outcome, not an engine fault.
+/// Each surface decides its own presentation: the MCP adapter reports a
+/// failed invocation (`isError: true` with the `{code, message}` in
+/// `structuredContent` — A4); the CLI prints the error and keeps its exit
+/// semantics.
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct ToolError {
     /// Stable machine code, e.g. `"heading_not_found"`.
@@ -119,8 +123,10 @@ pub struct ToolSpec {
 }
 
 /// Engine fault: the dispatcher could not even run the tool (unknown tool, bad
-/// arguments, transport down). Surfaces as MCP `isError: true` / a non-zero CLI
-/// exit — distinct from a business [`ToolError`] carried inside `data`
+/// arguments, transport down). Surfaces as a non-zero CLI exit; on MCP,
+/// `UnknownTool` is a JSON-RPC `-32602` protocol error and the rest are
+/// `isError: true` results (A4 mapping in `scrybe-mcp-server/src/server.rs`).
+/// Distinct from a business [`ToolError`] carried inside the outcome
 /// (design §2.2, §5).
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
 pub enum EngineFault {
@@ -377,5 +383,39 @@ mod tests {
         let mut reg = Registry::new();
         reg.register(tools::render::spec());
         reg.register(tools::render::spec());
+    }
+
+    #[test]
+    fn every_data_schema_is_an_honest_envelope_never_a_placeholder() {
+        // A4: no tool may serve a bare `{"type":"object"}` placeholder. Every
+        // data schema wraps its payload in the shared envelope: `v` pinned to
+        // the spec's version, `kind` pinned to the tool name, `tool_error`
+        // described as the optional business-failure object.
+        let reg = Registry::default();
+        for name in reg.names() {
+            let spec = reg.get(name).unwrap();
+            let schema = (spec.data_schema.schema)();
+            assert_eq!(
+                schema["properties"]["kind"]["const"], name,
+                "tool {name}: `kind` must be pinned to the tool name"
+            );
+            assert_eq!(
+                schema["properties"]["v"]["const"], spec.data_schema.version,
+                "tool {name}: `v` must be pinned to the data-schema version"
+            );
+            assert!(
+                schema["properties"]["tool_error"].is_object(),
+                "tool {name}: envelope must describe the optional tool_error"
+            );
+            let required = schema["required"].as_array().unwrap();
+            assert!(
+                required.contains(&json!("v")) && required.contains(&json!("kind")),
+                "tool {name}: v and kind are required envelope keys"
+            );
+            assert!(
+                !required.contains(&json!("tool_error")),
+                "tool {name}: tool_error is never required (absent on success)"
+            );
+        }
     }
 }

@@ -1,0 +1,32 @@
+{
+  "request": {
+    "id": 45,
+    "jsonrpc": "2.0",
+    "method": "tools/call",
+    "params": {
+      "arguments": {
+        "path": "/scrybe-fixtures/absent.md"
+      },
+      "name": "read"
+    }
+  },
+  "response": {
+    "id": 45,
+    "jsonrpc": "2.0",
+    "result": {
+      "content": [
+        {
+          "text": "-32001: not open: /scrybe-fixtures/absent.md",
+          "type": "text"
+        }
+      ],
+      "isError": true,
+      "structuredContent": {
+        "code": "app_error",
+        "kind": "read",
+        "message": "-32001: not open: /scrybe-fixtures/absent.md",
+        "v": 1
+      }
+    }
+  }
+}

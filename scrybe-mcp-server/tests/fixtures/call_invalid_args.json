@@ -1,0 +1,28 @@
+{
+  "request": {
+    "id": 43,
+    "jsonrpc": "2.0",
+    "method": "tools/call",
+    "params": {
+      "arguments": {},
+      "name": "lint"
+    }
+  },
+  "response": {
+    "id": 43,
+    "jsonrpc": "2.0",
+    "result": {
+      "content": [
+        {
+          "text": "invalid arguments: missing required argument: source",
+          "type": "text"
+        }
+      ],
+      "isError": true,
+      "structuredContent": {
+        "code": "bad_args",
+        "message": "invalid arguments: missing required argument: source"
+      }
+    }
+  }
+}

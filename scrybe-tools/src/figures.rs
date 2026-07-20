@@ -227,11 +227,10 @@ fn input_schema() -> Value {
 }
 
 fn data_schema() -> Value {
-    json!({
-        "type": "object",
-        "properties": {
-            "v": { "const": DATA_VERSION },
-            "kind": { "const": "export_figures" },
+    crate::schema::envelope(
+        "export_figures",
+        DATA_VERSION,
+        json!({
             "count": { "type": "integer" },
             "figures": {
                 "type": "array",
@@ -246,9 +245,9 @@ fn data_schema() -> Value {
                     "required": ["path", "uuid", "sha256", "bytes"]
                 }
             }
-        },
-        "required": ["v", "kind", "count", "figures"]
-    })
+        }),
+        &["count", "figures"],
+    )
 }
 
 fn handler(_ctx: &Ctx, args: &Value) -> Result<ToolOutcome, EngineFault> {

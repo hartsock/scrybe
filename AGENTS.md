@@ -52,8 +52,29 @@ addressed by canonical `path`.
 
 > `embed`, `extract`, `export`, `mermaid_to_png`, `export_figures`, `render`,
 > and `lint` are **in-process** — they work headless, no running app needed.
-> The stateful editor/UI tools return a `no_live_app` tool_error when no app
-> is running.
+> The stateful editor/UI tools report `no_live_app` when no app is running.
+
+### Reading MCP results (0.6.0 — BREAKING for older agents)
+
+Since 0.6.0 (workstream A4) the MCP boundary is honest per the MCP spec:
+
+- **Success**: `isError: false`; the typed payload is in `structuredContent`
+  (the `content` text block carries the same JSON for back-compat). The
+  payload's shape is advertised per tool as `outputSchema` in `tools/list`,
+  and every descriptor carries `annotations.readOnlyHint`.
+- **Failed invocation** — invalid arguments, transport fault, or a *business*
+  failure such as `no_live_app`, `app_error`, `verification_failed`: the
+  result has `isError: true`; `structuredContent` is `{code, message, …}` and
+  the content text is the human-readable message.
+- **Unknown tool / malformed `tools/call` params**: a top-level JSON-RPC
+  `-32602` protocol error, not a tool result.
+- The full frozen surface lives in `docs/mcp-contract-0.6.json`.
+
+**Breaking change:** before 0.6.0 a business failure was returned as a
+*success* (`isError: false`) with `tool_error` tucked inside the `data`
+payload. Agents that parsed `data.tool_error` out of success results must
+switch to checking `isError` and reading `structuredContent.code`. (The
+non-standard `data` result field is gone; use `structuredContent`.)
 
 ## Opening Files in the GUI
 
