@@ -28,6 +28,8 @@ use std::path::PathBuf;
 /// to the live app through one implementation.
 pub mod client;
 
+pub use client::{ClientError, EnvelopeError, UnavailableKind};
+
 /// JSON-RPC 2.0 request envelope.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Request {
@@ -390,8 +392,27 @@ impl Reply {
 
 // ── JSON-RPC error codes ────────────────────────────────────────────────────
 //
-// Standard codes (-32700 to -32603) follow the spec; -32000 to -32099 is the
-// app-defined range we use for Scrybe-specific failure modes.
+// Standard codes (-32700 to -32603) follow the spec. Application codes live in
+// APP_ERR_RANGE below. The full registry is frozen in docs/rpc-contract-0.6.md.
+
+/// The reserved range for Scrybe application error codes, per the JSON-RPC 2.0
+/// "server error" convention: every `ERR_*` application code MUST fall inside
+/// `-32099..=-32000`, MUST be unique, and — once shipped in a release — MUST
+/// keep its meaning forever (the 0.6 contract fixture,
+/// `docs/rpc-contract-0.6.md`, is the compatibility artifact). Enforced by the
+/// `app_error_codes_unique_and_in_reserved_range` test.
+pub const APP_ERR_RANGE: std::ops::RangeInclusive<i32> = -32099..=-32000;
+
+/// Every application-defined error code, in one place. New codes MUST be added
+/// here (the registry test checks uniqueness + range membership against this
+/// slice) and documented in `docs/rpc-contract-0.6.md`.
+pub const APP_ERROR_CODES: &[i32] = &[
+    ERR_TAB_NOT_OPEN,
+    ERR_DIRTY_QUIT_REFUSED,
+    ERR_REPLY_TIMEOUT,
+    ERR_SECTION_NOT_FOUND,
+    ERR_DIRTY_RELOAD_REFUSED,
+];
 
 pub const ERR_PARSE: i32 = -32700;
 pub const ERR_INVALID_REQUEST: i32 = -32600;
@@ -700,23 +721,39 @@ mod tests {
     }
 
     #[test]
-    fn error_codes_are_distinct() {
-        // Sanity check: app-defined codes don't collide with each other or
-        // with reserved standard codes (-32700 to -32603).
-        let codes = [
-            ERR_TAB_NOT_OPEN,
-            ERR_DIRTY_QUIT_REFUSED,
-            ERR_REPLY_TIMEOUT,
-            ERR_SECTION_NOT_FOUND,
-            ERR_DIRTY_RELOAD_REFUSED,
-        ];
-        for &c in &codes {
-            assert!((-32099..=-32000).contains(&c), "code {c} outside app range");
+    fn app_error_codes_unique_and_in_reserved_range() {
+        // The contract registry: every application code lives in
+        // APP_ERROR_CODES, is unique, and stays inside the reserved
+        // APP_ERR_RANGE (-32099..=-32000). New codes extend the slice —
+        // this test then covers them automatically.
+        for &c in APP_ERROR_CODES {
+            assert!(
+                APP_ERR_RANGE.contains(&c),
+                "code {c} outside reserved app range {APP_ERR_RANGE:?}"
+            );
         }
-        let mut sorted = codes.to_vec();
+        let mut sorted = APP_ERROR_CODES.to_vec();
         sorted.sort_unstable();
         sorted.dedup();
-        assert_eq!(sorted.len(), codes.len(), "codes collide");
+        assert_eq!(sorted.len(), APP_ERROR_CODES.len(), "codes collide");
+    }
+
+    #[test]
+    fn standard_codes_stay_outside_the_app_range() {
+        // The spec-standard codes must never drift into (or collide with)
+        // the application range.
+        for c in [
+            ERR_PARSE,
+            ERR_INVALID_REQUEST,
+            ERR_METHOD_NOT_FOUND,
+            ERR_INVALID_PARAMS,
+            ERR_INTERNAL,
+        ] {
+            assert!(
+                !APP_ERR_RANGE.contains(&c),
+                "standard code {c} collides with the app range"
+            );
+        }
     }
 
     #[test]

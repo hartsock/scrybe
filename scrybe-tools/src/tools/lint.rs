@@ -10,7 +10,7 @@ use scrybe_core::{ContentAddressable, Document};
 use serde_json::{json, Value};
 
 use crate::lint::lint_document;
-use crate::{Ctx, DataSchema, Facet, ToolOutcome, ToolSpec};
+use crate::{Ctx, DataSchema, EngineFault, Facet, ToolOutcome, ToolSpec};
 
 /// Version of this tool's `data` payload.
 const DATA_VERSION: u32 = 1;
@@ -82,7 +82,7 @@ fn data_schema() -> Value {
     })
 }
 
-fn handler(_ctx: &Ctx, args: &Value) -> ToolOutcome {
+fn handler(_ctx: &Ctx, args: &Value) -> Result<ToolOutcome, EngineFault> {
     // `source` is guaranteed present by the dispatcher's required-args gate.
     let source = args
         .get("source")
@@ -95,7 +95,7 @@ fn handler(_ctx: &Ctx, args: &Value) -> ToolOutcome {
         .iter()
         .map(|b| json!({ "text": b.text, "url": b.url }))
         .collect();
-    ToolOutcome::ok(json!({
+    Ok(ToolOutcome::ok(json!({
         "v": DATA_VERSION,
         "kind": "lint",
         // JSON key stays `content_id` — it is a versioned wire schema
@@ -110,7 +110,7 @@ fn handler(_ctx: &Ctx, args: &Value) -> ToolOutcome {
         "has_mermaid": report.has_mermaid,
         "broken_links": broken,
         "clean": report.is_clean(),
-    }))
+    })))
 }
 
 #[cfg(test)]

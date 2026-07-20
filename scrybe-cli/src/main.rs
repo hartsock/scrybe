@@ -587,13 +587,11 @@ fn main() -> anyhow::Result<()> {
                 // the "one tab, one file, refresh on re-open" semantics.
                 match rpc_client::send("open", serde_json::json!({"path": canon.to_string_lossy()}))
                 {
-                    Ok(resp) => match resp.error {
-                        None => println!("Opening {} in Scrybe", canon.display()),
-                        Some(e) => {
-                            anyhow::bail!("scrybe open failed: {} ({})", e.message, e.code)
-                        }
-                    },
-                    Err(e) if e.contains("no Scrybe running") => {
+                    Ok(_) => println!("Opening {} in Scrybe", canon.display()),
+                    Err(scrybe_rpc::ClientError::Remote(e)) => {
+                        anyhow::bail!("scrybe open failed: {} ({})", e.message, e.code)
+                    }
+                    Err(e) if e.is_not_running() => {
                         // Fall through to launching the app.
                         launch_scrybe(Some(&canon)).map_err(|e| anyhow::anyhow!("{e}"))?;
                         println!("Opening {} in Scrybe", canon.display());
@@ -613,28 +611,23 @@ fn main() -> anyhow::Result<()> {
         Command::Save { path } => {
             let canon = path.canonicalize().unwrap_or_else(|_| path.clone());
             match rpc_client::send("save", serde_json::json!({"path": canon.to_string_lossy()})) {
-                Ok(resp) => match resp.error {
-                    // Reply-correlated save reports { path, bytes, was_dirty };
-                    // an older app replies the legacy {applied} ack with no
-                    // byte count — don't fabricate one.
-                    None => {
-                        let bytes = resp
-                            .result
-                            .as_ref()
-                            .and_then(|r| r.get("bytes"))
-                            .and_then(serde_json::Value::as_u64);
-                        match bytes {
-                            Some(b) => println!("Saved {} ({b} bytes)", canon.display()),
-                            None => println!("Saved {}", canon.display()),
-                        }
+                // Reply-correlated save reports { path, bytes, was_dirty };
+                // an older app replies the legacy {applied} ack with no
+                // byte count — don't fabricate one.
+                Ok(result) => {
+                    let bytes = result.get("bytes").and_then(serde_json::Value::as_u64);
+                    match bytes {
+                        Some(b) => println!("Saved {} ({b} bytes)", canon.display()),
+                        None => println!("Saved {}", canon.display()),
                     }
-                    // Not open: silent no-op per the documented CLI contract.
-                    Some(e) if e.code == scrybe_rpc::ERR_TAB_NOT_OPEN => {}
-                    Some(e) => {
-                        anyhow::bail!("scrybe save failed: {} ({})", e.message, e.code)
-                    }
-                },
-                Err(e) if e.contains("no Scrybe running") => {
+                }
+                // Not open: silent no-op per the documented CLI contract.
+                Err(scrybe_rpc::ClientError::Remote(e))
+                    if e.code == scrybe_rpc::ERR_TAB_NOT_OPEN => {}
+                Err(scrybe_rpc::ClientError::Remote(e)) => {
+                    anyhow::bail!("scrybe save failed: {} ({})", e.message, e.code)
+                }
+                Err(e) if e.is_not_running() => {
                     // Silent no-op per design: nothing open, nothing to save.
                 }
                 Err(e) => anyhow::bail!("scrybe save failed: {e}"),
@@ -647,13 +640,11 @@ fn main() -> anyhow::Result<()> {
                 "close",
                 serde_json::json!({"path": canon.to_string_lossy()}),
             ) {
-                Ok(resp) => match resp.error {
-                    None => println!("Closed {}", canon.display()),
-                    Some(e) => {
-                        anyhow::bail!("scrybe close failed: {} ({})", e.message, e.code)
-                    }
-                },
-                Err(e) if e.contains("no Scrybe running") => {
+                Ok(_) => println!("Closed {}", canon.display()),
+                Err(scrybe_rpc::ClientError::Remote(e)) => {
+                    anyhow::bail!("scrybe close failed: {} ({})", e.message, e.code)
+                }
+                Err(e) if e.is_not_running() => {
                     // Silent no-op.
                 }
                 Err(e) => anyhow::bail!("scrybe close failed: {e}"),
@@ -707,13 +698,11 @@ fn main() -> anyhow::Result<()> {
         }
         Command::Quit { force } => {
             match rpc_client::send("quit", serde_json::json!({"force": force})) {
-                Ok(resp) => match resp.error {
-                    None => println!("Quitting Scrybe"),
-                    Some(e) => {
-                        anyhow::bail!("scrybe quit failed: {} ({})", e.message, e.code)
-                    }
-                },
-                Err(e) if e.contains("no Scrybe running") => {
+                Ok(_) => println!("Quitting Scrybe"),
+                Err(scrybe_rpc::ClientError::Remote(e)) => {
+                    anyhow::bail!("scrybe quit failed: {} ({})", e.message, e.code)
+                }
+                Err(e) if e.is_not_running() => {
                     // Silent no-op.
                 }
                 Err(e) => anyhow::bail!("scrybe quit failed: {e}"),
@@ -813,13 +802,15 @@ fn require_running_gui<F: FnOnce(serde_json::Value) -> anyhow::Result<()>>(
     params: serde_json::Value,
     on_ok: F,
 ) -> anyhow::Result<()> {
+    // The client types every failure (A3): in-band app errors are `Remote`,
+    // no-app is `is_not_running()`, and malformed replies arrive pre-typed
+    // (envelope/frame/JSON violations) — no message-text matching anywhere.
     match rpc_client::send(method, params) {
-        Ok(resp) => match (resp.result, resp.error) {
-            (Some(r), None) => on_ok(r),
-            (None, Some(e)) => anyhow::bail!("scrybe {method}: {} ({})", e.message, e.code),
-            _ => anyhow::bail!("scrybe {method}: malformed response"),
-        },
-        Err(e) if e.contains("no Scrybe running") => {
+        Ok(result) => on_ok(result),
+        Err(scrybe_rpc::ClientError::Remote(e)) => {
+            anyhow::bail!("scrybe {method}: {} ({})", e.message, e.code)
+        }
+        Err(e) if e.is_not_running() => {
             anyhow::bail!(
                 "scrybe {method}: no Scrybe running — start the app first, or open the file with `scrybe <path>`"
             )

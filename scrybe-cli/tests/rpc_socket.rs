@@ -3,9 +3,10 @@
 //!
 //! Spawns a tiny mock server in-process that mimics the dispatch loop in
 //! `scrybe-app/src-tauri/src/cli_rpc.rs` (parse JSON-RPC, return canned
-//! responses), points the client at it via `SCRYBE_SOCK`, and verifies
-//! request/response round-trip semantics for `open`, `save`, `close`,
-//! `quit`, and the `method not found` error path.
+//! responses), points the client at it via explicit `send_to` paths, and
+//! verifies request/response round-trip semantics for `open`, `save`,
+//! `close`, `quit`, and the typed remote-error paths (A3: `send` returns the
+//! `result` value; in-band errors are `ClientError::Remote`).
 //!
 //! These tests are unix-only — Phase 1 doesn't ship Windows named-pipe
 //! support. Skipped on non-unix targets.
@@ -13,7 +14,9 @@
 #![cfg(unix)]
 
 use scrybe_cli::rpc_client;
-use scrybe_rpc::{JsonRpcVersion, Request, Response, ERR_INVALID_PARAMS, ERR_METHOD_NOT_FOUND};
+use scrybe_rpc::{
+    ClientError, JsonRpcVersion, Request, Response, ERR_INVALID_PARAMS, ERR_METHOD_NOT_FOUND,
+};
 use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::UnixListener;
 use std::path::PathBuf;
@@ -97,10 +100,7 @@ fn open_roundtrip() {
         )
     });
 
-    let resp =
-        rpc_client::send_to(&sock, "open", serde_json::json!({"path": "/tmp/foo.md"})).unwrap();
-    assert!(resp.error.is_none());
-    let r = resp.result.unwrap();
+    let r = rpc_client::send_to(&sock, "open", serde_json::json!({"path": "/tmp/foo.md"})).unwrap();
     assert_eq!(r["tab_id"], "T1");
     assert_eq!(r["reloaded"], false);
 
@@ -120,12 +120,12 @@ fn save_close_quit_roundtrip() {
     });
 
     for method in &["save", "close"] {
-        let resp =
+        let r =
             rpc_client::send_to(&sock, method, serde_json::json!({"path": "/tmp/bar.md"})).unwrap();
-        assert!(resp.error.is_none(), "{method} failed");
+        assert_eq!(r["applied"], true, "{method} failed");
     }
-    let resp = rpc_client::send_to(&sock, "quit", serde_json::json!({"force": true})).unwrap();
-    assert!(resp.error.is_none());
+    let r = rpc_client::send_to(&sock, "quit", serde_json::json!({"force": true})).unwrap();
+    assert_eq!(r["applied"], true);
 
     let reqs = received.lock().unwrap();
     let methods: Vec<&str> = reqs.iter().map(|r| r.method.as_str()).collect();
@@ -142,11 +142,14 @@ fn method_not_found_errors_propagate() {
         Response::err(req.id, ERR_METHOD_NOT_FOUND, "method not found: phlogiston")
     });
 
-    let resp = rpc_client::send_to(&sock, "phlogiston", serde_json::json!({})).unwrap();
-    assert!(resp.result.is_none());
-    let e = resp.error.unwrap();
-    assert_eq!(e.code, ERR_METHOD_NOT_FOUND);
-    assert!(e.message.contains("phlogiston"));
+    let err = rpc_client::send_to(&sock, "phlogiston", serde_json::json!({})).unwrap_err();
+    match err {
+        ClientError::Remote(e) => {
+            assert_eq!(e.code, ERR_METHOD_NOT_FOUND);
+            assert!(e.message.contains("phlogiston"));
+        }
+        other => panic!("expected Remote, got {other:?}"),
+    }
     cleanup(&sock);
 }
 
@@ -157,19 +160,21 @@ fn invalid_params_errors_propagate() {
         Response::err(req.id, ERR_INVALID_PARAMS, "missing field: path")
     });
 
-    let resp = rpc_client::send_to(&sock, "save", serde_json::json!({"oops": 1})).unwrap();
-    let e = resp.error.unwrap();
-    assert_eq!(e.code, ERR_INVALID_PARAMS);
+    let err = rpc_client::send_to(&sock, "save", serde_json::json!({"oops": 1})).unwrap_err();
+    match err {
+        ClientError::Remote(e) => assert_eq!(e.code, ERR_INVALID_PARAMS),
+        other => panic!("expected Remote, got {other:?}"),
+    }
     cleanup(&sock);
 }
 
 #[test]
-fn no_server_running_returns_no_scrybe_running() {
+fn no_server_running_is_typed_not_running() {
     let sock = unique_socket_path("nosrv");
-    // Don't bind anything.
+    // Don't bind anything. The typed check replaces message-text matching.
     let err =
         rpc_client::send_to(&sock, "open", serde_json::json!({"path": "/tmp/x"})).unwrap_err();
-    assert!(err.contains("no Scrybe running"), "actual: {err}");
+    assert!(err.is_not_running(), "actual: {err:?}");
 }
 
 #[test]
@@ -205,9 +210,7 @@ fn read_returns_buffer_content() {
         )
     });
 
-    let resp =
-        rpc_client::send_to(&sock, "read", serde_json::json!({"path": "/tmp/foo.md"})).unwrap();
-    let r = resp.result.unwrap();
+    let r = rpc_client::send_to(&sock, "read", serde_json::json!({"path": "/tmp/foo.md"})).unwrap();
     assert_eq!(r["content"], "# Hello\nfrom an in-memory buffer.\n");
     assert_eq!(r["is_dirty"], true);
     cleanup(&sock);
@@ -220,11 +223,15 @@ fn read_propagates_tab_not_open_error() {
     let _received = mock_server(&sock, |req| {
         Response::err(req.id, ERR_TAB_NOT_OPEN, "not open: /tmp/x.md")
     });
-    let resp =
-        rpc_client::send_to(&sock, "read", serde_json::json!({"path": "/tmp/x.md"})).unwrap();
-    let e = resp.error.unwrap();
-    assert_eq!(e.code, ERR_TAB_NOT_OPEN);
-    assert!(e.message.contains("not open"));
+    let err =
+        rpc_client::send_to(&sock, "read", serde_json::json!({"path": "/tmp/x.md"})).unwrap_err();
+    match err {
+        ClientError::Remote(e) => {
+            assert_eq!(e.code, ERR_TAB_NOT_OPEN);
+            assert!(e.message.contains("not open"));
+        }
+        other => panic!("expected Remote, got {other:?}"),
+    }
     cleanup(&sock);
 }
 
@@ -243,7 +250,7 @@ fn find_returns_hits_array() {
             }),
         )
     });
-    let resp = rpc_client::send_to(
+    let r = rpc_client::send_to(
         &sock,
         "find",
         serde_json::json!({
@@ -254,7 +261,7 @@ fn find_returns_hits_array() {
         }),
     )
     .unwrap();
-    let hits = resp.result.unwrap()["hits"].as_array().cloned().unwrap();
+    let hits = r["hits"].as_array().cloned().unwrap();
     assert_eq!(hits.len(), 2);
     assert_eq!(hits[0]["line"], 10);
     assert_eq!(hits[1]["text"], "TODO list");
@@ -274,13 +281,12 @@ fn section_returns_heading_level_content() {
             }),
         )
     });
-    let resp = rpc_client::send_to(
+    let r = rpc_client::send_to(
         &sock,
         "section",
         serde_json::json!({"path": "/tmp/foo.md", "heading": "install"}),
     )
     .unwrap();
-    let r = resp.result.unwrap();
     assert_eq!(r["heading"], "Install");
     assert_eq!(r["level"], 2);
     assert!(r["content"].as_str().unwrap().contains("pip install"));
@@ -298,14 +304,16 @@ fn section_propagates_not_found() {
             "no heading matching 'Hodor' in /tmp/foo.md",
         )
     });
-    let resp = rpc_client::send_to(
+    let err = rpc_client::send_to(
         &sock,
         "section",
         serde_json::json!({"path": "/tmp/foo.md", "heading": "Hodor"}),
     )
-    .unwrap();
-    let e = resp.error.unwrap();
-    assert_eq!(e.code, ERR_SECTION_NOT_FOUND);
+    .unwrap_err();
+    match err {
+        ClientError::Remote(e) => assert_eq!(e.code, ERR_SECTION_NOT_FOUND),
+        other => panic!("expected Remote, got {other:?}"),
+    }
     cleanup(&sock);
 }
 
@@ -318,7 +326,7 @@ fn edit_returns_applied_and_size_after() {
             serde_json::json!({"applied": true, "size_after": 1234}),
         )
     });
-    let resp = rpc_client::send_to(
+    let r = rpc_client::send_to(
         &sock,
         "edit",
         serde_json::json!({
@@ -329,7 +337,6 @@ fn edit_returns_applied_and_size_after() {
         }),
     )
     .unwrap();
-    let r = resp.result.unwrap();
     assert_eq!(r["applied"], true);
     assert_eq!(r["size_after"], 1234);
     cleanup(&sock);
@@ -356,7 +363,7 @@ fn concurrent_clients_do_not_corrupt_responses() {
     });
     let r1 = h1.join().unwrap().unwrap();
     let r2 = h2.join().unwrap().unwrap();
-    assert_eq!(r1.result.unwrap()["echoed"], "open");
-    assert_eq!(r2.result.unwrap()["echoed"], "save");
+    assert_eq!(r1["echoed"], "open");
+    assert_eq!(r2["echoed"], "save");
     cleanup(&sock);
 }

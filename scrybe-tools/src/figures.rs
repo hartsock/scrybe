@@ -23,7 +23,7 @@ use scrybe_core::Ast;
 use scrybe_mermaid_render::{render_png, source_sha256};
 use serde_json::{json, Value};
 
-use crate::{Ctx, DataSchema, Facet, ToolError, ToolOutcome, ToolSpec};
+use crate::{Ctx, DataSchema, EngineFault, Facet, ToolError, ToolOutcome, ToolSpec};
 
 /// Version of the `export_figures` tool's `data` payload.
 const DATA_VERSION: u32 = 1;
@@ -251,7 +251,7 @@ fn data_schema() -> Value {
     })
 }
 
-fn handler(_ctx: &Ctx, args: &Value) -> ToolOutcome {
+fn handler(_ctx: &Ctx, args: &Value) -> Result<ToolOutcome, EngineFault> {
     // Required args are gated by the dispatcher.
     let path = args.get("path").and_then(Value::as_str).unwrap_or_default();
     let base = json!({ "v": DATA_VERSION, "kind": "export_figures", "path": path });
@@ -261,14 +261,14 @@ fn handler(_ctx: &Ctx, args: &Value) -> ToolOutcome {
     let source = match std::fs::read_to_string(path) {
         Ok(s) => s,
         Err(e) => {
-            return ToolOutcome::fail(
+            return Ok(ToolOutcome::fail(
                 base,
                 ToolError::new("read_failed", format!("could not read {path}: {e}")),
-            )
+            ))
         }
     };
 
-    match export_figures(&source, Path::new(path)) {
+    Ok(match export_figures(&source, Path::new(path)) {
         Ok(figs) => {
             let figures: Vec<Value> = figs
                 .iter()
@@ -292,7 +292,7 @@ fn handler(_ctx: &Ctx, args: &Value) -> ToolOutcome {
             base,
             ToolError::new("export_failed", format!("could not export figures: {e}")),
         ),
-    }
+    })
 }
 
 // ---------------------------------------------------------------------------

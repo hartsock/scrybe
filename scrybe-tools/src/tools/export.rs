@@ -16,7 +16,7 @@ use std::path::{Path, PathBuf};
 
 use serde_json::{json, Value};
 
-use crate::{Ctx, DataSchema, Facet, ToolError, ToolOutcome, ToolSpec};
+use crate::{Ctx, DataSchema, EngineFault, Facet, ToolError, ToolOutcome, ToolSpec};
 
 /// Version of this tool's `data` payload.
 const DATA_VERSION: u32 = 1;
@@ -71,7 +71,7 @@ fn data_schema() -> Value {
     })
 }
 
-fn handler(_ctx: &Ctx, args: &Value) -> ToolOutcome {
+fn handler(_ctx: &Ctx, args: &Value) -> Result<ToolOutcome, EngineFault> {
     // Required args are gated by the dispatcher.
     let path = args.get("path").and_then(Value::as_str).unwrap_or_default();
     let output = match args.get("output").and_then(Value::as_str) {
@@ -93,12 +93,17 @@ fn handler(_ctx: &Ctx, args: &Value) -> ToolOutcome {
     // here so a bad call fails as a clear business error instead of an opaque
     // subprocess failure — and so the write target can't be redirected.
     if let Some(err) = validate_paths(path, &output) {
-        return ToolOutcome::fail(base, err);
+        return Ok(ToolOutcome::fail(base, err));
     }
 
     let bin = match which_scrybe_docx() {
         Ok(bin) => bin,
-        Err(e) => return ToolOutcome::fail(base, ToolError::new("exporter_not_found", e)),
+        Err(e) => {
+            return Ok(ToolOutcome::fail(
+                base,
+                ToolError::new("exporter_not_found", e),
+            ))
+        }
     };
 
     let mut cmd = std::process::Command::new(bin);
@@ -106,7 +111,7 @@ fn handler(_ctx: &Ctx, args: &Value) -> ToolOutcome {
     if no_diagrams {
         cmd.arg("--no-diagrams");
     }
-    match cmd.output() {
+    Ok(match cmd.output() {
         Ok(out) if out.status.success() => ToolOutcome::ok(json!({
             "v": DATA_VERSION,
             "kind": "export",
@@ -124,7 +129,7 @@ fn handler(_ctx: &Ctx, args: &Value) -> ToolOutcome {
             base,
             ToolError::new("export_failed", format!("failed to run scrybe-docx ({e})")),
         ),
-    }
+    })
 }
 
 /// Validate the input document and the output target. Returns the business
