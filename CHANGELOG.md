@@ -9,6 +9,22 @@ All notable changes to Scrybe are documented here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/); versions are the workspace
 lock-step version (`[workspace.package] version`).
 
+## [0.6.2] — 2026-07-20
+
+### Added — install channels (#1, #2, #220)
+- **Homebrew**: `brew install --cask hartsock/scrybe/scrybe` via the
+  [hartsock/homebrew-scrybe](https://github.com/hartsock/homebrew-scrybe) tap
+  (Apple silicon; Intel joins when the build matrix adds an x86_64 dmg). The
+  release workflow renders and stages the cask each release, and pushes it to
+  the tap when `TAP_GITHUB_TOKEN` is provisioned.
+- **Chocolatey**: `scrybe` package (silent NSIS install) rendered and staged
+  each release; pushed to the community feed when `CHOCO_API_KEY` is
+  provisioned (then subject to chocolatey.org moderation).
+- Packaging jobs never sink a release: artifacts always stage; publishing is
+  secret-gated.
+- README: terse install matrix across brew / npm / pip / cargo / choco and the
+  named installer formats on GitHub Releases.
+
 ## [0.6.1] — 2026-07-20 — "Contract"
 
 > **Version history note:** the `v0.6.0` tag was consumed by a release run

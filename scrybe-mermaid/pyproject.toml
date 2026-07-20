@@ -4,7 +4,7 @@ build-backend = "maturin"
 
 [project]
 name = "scrybe-mermaid"
-version = "0.6.1"
+version = "0.6.2"
 description = "Scrybe Mermaid — standalone PNG iTXt codec (Rust-backed)"
 license = {text = "Apache-2.0"}
 readme = "README.md"
