@@ -39,11 +39,10 @@ fn input_schema() -> Value {
 }
 
 fn data_schema() -> Value {
-    json!({
-        "type": "object",
-        "properties": {
-            "v": { "const": DATA_VERSION },
-            "kind": { "const": "list_tabs" },
+    crate::schema::envelope(
+        "list_tabs",
+        DATA_VERSION,
+        json!({
             "tabs": {
                 "type": "array",
                 "items": {
@@ -54,13 +53,14 @@ fn data_schema() -> Value {
                         "is_dirty": { "type": "boolean" },
                         "view_mode": { "type": "string" },
                         "active": { "type": "boolean" }
-                    }
+                    },
+                    "required": ["path", "title", "is_dirty", "view_mode", "active"]
                 }
             },
             "count": { "type": "integer" }
-        },
-        "required": ["v", "kind", "tabs", "count"]
-    })
+        }),
+        &["tabs", "count"],
+    )
 }
 
 fn handler(ctx: &Ctx, _args: &Value) -> Result<ToolOutcome, EngineFault> {
@@ -139,7 +139,7 @@ mod tests {
 
     #[test]
     fn no_live_app_is_a_business_failure_not_an_engine_fault() {
-        // Headless transport → NoApp → tool_error, isError stays false.
+        // Headless transport → NoApp → a `no_live_app` tool_error outcome.
         let out = Registry::default()
             .call("list_tabs", &Ctx::headless(), &json!({}))
             .expect("dispatch");

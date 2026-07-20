@@ -11,6 +11,24 @@ lock-step version (`[workspace.package] version`).
 
 ## [Unreleased]
 
+### Changed — BREAKING (A4: honest MCP contract)
+- **Failed MCP invocations now read as failed.** A business `tool_error`
+  (incl. `no_live_app`, `app_error`, `verification_failed`) is an
+  `isError: true` tool result at the MCP boundary — it no longer hides inside
+  a success payload as `data.tool_error`. `structuredContent` carries
+  `{code, message, …}`; the content text is the human message. Agents that
+  parsed `tool_error` out of success results must switch to `isError` +
+  `structuredContent.code`. The non-standard `data` result field is replaced
+  by the spec's `structuredContent` (the content text still carries the same
+  JSON). Unknown tools and malformed `tools/call` params are now top-level
+  JSON-RPC `-32602` protocol errors, not tool results.
+- **Real output schemas.** Every tool's `tools/list` descriptor now advertises
+  `outputSchema` (the versioned data envelope `v`/`kind`/`tool_error?` + the
+  tool's honest payload shape) and `annotations.readOnlyHint` (from
+  `mutates`). The full surface is frozen as `docs/mcp-contract-0.6.json`,
+  pinned by golden fixtures (`scrybe-mcp-server/tests/mcp_contract.rs`).
+  `initialize` now negotiates the protocol version (latest: 2025-11-25).
+
 ### Fixed
 - **`scrybe_mermaid::extract` verifies the embedded digest by default** —
   shipped docs (the PyPI-facing `extract` docstring) promised a `ValueError`

@@ -1,0 +1,1621 @@
+{
+  "tools": [
+    {
+      "annotations": {
+        "readOnlyHint": true
+      },
+      "description": "Render Markdown to HTML using Scrybe's pipeline (syntect highlighting, KaTeX-ready math, Mermaid wrappers, theme CSS). Input: `source` (Markdown string) and optional `theme` (default|dark|solarized). Returns `{ html, body_html, theme, bytes }` — read the `data` payload, never this prose.",
+      "inputSchema": {
+        "properties": {
+          "source": {
+            "description": "Markdown source to render.",
+            "type": "string"
+          },
+          "theme": {
+            "description": "Theme CSS to prepend. Defaults to `default`.",
+            "enum": [
+              "default",
+              "dark",
+              "solarized"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "source"
+        ],
+        "type": "object"
+      },
+      "name": "render",
+      "outputSchema": {
+        "properties": {
+          "body_html": {
+            "description": "Body only, no CSS.",
+            "type": "string"
+          },
+          "bytes": {
+            "type": "integer"
+          },
+          "html": {
+            "description": "Full fragment incl. <style>.",
+            "type": "string"
+          },
+          "kind": {
+            "const": "render",
+            "description": "Payload discriminator — the tool name."
+          },
+          "theme": {
+            "type": "string"
+          },
+          "tool_error": {
+            "description": "Business failure — the tool ran and said \"no\". Absent on success. (At the MCP boundary a business failure surfaces as an isError:true result instead of riding inside a success payload.)",
+            "properties": {
+              "code": {
+                "description": "Stable machine code, e.g. no_live_app.",
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "code",
+              "message"
+            ],
+            "type": "object"
+          },
+          "v": {
+            "const": 1,
+            "description": "Payload schema version."
+          }
+        },
+        "required": [
+          "v",
+          "kind",
+          "html",
+          "body_html",
+          "theme",
+          "bytes"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "annotations": {
+        "readOnlyHint": true
+      },
+      "description": "Analyze a Markdown document and return structured statistics (word/heading/code counts, code-block languages, math & Mermaid presence, broken links) plus the source's content id. Input: `source` (Markdown string). Read the `data` payload — `clean` is true when there are no broken links.",
+      "inputSchema": {
+        "properties": {
+          "source": {
+            "description": "Markdown source to lint.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "source"
+        ],
+        "type": "object"
+      },
+      "name": "lint",
+      "outputSchema": {
+        "properties": {
+          "broken_links": {
+            "items": {
+              "properties": {
+                "text": {
+                  "type": "string"
+                },
+                "url": {
+                  "type": "string"
+                }
+              },
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "clean": {
+            "type": "boolean"
+          },
+          "code_block_count": {
+            "type": "integer"
+          },
+          "code_block_langs": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "content_id": {
+            "description": "BLAKE3 content digest of the source (64 lowercase hex chars).",
+            "type": "string"
+          },
+          "has_math": {
+            "type": "boolean"
+          },
+          "has_mermaid": {
+            "type": "boolean"
+          },
+          "heading_count": {
+            "type": "integer"
+          },
+          "kind": {
+            "const": "lint",
+            "description": "Payload discriminator — the tool name."
+          },
+          "max_heading_depth": {
+            "type": "integer"
+          },
+          "tool_error": {
+            "description": "Business failure — the tool ran and said \"no\". Absent on success. (At the MCP boundary a business failure surfaces as an isError:true result instead of riding inside a success payload.)",
+            "properties": {
+              "code": {
+                "description": "Stable machine code, e.g. no_live_app.",
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "code",
+              "message"
+            ],
+            "type": "object"
+          },
+          "v": {
+            "const": 1,
+            "description": "Payload schema version."
+          },
+          "word_count": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "v",
+          "kind",
+          "content_id",
+          "word_count",
+          "heading_count",
+          "max_heading_depth",
+          "code_block_count",
+          "code_block_langs",
+          "has_math",
+          "has_mermaid",
+          "broken_links",
+          "clean"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "annotations": {
+        "readOnlyHint": false
+      },
+      "description": "Render a Mermaid diagram to PNG AND embed the source in the PNG's iTXt metadata (a per-artifact UUID + the source's SHA-256). ALWAYS use this instead of calling `mmdc` directly — raw `mmdc` skips the embedding and breaks lossless round-trips and document publishing. Rendering is pure Rust (no browser). Input: `source` (Mermaid text) + `output_path`. Returns `{ png_path, uuid, sha256, bytes }`; recover the source later with `extract`.",
+      "inputSchema": {
+        "properties": {
+          "output_path": {
+            "description": "Where to write the PNG.",
+            "type": "string"
+          },
+          "source": {
+            "description": "Mermaid diagram source.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "source",
+          "output_path"
+        ],
+        "type": "object"
+      },
+      "name": "mermaid_to_png",
+      "outputSchema": {
+        "properties": {
+          "bytes": {
+            "type": "integer"
+          },
+          "kind": {
+            "const": "mermaid_to_png",
+            "description": "Payload discriminator — the tool name."
+          },
+          "png_path": {
+            "type": "string"
+          },
+          "sha256": {
+            "description": "SHA-256 of the Mermaid source.",
+            "type": "string"
+          },
+          "tool_error": {
+            "description": "Business failure — the tool ran and said \"no\". Absent on success. (At the MCP boundary a business failure surfaces as an isError:true result instead of riding inside a success payload.)",
+            "properties": {
+              "code": {
+                "description": "Stable machine code, e.g. no_live_app.",
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "code",
+              "message"
+            ],
+            "type": "object"
+          },
+          "uuid": {
+            "description": "Per-artifact id embedded in the PNG.",
+            "type": "string"
+          },
+          "v": {
+            "const": 1,
+            "description": "Payload schema version."
+          }
+        },
+        "required": [
+          "v",
+          "kind",
+          "png_path",
+          "uuid",
+          "sha256",
+          "bytes"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "annotations": {
+        "readOnlyHint": false
+      },
+      "description": "Embed Mermaid `source` into an EXISTING PNG file's iTXt metadata, in place (a per-artifact UUID + the source's SHA-256 travel with the image). Use this to retrofit a PNG you already have; prefer `mermaid_to_png` to render + embed in one step. In-process — no running app needed. Returns `{ png_path, uuid, sha256, bytes }`; recover the source later with `extract`.",
+      "inputSchema": {
+        "properties": {
+          "png_path": {
+            "description": "PNG file to embed into (rewritten in place).",
+            "type": "string"
+          },
+          "source": {
+            "description": "Mermaid diagram source.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "png_path",
+          "source"
+        ],
+        "type": "object"
+      },
+      "name": "embed",
+      "outputSchema": {
+        "properties": {
+          "bytes": {
+            "type": "integer"
+          },
+          "kind": {
+            "const": "embed",
+            "description": "Payload discriminator — the tool name."
+          },
+          "png_path": {
+            "type": "string"
+          },
+          "sha256": {
+            "description": "SHA-256 of the Mermaid source.",
+            "type": "string"
+          },
+          "tool_error": {
+            "description": "Business failure — the tool ran and said \"no\". Absent on success. (At the MCP boundary a business failure surfaces as an isError:true result instead of riding inside a success payload.)",
+            "properties": {
+              "code": {
+                "description": "Stable machine code, e.g. no_live_app.",
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "code",
+              "message"
+            ],
+            "type": "object"
+          },
+          "uuid": {
+            "description": "Per-artifact id embedded in the PNG.",
+            "type": "string"
+          },
+          "v": {
+            "const": 1,
+            "description": "Payload schema version."
+          }
+        },
+        "required": [
+          "v",
+          "kind",
+          "png_path",
+          "uuid",
+          "sha256",
+          "bytes"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "annotations": {
+        "readOnlyHint": true
+      },
+      "description": "Extract the Mermaid source embedded in a PNG's iTXt metadata, verifying the stored SHA-256 against the extracted source by default. Returns `{ source, uuid, verification }` where `verification` is \"verified\" (digest matched) or \"no-digest\" (the payload stored none — older or foreign embedder, explicitly NOT verified). A digest mismatch is the business tool_error `verification_failed` (tampered source is never returned as good); a PNG with no payload is `no_payload`. In-process — no running app needed.",
+      "inputSchema": {
+        "properties": {
+          "png_path": {
+            "description": "PNG file to extract from.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "png_path"
+        ],
+        "type": "object"
+      },
+      "name": "extract",
+      "outputSchema": {
+        "properties": {
+          "kind": {
+            "const": "extract",
+            "description": "Payload discriminator — the tool name."
+          },
+          "png_path": {
+            "type": "string"
+          },
+          "sha256": {
+            "description": "Verified digest; empty when the payload stored none.",
+            "type": "string"
+          },
+          "source": {
+            "type": "string"
+          },
+          "tool_error": {
+            "description": "Business failure — the tool ran and said \"no\". Absent on success. (At the MCP boundary a business failure surfaces as an isError:true result instead of riding inside a success payload.)",
+            "properties": {
+              "code": {
+                "description": "Stable machine code, e.g. no_live_app.",
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "code",
+              "message"
+            ],
+            "type": "object"
+          },
+          "uuid": {
+            "type": "string"
+          },
+          "v": {
+            "const": 1,
+            "description": "Payload schema version."
+          },
+          "verification": {
+            "enum": [
+              "verified",
+              "no-digest"
+            ]
+          }
+        },
+        "required": [
+          "v",
+          "kind",
+          "png_path",
+          "source",
+          "uuid",
+          "sha256",
+          "verification"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "annotations": {
+        "readOnlyHint": false
+      },
+      "description": "Export EVERY Mermaid diagram in a Markdown document to sibling PNG figures. For `foo.md`, writes `foo_fig_01.png`, `foo_fig_02.png`, … in the SAME directory, numbered 1-based in document order (zero-padded so they sort next to the document). Each PNG embeds its Mermaid source (a per-artifact UUID + the source's SHA-256), so the diagrams are losslessly round-trippable with `extract`. Re-exporting replaces the document's prior figure set (stale `<stem>_fig_NN.png` siblings are pruned), so the output always matches the current document. Input: `path` (the Markdown document on disk). Returns `{ count, figures: [{ path, uuid, sha256, bytes }] }`.",
+      "inputSchema": {
+        "properties": {
+          "path": {
+            "description": "Markdown document whose Mermaid diagrams to export.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "type": "object"
+      },
+      "name": "export_figures",
+      "outputSchema": {
+        "properties": {
+          "count": {
+            "type": "integer"
+          },
+          "figures": {
+            "items": {
+              "properties": {
+                "bytes": {
+                  "type": "integer"
+                },
+                "path": {
+                  "type": "string"
+                },
+                "sha256": {
+                  "type": "string"
+                },
+                "uuid": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "path",
+                "uuid",
+                "sha256",
+                "bytes"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "kind": {
+            "const": "export_figures",
+            "description": "Payload discriminator — the tool name."
+          },
+          "tool_error": {
+            "description": "Business failure — the tool ran and said \"no\". Absent on success. (At the MCP boundary a business failure surfaces as an isError:true result instead of riding inside a success payload.)",
+            "properties": {
+              "code": {
+                "description": "Stable machine code, e.g. no_live_app.",
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "code",
+              "message"
+            ],
+            "type": "object"
+          },
+          "v": {
+            "const": 1,
+            "description": "Payload schema version."
+          }
+        },
+        "required": [
+          "v",
+          "kind",
+          "count",
+          "figures"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "annotations": {
+        "readOnlyHint": false
+      },
+      "description": "Export a Markdown file to a Word (.docx) document with Mermaid diagrams rendered to PNGs (source embedded in PNG metadata). Human equivalent: the toolbar Export button. Input: `path` (the Markdown file); optional `output` (.docx path, default: `path` with a .docx extension) and `no_diagrams` (keep fenced Mermaid blocks as monospace text). Drives the `scrybe-docx` exporter — install the Scrybe Python toolkit or set SCRYBE_DOCX_BIN. Returns `{ path, output }`.",
+      "inputSchema": {
+        "properties": {
+          "no_diagrams": {
+            "description": "Skip Mermaid rendering; keep fenced blocks as monospace text.",
+            "type": "boolean"
+          },
+          "output": {
+            "description": "Output .docx path (default: `path` with a .docx extension).",
+            "type": "string"
+          },
+          "path": {
+            "description": "Path to the Markdown file to export.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "type": "object"
+      },
+      "name": "export",
+      "outputSchema": {
+        "properties": {
+          "kind": {
+            "const": "export",
+            "description": "Payload discriminator — the tool name."
+          },
+          "output": {
+            "description": "The .docx file that was written.",
+            "type": "string"
+          },
+          "path": {
+            "description": "The Markdown file that was exported.",
+            "type": "string"
+          },
+          "tool_error": {
+            "description": "Business failure — the tool ran and said \"no\". Absent on success. (At the MCP boundary a business failure surfaces as an isError:true result instead of riding inside a success payload.)",
+            "properties": {
+              "code": {
+                "description": "Stable machine code, e.g. no_live_app.",
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "code",
+              "message"
+            ],
+            "type": "object"
+          },
+          "v": {
+            "const": 1,
+            "description": "Payload schema version."
+          }
+        },
+        "required": [
+          "v",
+          "kind",
+          "path",
+          "output"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "annotations": {
+        "readOnlyHint": true
+      },
+      "description": "List the tabs currently open in the running Scrybe editor — each with its path, title, dirty flag, view mode, and whether it is the active tab. Requires a live app; with none running it reports `no_live_app`. Read the `data.tabs` array.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {},
+        "type": "object"
+      },
+      "name": "list_tabs",
+      "outputSchema": {
+        "properties": {
+          "count": {
+            "type": "integer"
+          },
+          "kind": {
+            "const": "list_tabs",
+            "description": "Payload discriminator — the tool name."
+          },
+          "tabs": {
+            "items": {
+              "properties": {
+                "active": {
+                  "type": "boolean"
+                },
+                "is_dirty": {
+                  "type": "boolean"
+                },
+                "path": {
+                  "type": "string"
+                },
+                "title": {
+                  "type": "string"
+                },
+                "view_mode": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "path",
+                "title",
+                "is_dirty",
+                "view_mode",
+                "active"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "tool_error": {
+            "description": "Business failure — the tool ran and said \"no\". Absent on success. (At the MCP boundary a business failure surfaces as an isError:true result instead of riding inside a success payload.)",
+            "properties": {
+              "code": {
+                "description": "Stable machine code, e.g. no_live_app.",
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "code",
+              "message"
+            ],
+            "type": "object"
+          },
+          "v": {
+            "const": 1,
+            "description": "Payload schema version."
+          }
+        },
+        "required": [
+          "v",
+          "kind",
+          "tabs",
+          "count"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "annotations": {
+        "readOnlyHint": false
+      },
+      "description": "Open (or refresh) a file as a tab in the running Scrybe editor. The tab is addressed by its canonical `path` thereafter. Requires a live app. Returns `{ tab_id, reloaded }`.",
+      "inputSchema": {
+        "properties": {
+          "path": {
+            "description": "File to open.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "type": "object"
+      },
+      "name": "open",
+      "outputSchema": {
+        "properties": {
+          "kind": {
+            "const": "open",
+            "description": "Payload discriminator — the tool name."
+          },
+          "reloaded": {
+            "description": "True when an existing tab was refreshed from disk.",
+            "type": "boolean"
+          },
+          "tab_id": {
+            "description": "Stable id of the tab.",
+            "type": "string"
+          },
+          "tool_error": {
+            "description": "Business failure — the tool ran and said \"no\". Absent on success. (At the MCP boundary a business failure surfaces as an isError:true result instead of riding inside a success payload.)",
+            "properties": {
+              "code": {
+                "description": "Stable machine code, e.g. no_live_app.",
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "code",
+              "message"
+            ],
+            "type": "object"
+          },
+          "v": {
+            "const": 1,
+            "description": "Payload schema version."
+          }
+        },
+        "required": [
+          "v",
+          "kind",
+          "tab_id",
+          "reloaded"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "annotations": {
+        "readOnlyHint": true
+      },
+      "description": "Read the in-memory buffer of an open tab (sees unsaved edits, unlike reading the file from disk). Address the tab by `path`. Returns `{ path, content, is_dirty }`.",
+      "inputSchema": {
+        "properties": {
+          "path": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "type": "object"
+      },
+      "name": "read",
+      "outputSchema": {
+        "properties": {
+          "content": {
+            "description": "The in-memory buffer (may differ from disk).",
+            "type": "string"
+          },
+          "is_dirty": {
+            "type": "boolean"
+          },
+          "kind": {
+            "const": "read",
+            "description": "Payload discriminator — the tool name."
+          },
+          "path": {
+            "type": "string"
+          },
+          "tool_error": {
+            "description": "Business failure — the tool ran and said \"no\". Absent on success. (At the MCP boundary a business failure surfaces as an isError:true result instead of riding inside a success payload.)",
+            "properties": {
+              "code": {
+                "description": "Stable machine code, e.g. no_live_app.",
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "code",
+              "message"
+            ],
+            "type": "object"
+          },
+          "v": {
+            "const": 1,
+            "description": "Payload schema version."
+          }
+        },
+        "required": [
+          "v",
+          "kind",
+          "path",
+          "content",
+          "is_dirty"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "annotations": {
+        "readOnlyHint": true
+      },
+      "description": "Search open tabs (or named `paths`, falling back to disk) for a regex `pattern` (or a `literal` string). Returns `{ hits: [{ path, line, column, text }] }`.",
+      "inputSchema": {
+        "properties": {
+          "case_sensitive": {
+            "type": "boolean"
+          },
+          "literal": {
+            "type": "boolean"
+          },
+          "paths": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "pattern": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "pattern"
+        ],
+        "type": "object"
+      },
+      "name": "find",
+      "outputSchema": {
+        "properties": {
+          "hits": {
+            "items": {
+              "properties": {
+                "column": {
+                  "description": "1-indexed column where the match starts.",
+                  "type": "integer"
+                },
+                "line": {
+                  "description": "1-indexed line of the match.",
+                  "type": "integer"
+                },
+                "path": {
+                  "type": "string"
+                },
+                "text": {
+                  "description": "The full line text.",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "path",
+                "line",
+                "column",
+                "text"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "kind": {
+            "const": "find",
+            "description": "Payload discriminator — the tool name."
+          },
+          "tool_error": {
+            "description": "Business failure — the tool ran and said \"no\". Absent on success. (At the MCP boundary a business failure surfaces as an isError:true result instead of riding inside a success payload.)",
+            "properties": {
+              "code": {
+                "description": "Stable machine code, e.g. no_live_app.",
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "code",
+              "message"
+            ],
+            "type": "object"
+          },
+          "v": {
+            "const": 1,
+            "description": "Payload schema version."
+          }
+        },
+        "required": [
+          "v",
+          "kind",
+          "hits"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "annotations": {
+        "readOnlyHint": true
+      },
+      "description": "Extract a section of an open tab by `heading` (case-insensitive substring). Address the tab by `path`. Returns `{ heading, level, content }`.",
+      "inputSchema": {
+        "properties": {
+          "heading": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "path",
+          "heading"
+        ],
+        "type": "object"
+      },
+      "name": "section",
+      "outputSchema": {
+        "properties": {
+          "content": {
+            "description": "The section's Markdown content.",
+            "type": "string"
+          },
+          "heading": {
+            "description": "The matched heading text.",
+            "type": "string"
+          },
+          "kind": {
+            "const": "section",
+            "description": "Payload discriminator — the tool name."
+          },
+          "level": {
+            "description": "Heading level (1-6).",
+            "type": "integer"
+          },
+          "tool_error": {
+            "description": "Business failure — the tool ran and said \"no\". Absent on success. (At the MCP boundary a business failure surfaces as an isError:true result instead of riding inside a success payload.)",
+            "properties": {
+              "code": {
+                "description": "Stable machine code, e.g. no_live_app.",
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "code",
+              "message"
+            ],
+            "type": "object"
+          },
+          "v": {
+            "const": 1,
+            "description": "Payload schema version."
+          }
+        },
+        "required": [
+          "v",
+          "kind",
+          "heading",
+          "level",
+          "content"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "annotations": {
+        "readOnlyHint": false
+      },
+      "description": "Replace lines `start_line..=end_line` (1-indexed) of an open tab's buffer with `content`. Address the tab by `path`. The unified line-range edit (the old MCP `{old, new}` replace is dropped).",
+      "inputSchema": {
+        "properties": {
+          "content": {
+            "type": "string"
+          },
+          "end_line": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "path": {
+            "type": "string"
+          },
+          "start_line": {
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "path",
+          "start_line",
+          "end_line",
+          "content"
+        ],
+        "type": "object"
+      },
+      "name": "edit",
+      "outputSchema": {
+        "properties": {
+          "applied": {
+            "type": "boolean"
+          },
+          "is_dirty": {
+            "description": "True until an explicit `save` persists the buffer.",
+            "type": "boolean"
+          },
+          "kind": {
+            "const": "edit",
+            "description": "Payload discriminator — the tool name."
+          },
+          "size_after": {
+            "description": "Buffer size in bytes after the edit.",
+            "type": "integer"
+          },
+          "tool_error": {
+            "description": "Business failure — the tool ran and said \"no\". Absent on success. (At the MCP boundary a business failure surfaces as an isError:true result instead of riding inside a success payload.)",
+            "properties": {
+              "code": {
+                "description": "Stable machine code, e.g. no_live_app.",
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "code",
+              "message"
+            ],
+            "type": "object"
+          },
+          "v": {
+            "const": 1,
+            "description": "Payload schema version."
+          }
+        },
+        "required": [
+          "v",
+          "kind",
+          "applied",
+          "size_after",
+          "is_dirty"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "annotations": {
+        "readOnlyHint": false
+      },
+      "description": "Write an open tab's buffer to its file on disk. Edits made with `edit` stay in the in-memory buffer (dirty) until saved — that is deliberate: review with `read`/`render` first, and leave the buffer dirty to defer or discard (`reload` with `force`). Call `save` only when the change should persist. Address the tab by `path`. Returns `{ path, bytes, was_dirty }`.",
+      "inputSchema": {
+        "properties": {
+          "path": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "type": "object"
+      },
+      "name": "save",
+      "outputSchema": {
+        "properties": {
+          "bytes": {
+            "description": "Bytes written to disk.",
+            "type": "integer"
+          },
+          "kind": {
+            "const": "save",
+            "description": "Payload discriminator — the tool name."
+          },
+          "path": {
+            "type": "string"
+          },
+          "tool_error": {
+            "description": "Business failure — the tool ran and said \"no\". Absent on success. (At the MCP boundary a business failure surfaces as an isError:true result instead of riding inside a success payload.)",
+            "properties": {
+              "code": {
+                "description": "Stable machine code, e.g. no_live_app.",
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "code",
+              "message"
+            ],
+            "type": "object"
+          },
+          "v": {
+            "const": 1,
+            "description": "Payload schema version."
+          },
+          "was_dirty": {
+            "description": "Whether the buffer had unsaved edits at save time.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "v",
+          "kind",
+          "path",
+          "bytes",
+          "was_dirty"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "annotations": {
+        "readOnlyHint": false
+      },
+      "description": "Re-read an open tab from disk into its live buffer (picks up external edits). Address the tab by `path`; pass `force: true` to discard unsaved edits. Returns `{ path, bytes, was_dirty }`. Requires a live app; a first-class socket op, replacing the old /tmp poke.",
+      "inputSchema": {
+        "properties": {
+          "force": {
+            "description": "Discard unsaved edits.",
+            "type": "boolean"
+          },
+          "path": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "type": "object"
+      },
+      "name": "reload",
+      "outputSchema": {
+        "properties": {
+          "bytes": {
+            "description": "Bytes re-read from disk.",
+            "type": "integer"
+          },
+          "kind": {
+            "const": "reload",
+            "description": "Payload discriminator — the tool name."
+          },
+          "path": {
+            "type": "string"
+          },
+          "tool_error": {
+            "description": "Business failure — the tool ran and said \"no\". Absent on success. (At the MCP boundary a business failure surfaces as an isError:true result instead of riding inside a success payload.)",
+            "properties": {
+              "code": {
+                "description": "Stable machine code, e.g. no_live_app.",
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "code",
+              "message"
+            ],
+            "type": "object"
+          },
+          "v": {
+            "const": 1,
+            "description": "Payload schema version."
+          },
+          "was_dirty": {
+            "description": "Whether the buffer had unsaved edits at reload time.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "v",
+          "kind",
+          "path",
+          "bytes",
+          "was_dirty"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "annotations": {
+        "readOnlyHint": true
+      },
+      "description": "Report the running Scrybe app's current UI state: the active tab's path/title/dirty flag, view mode, theme, Vim and wrap toggles, and every open path. Served live from the frontend — the human equivalents are the path bar, tab mode icon, theme dropdown, and Vim toggle.",
+      "inputSchema": {
+        "properties": {},
+        "type": "object"
+      },
+      "name": "state",
+      "outputSchema": {
+        "properties": {
+          "active_path": {
+            "description": "Canonical path of the active tab (null on the welcome screen).",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "active_title": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "is_dirty": {
+            "type": "boolean"
+          },
+          "kind": {
+            "const": "state",
+            "description": "Payload discriminator — the tool name."
+          },
+          "open_paths": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "theme": {
+            "type": "string"
+          },
+          "tool_error": {
+            "description": "Business failure — the tool ran and said \"no\". Absent on success. (At the MCP boundary a business failure surfaces as an isError:true result instead of riding inside a success payload.)",
+            "properties": {
+              "code": {
+                "description": "Stable machine code, e.g. no_live_app.",
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "code",
+              "message"
+            ],
+            "type": "object"
+          },
+          "v": {
+            "const": 1,
+            "description": "Payload schema version."
+          },
+          "view_mode": {
+            "enum": [
+              "both",
+              "edit",
+              "preview"
+            ],
+            "type": "string"
+          },
+          "vim": {
+            "type": "boolean"
+          },
+          "wrap": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "v",
+          "kind",
+          "active_path",
+          "active_title",
+          "is_dirty",
+          "view_mode",
+          "theme",
+          "vim",
+          "wrap",
+          "open_paths"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "annotations": {
+        "readOnlyHint": false
+      },
+      "description": "Set the editor + preview theme in the running Scrybe app (same entry point as the toolbar dropdown). Returns the applied theme.",
+      "inputSchema": {
+        "properties": {
+          "theme": {
+            "enum": [
+              "default",
+              "dark",
+              "solarized"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "theme"
+        ],
+        "type": "object"
+      },
+      "name": "set_theme",
+      "outputSchema": {
+        "properties": {
+          "kind": {
+            "const": "set_theme",
+            "description": "Payload discriminator — the tool name."
+          },
+          "theme": {
+            "description": "The theme now applied.",
+            "enum": [
+              "default",
+              "dark",
+              "solarized"
+            ],
+            "type": "string"
+          },
+          "tool_error": {
+            "description": "Business failure — the tool ran and said \"no\". Absent on success. (At the MCP boundary a business failure surfaces as an isError:true result instead of riding inside a success payload.)",
+            "properties": {
+              "code": {
+                "description": "Stable machine code, e.g. no_live_app.",
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "code",
+              "message"
+            ],
+            "type": "object"
+          },
+          "v": {
+            "const": 1,
+            "description": "Payload schema version."
+          }
+        },
+        "required": [
+          "v",
+          "kind",
+          "theme"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "annotations": {
+        "readOnlyHint": false
+      },
+      "description": "Set the active tab's view mode in the running Scrybe app — `both`, `edit`, `preview`, or `cycle` to advance both→edit→preview (same entry point as the toolbar View button). Returns the CONCRETE mode now active (a code/text tab pins to `edit`).",
+      "inputSchema": {
+        "properties": {
+          "mode": {
+            "enum": [
+              "both",
+              "edit",
+              "preview",
+              "cycle"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "mode"
+        ],
+        "type": "object"
+      },
+      "name": "view_mode",
+      "outputSchema": {
+        "properties": {
+          "kind": {
+            "const": "view_mode",
+            "description": "Payload discriminator — the tool name."
+          },
+          "mode": {
+            "description": "The CONCRETE mode now active (never `cycle`).",
+            "enum": [
+              "both",
+              "edit",
+              "preview"
+            ],
+            "type": "string"
+          },
+          "tool_error": {
+            "description": "Business failure — the tool ran and said \"no\". Absent on success. (At the MCP boundary a business failure surfaces as an isError:true result instead of riding inside a success payload.)",
+            "properties": {
+              "code": {
+                "description": "Stable machine code, e.g. no_live_app.",
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "code",
+              "message"
+            ],
+            "type": "object"
+          },
+          "v": {
+            "const": 1,
+            "description": "Payload schema version."
+          }
+        },
+        "required": [
+          "v",
+          "kind",
+          "mode"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "annotations": {
+        "readOnlyHint": false
+      },
+      "description": "Enable or disable Vim keybindings in the running Scrybe editor (same entry point as the toolbar Vim toggle). Returns the applied setting.",
+      "inputSchema": {
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "enabled"
+        ],
+        "type": "object"
+      },
+      "name": "set_vim",
+      "outputSchema": {
+        "properties": {
+          "enabled": {
+            "description": "The setting now applied.",
+            "type": "boolean"
+          },
+          "kind": {
+            "const": "set_vim",
+            "description": "Payload discriminator — the tool name."
+          },
+          "tool_error": {
+            "description": "Business failure — the tool ran and said \"no\". Absent on success. (At the MCP boundary a business failure surfaces as an isError:true result instead of riding inside a success payload.)",
+            "properties": {
+              "code": {
+                "description": "Stable machine code, e.g. no_live_app.",
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "code",
+              "message"
+            ],
+            "type": "object"
+          },
+          "v": {
+            "const": 1,
+            "description": "Payload schema version."
+          }
+        },
+        "required": [
+          "v",
+          "kind",
+          "enabled"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "annotations": {
+        "readOnlyHint": true
+      },
+      "description": "Read recent console output from the running Scrybe app (errors, warnings, info) — newest last, up to `tail` lines (default 50). Served from the app's in-memory ring; nothing is written to disk.",
+      "inputSchema": {
+        "properties": {
+          "tail": {
+            "maximum": 500,
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "name": "logs",
+      "outputSchema": {
+        "properties": {
+          "kind": {
+            "const": "logs",
+            "description": "Payload discriminator — the tool name."
+          },
+          "lines": {
+            "description": "Recent console lines, newest last.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "tool_error": {
+            "description": "Business failure — the tool ran and said \"no\". Absent on success. (At the MCP boundary a business failure surfaces as an isError:true result instead of riding inside a success payload.)",
+            "properties": {
+              "code": {
+                "description": "Stable machine code, e.g. no_live_app.",
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "code",
+              "message"
+            ],
+            "type": "object"
+          },
+          "v": {
+            "const": 1,
+            "description": "Payload schema version."
+          }
+        },
+        "required": [
+          "v",
+          "kind",
+          "lines"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "annotations": {
+        "readOnlyHint": false
+      },
+      "description": "Gracefully close the running Scrybe app via the socket. The app runs its dirty-buffer checks and may refuse (unsaved edits); pass `force: true` to discard them. Never signals or kills processes.",
+      "inputSchema": {
+        "properties": {
+          "force": {
+            "description": "Quit even with unsaved edits.",
+            "type": "boolean"
+          }
+        },
+        "type": "object"
+      },
+      "name": "quit",
+      "outputSchema": {
+        "properties": {
+          "applied": {
+            "description": "False when the command was a no-op (e.g. the path was not an open tab).",
+            "type": "boolean"
+          },
+          "kind": {
+            "const": "quit",
+            "description": "Payload discriminator — the tool name."
+          },
+          "tool_error": {
+            "description": "Business failure — the tool ran and said \"no\". Absent on success. (At the MCP boundary a business failure surfaces as an isError:true result instead of riding inside a success payload.)",
+            "properties": {
+              "code": {
+                "description": "Stable machine code, e.g. no_live_app.",
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "code",
+              "message"
+            ],
+            "type": "object"
+          },
+          "v": {
+            "const": 1,
+            "description": "Payload schema version."
+          }
+        },
+        "required": [
+          "v",
+          "kind",
+          "applied"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "annotations": {
+        "readOnlyHint": false
+      },
+      "description": "Close an open tab in the running Scrybe app by its canonical `path`. (Closing the active tab without naming it was a legacy /tmp-signal behavior and is retired — name the path.)",
+      "inputSchema": {
+        "properties": {
+          "path": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "type": "object"
+      },
+      "name": "close_tab",
+      "outputSchema": {
+        "properties": {
+          "applied": {
+            "description": "False when the command was a no-op (e.g. the path was not an open tab).",
+            "type": "boolean"
+          },
+          "kind": {
+            "const": "close_tab",
+            "description": "Payload discriminator — the tool name."
+          },
+          "tool_error": {
+            "description": "Business failure — the tool ran and said \"no\". Absent on success. (At the MCP boundary a business failure surfaces as an isError:true result instead of riding inside a success payload.)",
+            "properties": {
+              "code": {
+                "description": "Stable machine code, e.g. no_live_app.",
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "code",
+              "message"
+            ],
+            "type": "object"
+          },
+          "v": {
+            "const": 1,
+            "description": "Payload schema version."
+          }
+        },
+        "required": [
+          "v",
+          "kind",
+          "applied"
+        ],
+        "type": "object"
+      }
+    }
+  ]
+}

@@ -59,16 +59,15 @@ fn input_schema() -> Value {
 }
 
 fn data_schema() -> Value {
-    json!({
-        "type": "object",
-        "properties": {
-            "v": { "const": DATA_VERSION },
-            "kind": { "const": "export" },
+    crate::schema::envelope(
+        "export",
+        DATA_VERSION,
+        json!({
             "path": { "type": "string", "description": "The Markdown file that was exported." },
             "output": { "type": "string", "description": "The .docx file that was written." }
-        },
-        "required": ["v", "kind", "path", "output"]
-    })
+        }),
+        &["path", "output"],
+    )
 }
 
 fn handler(_ctx: &Ctx, args: &Value) -> Result<ToolOutcome, EngineFault> {

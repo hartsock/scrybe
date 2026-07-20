@@ -53,18 +53,17 @@ fn input_schema() -> Value {
 }
 
 fn data_schema() -> Value {
-    json!({
-        "type": "object",
-        "properties": {
-            "v": { "const": DATA_VERSION },
-            "kind": { "const": "render" },
+    crate::schema::envelope(
+        "render",
+        DATA_VERSION,
+        json!({
             "html": { "type": "string", "description": "Full fragment incl. <style>." },
             "body_html": { "type": "string", "description": "Body only, no CSS." },
             "theme": { "type": "string" },
             "bytes": { "type": "integer" }
-        },
-        "required": ["v", "kind", "html", "body_html", "theme", "bytes"]
-    })
+        }),
+        &["html", "body_html", "theme", "bytes"],
+    )
 }
 
 fn handler(_ctx: &Ctx, args: &Value) -> Result<ToolOutcome, EngineFault> {

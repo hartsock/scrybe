@@ -61,18 +61,17 @@ fn input_schema() -> Value {
 }
 
 fn data_schema() -> Value {
-    json!({
-        "type": "object",
-        "properties": {
-            "v": { "const": DATA_VERSION },
-            "kind": { "const": "mermaid_to_png" },
+    crate::schema::envelope(
+        "mermaid_to_png",
+        DATA_VERSION,
+        json!({
             "png_path": { "type": "string" },
             "uuid": { "type": "string", "description": "Per-artifact id embedded in the PNG." },
             "sha256": { "type": "string", "description": "SHA-256 of the Mermaid source." },
             "bytes": { "type": "integer" }
-        },
-        "required": ["v", "kind", "png_path", "uuid", "sha256", "bytes"]
-    })
+        }),
+        &["png_path", "uuid", "sha256", "bytes"],
+    )
 }
 
 fn handler(_ctx: &Ctx, args: &Value) -> Result<ToolOutcome, EngineFault> {
@@ -171,18 +170,17 @@ fn embed_input_schema() -> Value {
 }
 
 fn embed_data_schema() -> Value {
-    json!({
-        "type": "object",
-        "properties": {
-            "v": { "const": DATA_VERSION },
-            "kind": { "const": "embed" },
+    crate::schema::envelope(
+        "embed",
+        DATA_VERSION,
+        json!({
             "png_path": { "type": "string" },
             "uuid": { "type": "string", "description": "Per-artifact id embedded in the PNG." },
             "sha256": { "type": "string", "description": "SHA-256 of the Mermaid source." },
             "bytes": { "type": "integer" }
-        },
-        "required": ["v", "kind", "png_path", "uuid", "sha256", "bytes"]
-    })
+        }),
+        &["png_path", "uuid", "sha256", "bytes"],
+    )
 }
 
 fn embed_handler(_ctx: &Ctx, args: &Value) -> Result<ToolOutcome, EngineFault> {
@@ -275,19 +273,18 @@ fn extract_input_schema() -> Value {
 }
 
 fn extract_data_schema() -> Value {
-    json!({
-        "type": "object",
-        "properties": {
-            "v": { "const": DATA_VERSION },
-            "kind": { "const": "extract" },
+    crate::schema::envelope(
+        "extract",
+        DATA_VERSION,
+        json!({
             "png_path": { "type": "string" },
             "source": { "type": "string" },
             "uuid": { "type": "string" },
             "sha256": { "type": "string", "description": "Verified digest; empty when the payload stored none." },
             "verification": { "enum": ["verified", "no-digest"] }
-        },
-        "required": ["v", "kind", "png_path", "source", "uuid", "sha256", "verification"]
-    })
+        }),
+        &["png_path", "source", "uuid", "sha256", "verification"],
+    )
 }
 
 fn extract_handler(_ctx: &Ctx, args: &Value) -> Result<ToolOutcome, EngineFault> {

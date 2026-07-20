@@ -1,0 +1,40 @@
+{
+  "request": {
+    "id": 42,
+    "jsonrpc": "2.0",
+    "method": "tools/call",
+    "params": {
+      "arguments": {
+        "source": "# Title\n\nHello scrybe fixture.\n"
+      },
+      "name": "lint"
+    }
+  },
+  "response": {
+    "id": 42,
+    "jsonrpc": "2.0",
+    "result": {
+      "content": [
+        {
+          "text": "{\"broken_links\":[],\"clean\":true,\"code_block_count\":0,\"code_block_langs\":[],\"content_id\":\"7b1c8013bda697d1e08eb513133db9d9be59480f8c35bf10d80b35a7f258f578\",\"has_math\":false,\"has_mermaid\":false,\"heading_count\":1,\"kind\":\"lint\",\"max_heading_depth\":1,\"v\":1,\"word_count\":5}",
+          "type": "text"
+        }
+      ],
+      "isError": false,
+      "structuredContent": {
+        "broken_links": [],
+        "clean": true,
+        "code_block_count": 0,
+        "code_block_langs": [],
+        "content_id": "7b1c8013bda697d1e08eb513133db9d9be59480f8c35bf10d80b35a7f258f578",
+        "has_math": false,
+        "has_mermaid": false,
+        "heading_count": 1,
+        "kind": "lint",
+        "max_heading_depth": 1,
+        "v": 1,
+        "word_count": 5
+      }
+    }
+  }
+}

@@ -29,11 +29,16 @@ pub(crate) fn specs() -> Vec<ToolSpec> {
     ]
 }
 
-fn object_schema() -> DataSchema {
-    DataSchema {
-        version: DATA_VERSION,
-        schema: || json!({ "type": "object" }),
-    }
+/// `quit` and `close_tab` share the socket's fire-and-forget ack shape.
+fn ack_schema(kind: &'static str) -> Value {
+    crate::schema::envelope(
+        kind,
+        DATA_VERSION,
+        json!({
+            "applied": { "type": "boolean", "description": "False when the command was a no-op (e.g. the path was not an open tab)." }
+        }),
+        &["applied"],
+    )
 }
 
 // ── state ────────────────────────────────────────────────────────────────────
@@ -47,7 +52,35 @@ fn state_spec() -> ToolSpec {
             human equivalents are the path bar, tab mode icon, theme dropdown, \
             and Vim toggle.",
         input_schema: || json!({ "type": "object", "properties": {} }),
-        data_schema: object_schema(),
+        data_schema: DataSchema {
+            version: DATA_VERSION,
+            schema: || {
+                crate::schema::envelope(
+                    "state",
+                    DATA_VERSION,
+                    json!({
+                        "active_path": { "type": ["string", "null"], "description": "Canonical path of the active tab (null on the welcome screen)." },
+                        "active_title": { "type": ["string", "null"] },
+                        "is_dirty": { "type": "boolean" },
+                        "view_mode": { "type": "string", "enum": ["both", "edit", "preview"] },
+                        "theme": { "type": "string" },
+                        "vim": { "type": "boolean" },
+                        "wrap": { "type": "boolean" },
+                        "open_paths": { "type": "array", "items": { "type": "string" } }
+                    }),
+                    &[
+                        "active_path",
+                        "active_title",
+                        "is_dirty",
+                        "view_mode",
+                        "theme",
+                        "vim",
+                        "wrap",
+                        "open_paths",
+                    ],
+                )
+            },
+        },
         mutates: false,
         facet: Facet::UiParity,
         handler: |ctx, _args| dispatch(ctx, "state", "state", json!({})),
@@ -71,7 +104,23 @@ fn set_theme_spec() -> ToolSpec {
                 "required": ["theme"]
             })
         },
-        data_schema: object_schema(),
+        data_schema: DataSchema {
+            version: DATA_VERSION,
+            schema: || {
+                crate::schema::envelope(
+                    "set_theme",
+                    DATA_VERSION,
+                    json!({
+                        "theme": {
+                            "type": "string",
+                            "enum": ["default", "dark", "solarized"],
+                            "description": "The theme now applied."
+                        }
+                    }),
+                    &["theme"],
+                )
+            },
+        },
         mutates: true,
         facet: Facet::UiParity,
         handler: |ctx, args| {
@@ -103,7 +152,23 @@ fn view_mode_spec() -> ToolSpec {
                 "required": ["mode"]
             })
         },
-        data_schema: object_schema(),
+        data_schema: DataSchema {
+            version: DATA_VERSION,
+            schema: || {
+                crate::schema::envelope(
+                    "view_mode",
+                    DATA_VERSION,
+                    json!({
+                        "mode": {
+                            "type": "string",
+                            "enum": ["both", "edit", "preview"],
+                            "description": "The CONCRETE mode now active (never `cycle`)."
+                        }
+                    }),
+                    &["mode"],
+                )
+            },
+        },
         mutates: true,
         facet: Facet::UiParity,
         handler: |ctx, args| {
@@ -132,7 +197,19 @@ fn set_vim_spec() -> ToolSpec {
                 "required": ["enabled"]
             })
         },
-        data_schema: object_schema(),
+        data_schema: DataSchema {
+            version: DATA_VERSION,
+            schema: || {
+                crate::schema::envelope(
+                    "set_vim",
+                    DATA_VERSION,
+                    json!({
+                        "enabled": { "type": "boolean", "description": "The setting now applied." }
+                    }),
+                    &["enabled"],
+                )
+            },
+        },
         mutates: true,
         facet: Facet::UiParity,
         handler: |ctx, args| {
@@ -162,7 +239,23 @@ fn logs_spec() -> ToolSpec {
                 }
             })
         },
-        data_schema: object_schema(),
+        data_schema: DataSchema {
+            version: DATA_VERSION,
+            schema: || {
+                crate::schema::envelope(
+                    "logs",
+                    DATA_VERSION,
+                    json!({
+                        "lines": {
+                            "type": "array",
+                            "items": { "type": "string" },
+                            "description": "Recent console lines, newest last."
+                        }
+                    }),
+                    &["lines"],
+                )
+            },
+        },
         mutates: false,
         facet: Facet::UiParity,
         handler: |ctx, args| {
@@ -189,7 +282,10 @@ fn quit_spec() -> ToolSpec {
                 }
             })
         },
-        data_schema: object_schema(),
+        data_schema: DataSchema {
+            version: DATA_VERSION,
+            schema: || ack_schema("quit"),
+        },
         mutates: true,
         facet: Facet::UiParity,
         handler: |ctx, args| {
@@ -214,7 +310,10 @@ fn close_tab_spec() -> ToolSpec {
                 "required": ["path"]
             })
         },
-        data_schema: object_schema(),
+        data_schema: DataSchema {
+            version: DATA_VERSION,
+            schema: || ack_schema("close_tab"),
+        },
         mutates: true,
         facet: Facet::UiParity,
         handler: |ctx, args| {

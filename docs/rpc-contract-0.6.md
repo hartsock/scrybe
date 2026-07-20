@@ -165,6 +165,14 @@ and the MCP server):
 
 | `ClientError` | `TransportError` | Surfaced as |
 |---|---|---|
-| `is_not_running() == true` | `NoApp` | business `tool_error` `no_live_app` (`isError: false`) |
-| `Remote(RpcError)` | `Remote(RpcError)` | business `tool_error` `app_error` (`isError: false` — the app answered) |
-| everything else (I/O, timeouts, frame, UTF-8, JSON, envelope, mismatched id) | `Transport(String)` | `EngineFault::Transport` (`isError: true` / non-zero exit — the app did NOT answer) |
+| `is_not_running() == true` | `NoApp` | business `tool_error` `no_live_app` |
+| `Remote(RpcError)` | `Remote(RpcError)` | business `tool_error` `app_error` (the app answered) |
+| everything else (I/O, timeouts, frame, UTF-8, JSON, envelope, mismatched id) | `Transport(String)` | `EngineFault::Transport` (the app did NOT answer) |
+
+At the MCP boundary (since A4) *all three* rows surface as a tool result with
+`isError: true` — `structuredContent.code` distinguishes them (`no_live_app` /
+`app_error` / `transport`). The domain distinction still matters: a business
+`tool_error` is a `ToolOutcome` (the tool ran), an `EngineFault` is not. On
+the CLI, engine faults exit non-zero. The MCP mapping table is normative in
+`scrybe-mcp-server/src/server.rs`; the frozen surface is
+`docs/mcp-contract-0.6.json`.

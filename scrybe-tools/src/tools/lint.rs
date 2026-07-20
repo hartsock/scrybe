@@ -49,11 +49,10 @@ fn input_schema() -> Value {
 }
 
 fn data_schema() -> Value {
-    json!({
-        "type": "object",
-        "properties": {
-            "v": { "const": DATA_VERSION },
-            "kind": { "const": "lint" },
+    crate::schema::envelope(
+        "lint",
+        DATA_VERSION,
+        json!({
             "content_id": { "type": "string", "description": "BLAKE3 content digest of the source (64 lowercase hex chars)." },
             "word_count": { "type": "integer" },
             "heading_count": { "type": "integer" },
@@ -73,13 +72,20 @@ fn data_schema() -> Value {
                 }
             },
             "clean": { "type": "boolean" }
-        },
-        "required": [
-            "v", "kind", "content_id", "word_count", "heading_count",
-            "max_heading_depth", "code_block_count", "code_block_langs",
-            "has_math", "has_mermaid", "broken_links", "clean"
-        ]
-    })
+        }),
+        &[
+            "content_id",
+            "word_count",
+            "heading_count",
+            "max_heading_depth",
+            "code_block_count",
+            "code_block_langs",
+            "has_math",
+            "has_mermaid",
+            "broken_links",
+            "clean",
+        ],
+    )
 }
 
 fn handler(_ctx: &Ctx, args: &Value) -> Result<ToolOutcome, EngineFault> {
