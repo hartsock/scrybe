@@ -30,4 +30,11 @@ paths = [
   # JS trip the generic-api-key rule. Hand-authored secrets would still be caught
   # in the TypeScript source under scrybe-app/src/, which is NOT allowlisted.
   '''scrybe-app/dist/''',
+  # Cargo build output (gitignored, never in a CI checkout). Compiled .rmeta/
+  # .rlib blobs trip generic rules on arbitrary embedded strings — e.g. the
+  # `muda` menu crate's accelerator "shift+alt+KeyQ" reads as an api-key. Devs
+  # who build in-tree (per-worktree CARGO_TARGET_DIR) hit this on every
+  # `gitleaks dir .` pre-push run. Source directories are NOT allowlisted.
+  '''target/''',
+  '''node_modules/''',
 ]
