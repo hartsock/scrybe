@@ -230,6 +230,11 @@ fn dispatch(app: &AppHandle, req: &Request) -> Response {
         "edit" => handle_edit(app, req),
         "list_tabs" => handle_list_tabs(app, req),
         "reload" => handle_reload(app, req),
+        "state" => handle_state(app, req),
+        "set_theme" => handle_set_theme(app, req),
+        "view_mode" => handle_view_mode(app, req),
+        "set_vim" => handle_set_vim(app, req),
+        "logs" => handle_logs(app, req),
         other => Response::err(
             req.id,
             ERR_METHOD_NOT_FOUND,
@@ -264,6 +269,74 @@ fn handle_open(app: &AppHandle, req: &Request) -> Response {
 /// its tab state and replies with `{ tabs: [TabInfo, ...] }` (#46).
 fn handle_list_tabs(app: &AppHandle, req: &Request) -> Response {
     dispatch_with_reply(app, req, "scrybe://cli-list-tabs", serde_json::json!({}))
+}
+
+// ── UI-parity methods (A2): typed replacements for the /tmp signal files ─────
+
+/// `state` — what the human is looking at right now, served straight from
+/// live frontend state (replaces the `/tmp/scrybe-state.json` mirror).
+fn handle_state(app: &AppHandle, req: &Request) -> Response {
+    dispatch_with_reply(app, req, "scrybe://cli-state", serde_json::json!({}))
+}
+
+/// `set_theme` — set the editor + preview theme (replaces the theme signal
+/// file). The frontend applies it through the same path as the dropdown and
+/// echoes the applied theme.
+fn handle_set_theme(app: &AppHandle, req: &Request) -> Response {
+    let params: scrybe_rpc::SetThemeParams = match parse_params(req) {
+        Ok(p) => p,
+        Err(r) => return r,
+    };
+    dispatch_with_reply(
+        app,
+        req,
+        "scrybe://cli-set-theme",
+        serde_json::json!({ "theme": params.theme }),
+    )
+}
+
+/// `view_mode` — set the active tab's view mode, or `cycle` (replaces the
+/// view-mode signal file). Replies with the CONCRETE mode now active.
+fn handle_view_mode(app: &AppHandle, req: &Request) -> Response {
+    let params: scrybe_rpc::ViewModeParams = match parse_params(req) {
+        Ok(p) => p,
+        Err(r) => return r,
+    };
+    dispatch_with_reply(
+        app,
+        req,
+        "scrybe://cli-view-mode",
+        serde_json::json!({ "mode": params.mode }),
+    )
+}
+
+/// `set_vim` — enable/disable Vim keybindings (replaces the vim signal file).
+fn handle_set_vim(app: &AppHandle, req: &Request) -> Response {
+    let params: scrybe_rpc::SetVimParams = match parse_params(req) {
+        Ok(p) => p,
+        Err(r) => return r,
+    };
+    dispatch_with_reply(
+        app,
+        req,
+        "scrybe://cli-set-vim",
+        serde_json::json!({ "enabled": params.enabled }),
+    )
+}
+
+/// `logs` — recent console output from the frontend's in-memory ring
+/// (replaces reading the world-readable `/tmp/scrybe-debug.log`).
+fn handle_logs(app: &AppHandle, req: &Request) -> Response {
+    let params: scrybe_rpc::LogsParams = match parse_params(req) {
+        Ok(p) => p,
+        Err(r) => return r,
+    };
+    dispatch_with_reply(
+        app,
+        req,
+        "scrybe://cli-logs",
+        serde_json::json!({ "tail": params.tail }),
+    )
 }
 
 /// `reload` — re-read an open tab from disk into its live buffer (a first-class

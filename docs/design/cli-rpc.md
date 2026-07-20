@@ -10,37 +10,29 @@ A single `scrybe` binary that mirrors every MCP tool. Humans drive the GUI from 
 
 JSON-RPC 2.0, newline-delimited, one line per request and one per response. Transport is a Unix-domain socket (Windows named pipe deferred to a follow-up). Default path is `~/.scrybe/sock`; override with `$SCRYBE_SOCK`.
 
+> **The normative contract lives in [`docs/rpc-contract-0.6.md`](../rpc-contract-0.6.md)** —
+> the 0.6 compatibility artifact. It freezes the full method table
+> (params/results/app-errors), the stable error-code registry, the
+> client-enforced envelope validation rules, the 16 MiB frame cap, the
+> timeouts, and the malformed-reply → typed-`ClientError` guarantees. This
+> design doc deliberately does not duplicate those tables; when they disagree,
+> the fixture wins.
+
 ### Methods
 
-**Fire-and-forget GUI mutations:**
+`open`, `save`, `read`, `find`, `section`, `edit`, `list_tabs`, `reload`,
+`close`, `quit`, `state`, `set_theme`, `view_mode`, `set_vim`, `logs` — see
+the fixture for shapes and per-method errors. `close`/`quit` are
+fire-and-forget acks; everything else is request-with-reply.
 
-| Method | Params | Result |
-|---|---|---|
-| `close` | `{path}` | `{applied}` |
-| `quit`  | `{force}` | `{applied}` |
+### Errors
 
-**Request-with-reply:**
-
-| Method | Params | Result |
-|---|---|---|
-| `open`  | `{path}` | `{tab_id, reloaded}` |
-| `save`  | `{path}` | `{path, bytes, was_dirty}` |
-| `read` | `{path}` | `{path, content, is_dirty}` |
-| `find` | `{pattern, paths, literal, case_sensitive}` | `{hits: [{path, line, column, text}]}` |
-| `section` | `{path, heading}` | `{heading, level, content}` |
-| `edit` | `{path, start_line, end_line, content}` | `{applied, size_after, is_dirty}` |
-
-`find` paths is optional (empty = search all open tabs). `section` heading match is case-insensitive substring; the section runs from the matched heading to the next heading of the same or shallower level.
-
-### Error codes
-
-Standard JSON-RPC codes (`-32700` parse, `-32600` invalid request, `-32601` method not found, `-32602` invalid params, `-32603` internal). App-defined range starts at `-32000`:
-
-- `-32001` `ERR_TAB_NOT_OPEN` — `read`/`section`/`edit`/`save` against a path that isn't open in the GUI; `close` collapses this to `applied: false` instead. (The `scrybe save` CLI presents it as its documented silent no-op.)
-- `-32002` `ERR_DIRTY_QUIT_REFUSED` — `quit` with `force=false` and unsaved tabs exist.
-- `-32003` `ERR_REPLY_TIMEOUT` — frontend didn't reply within 5s. Caller can retry.
-- `-32004` `ERR_SECTION_NOT_FOUND` — `section` heading didn't match any heading in the document.
-- `-32005` `ERR_DIRTY_RELOAD_REFUSED` — `reload` with `force=false` on a tab with unsaved edits.
+Every failure a client can observe is typed (`scrybe_rpc::ClientError`, A3):
+in-band application errors arrive as `Remote(RpcError)` carrying the stable
+codes from the fixture's registry; "no app running" is detected only via
+`ClientError::is_not_running()`; transport-class failures (I/O, timeouts,
+frame cap, envelope violations, mismatched ids) are their own variants and
+are never dressed up as application outcomes.
 
 ## Structure
 
@@ -147,3 +139,9 @@ All non-dispatch-glue files clear the 80% target. `main.rs`'s dispatch arms are 
 2. **Windows named-pipe support.** Currently a `cfg(unix)` story. Phase 2 or later will add a named-pipe transport sharing the same JSON-RPC framing.
 3. **Linux `scrybe-app` discovery.** `scrybe foo.md` with no GUI running on Linux uses `$SCRYBE_APP_BIN` first, then `scrybe-app` on `PATH`. macOS uses `open -a Scrybe`. Windows is deferred.
 4. **Coverage of `main.rs` dispatch arms.** Adding `assert_cmd`-based subprocess tests in Phase 2.
+
+
+A2 note: the UI-parity methods above replaced the `/tmp` signal files
+(`scrybe-state.json`, theme/view/vim pokes, `scrybe-close-tab.txt`,
+`scrybe-debug.log`) and the `pkill` quit fallback — every control is a typed
+socket method served by the same code path as the human toolbar.

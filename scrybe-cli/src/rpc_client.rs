@@ -22,6 +22,7 @@ mod tests {
     fn send_to_errors_when_no_server() {
         let path = std::path::PathBuf::from("/tmp/scrybe-nonexistent-sock-cli-reexport-test");
         let err = send_to(&path, "open", serde_json::json!({"path": "/tmp/foo.md"})).unwrap_err();
-        assert!(err.contains("no Scrybe running"));
+        // The one blessed no-app check — typed, never message-text matching.
+        assert!(err.is_not_running());
     }
 }

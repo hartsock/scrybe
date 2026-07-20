@@ -5,14 +5,16 @@ Copyright 2026 Shawn Hartsock and contributors
 
 # scrybe-vcs
 
-Gitea-first, multi-remote git2 wrapper for the Scrybe editor. Python on the
-outside, Rust on the inside.
+Multi-remote git2 wrapper for the Scrybe editor. Python on the outside, Rust
+on the inside.
 
 ## What it does
 
 Provides a thin, safe abstraction over `libgit2` (via the `git2` Rust crate).
-The primary remote strategy is Gitea as origin (source of truth) with GitHub as
-a read-only mirror. SSH auth is resolved via `ssh-agent` or the
+Remote roles (origin / mirror / backup) are assigned by an explicit,
+configurable `RemoteRolePolicy` — conventional remote names by default,
+user-supplied name/URL-glob rules when configured. No hosts, brands, or ports
+are baked in. SSH auth is resolved via `ssh-agent` or the
 `SCRYBE_GITEA_TOKEN` environment variable.
 
 ## Role in the architecture
@@ -32,7 +34,8 @@ listing. The backend exposes these as Tauri IPC commands (`vcs_open`,
 | `ScrybeRepo::init(path)` | Initialise a new repository |
 | `ScrybeRepo::head_sha()` | Returns `Option<String>` for the HEAD commit SHA |
 | `ScrybeRepo::current_branch()` | Returns `Option<String>` for the branch name |
-| `RemoteEntry` / `RemoteRole` | Named remote + role enum (`Origin`, `Mirror`, `Other`) |
+| `RemoteEntry` / `RemoteRole` | Named remote + role enum (`Origin`, `Mirror`, `Backup`, `Other(label)`) |
+| `RemoteRolePolicy` / `RemoteRule` / `RemoteMatcher` | Ordered name/URL-glob rules mapping remotes to roles; `default()` = conventional names only |
 | `CommitSummary` / `FileStatus` / `GitAuthor` / `StatusEntry` | Value types for log and status results |
 
 ## Build and test

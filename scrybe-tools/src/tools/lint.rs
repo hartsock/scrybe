@@ -10,7 +10,7 @@ use scrybe_core::{ContentAddressable, Document};
 use serde_json::{json, Value};
 
 use crate::lint::lint_document;
-use crate::{Ctx, DataSchema, Facet, ToolOutcome, ToolSpec};
+use crate::{Ctx, DataSchema, EngineFault, Facet, ToolOutcome, ToolSpec};
 
 /// Version of this tool's `data` payload.
 const DATA_VERSION: u32 = 1;
@@ -49,12 +49,11 @@ fn input_schema() -> Value {
 }
 
 fn data_schema() -> Value {
-    json!({
-        "type": "object",
-        "properties": {
-            "v": { "const": DATA_VERSION },
-            "kind": { "const": "lint" },
-            "content_id": { "type": "string", "description": "BLAKE3 content id of the source." },
+    crate::schema::envelope(
+        "lint",
+        DATA_VERSION,
+        json!({
+            "content_id": { "type": "string", "description": "BLAKE3 content digest of the source (64 lowercase hex chars)." },
             "word_count": { "type": "integer" },
             "heading_count": { "type": "integer" },
             "max_heading_depth": { "type": "integer" },
@@ -73,16 +72,23 @@ fn data_schema() -> Value {
                 }
             },
             "clean": { "type": "boolean" }
-        },
-        "required": [
-            "v", "kind", "content_id", "word_count", "heading_count",
-            "max_heading_depth", "code_block_count", "code_block_langs",
-            "has_math", "has_mermaid", "broken_links", "clean"
-        ]
-    })
+        }),
+        &[
+            "content_id",
+            "word_count",
+            "heading_count",
+            "max_heading_depth",
+            "code_block_count",
+            "code_block_langs",
+            "has_math",
+            "has_mermaid",
+            "broken_links",
+            "clean",
+        ],
+    )
 }
 
-fn handler(_ctx: &Ctx, args: &Value) -> ToolOutcome {
+fn handler(_ctx: &Ctx, args: &Value) -> Result<ToolOutcome, EngineFault> {
     // `source` is guaranteed present by the dispatcher's required-args gate.
     let source = args
         .get("source")
@@ -95,10 +101,12 @@ fn handler(_ctx: &Ctx, args: &Value) -> ToolOutcome {
         .iter()
         .map(|b| json!({ "text": b.text, "url": b.url }))
         .collect();
-    ToolOutcome::ok(json!({
+    Ok(ToolOutcome::ok(json!({
         "v": DATA_VERSION,
         "kind": "lint",
-        "content_id": doc.content_id().to_string(),
+        // JSON key stays `content_id` — it is a versioned wire schema
+        // (DATA_VERSION); only the Rust-side vocabulary was renamed.
+        "content_id": doc.content_digest().to_string(),
         "word_count": report.word_count,
         "heading_count": report.heading_count,
         "max_heading_depth": report.max_heading_depth,
@@ -108,7 +116,7 @@ fn handler(_ctx: &Ctx, args: &Value) -> ToolOutcome {
         "has_mermaid": report.has_mermaid,
         "broken_links": broken,
         "clean": report.is_clean(),
-    }))
+    })))
 }
 
 #[cfg(test)]
@@ -133,7 +141,7 @@ mod tests {
         assert_eq!(d["code_block_count"], 1);
         assert_eq!(d["has_math"], true);
         assert_eq!(d["clean"], true);
-        // BLAKE3 hex content id is present and non-trivial.
+        // BLAKE3 hex content digest is present and non-trivial.
         assert!(d["content_id"].as_str().unwrap().len() >= 32);
     }
 

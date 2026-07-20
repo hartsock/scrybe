@@ -328,6 +328,9 @@ jobs:
           - { name: scrybe-mermaid,    pkg: scrybe-mermaid }
           - { name: scrybe-core,       pkg: scrybe-core }
           - { name: scrybe-rpc,        pkg: scrybe-rpc }
+          # #194: the extracted Markdown→ratatui rendering layer. Deps among
+          # workspace crates: scrybe-core only — anywhere after core is valid.
+          - { name: scrybe-ratatui,    pkg: scrybe-ratatui }
           - { name: scrybe-render,     pkg: scrybe-render }
           # New in v0.5 (#169/#171) — absent from this matrix at the v0.5.0
           # release, so scrybe-mcp-server (pins scrybe-tools =X.Y.Z) could
@@ -423,6 +426,13 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
+      - name: Add target to the pinned toolchain
+        # rust-toolchain.toml (the 1.88 pin) overrides the toolchain above for
+        # bare `cargo` runs, and rustup auto-installs the pin with the HOST
+        # target only — so the cross target declared above never reached the
+        # pinned toolchain (v0.6.0: darwin-x64 E0463 "can't find crate for
+        # `core`"; arm64 passed because host == target).
+        run: rustup target add ${{ matrix.target }}
       - uses: Swatinem/rust-cache@v2
         with:
           key: npm-${{ matrix.key }}

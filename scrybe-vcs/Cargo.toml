@@ -2,7 +2,7 @@
 name = "scrybe-vcs"
 version.workspace = true
 edition = "2021"
-description = "Scrybe VCS — Gitea-first git2 wrapper, multi-remote, ssh-agent auth"
+description = "Scrybe VCS — git2 wrapper, configurable multi-remote role policy, ssh-agent auth"
 license = "Apache-2.0"
 repository = "https://github.com/hartsock/scrybe"
 # Internal — consumed by scrybe-app only; not published to crates.io.

@@ -131,22 +131,6 @@ fn list_directory(path: String) -> Vec<serde_json::Value> {
         .collect()
 }
 
-/// Poll for a pending `close_tab` signal from the MCP server.
-///
-/// The `close_tab` MCP tool writes to `/tmp/scrybe-close-tab.txt`. This
-/// command reads and deletes it atomically, returning the path to close
-/// (empty string = close active tab) or `null` if no signal is pending.
-#[tauri::command]
-fn poll_close_tab() -> Option<String> {
-    let p = std::path::Path::new("/tmp/scrybe-close-tab.txt");
-    if !p.exists() {
-        return None;
-    }
-    let content = std::fs::read_to_string(p).ok()?;
-    let _ = std::fs::remove_file(p);
-    Some(content.trim().to_string())
-}
-
 /// Return whether `path` is a `"file"`, `"dir"`, or `"missing"`.
 /// Trims trailing slashes so URLs like `file:///foo/bar/` resolve correctly.
 #[tauri::command]
@@ -413,26 +397,6 @@ fn get_initial_file() -> Option<String> {
     }
 }
 
-/// Append a log entry from the frontend to the shared debug log file.
-///
-/// Both this command and the `logs` MCP tool read/write `/tmp/scrybe-debug.log`
-/// so Claude Code can tail the app's console output without DevTools.
-#[tauri::command]
-fn log_append(level: String, message: String) -> Result<(), String> {
-    use std::io::Write as _;
-    let log_path = std::path::Path::new("/tmp/scrybe-debug.log");
-    let ts = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs();
-    let mut f = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(log_path)
-        .map_err(|e| e.to_string())?;
-    writeln!(f, "{ts} [{level}] {message}").map_err(|e| e.to_string())
-}
-
 /// Toggle the WebKit/Chromium DevTools inspector window.
 /// Only opens the inspector in debug builds; no-op in release.
 #[tauri::command]
@@ -684,7 +648,9 @@ fn vcs_log(max: usize) -> Result<Vec<serde_json::Value>, String> {
         .collect())
 }
 
-/// Return the configured remotes with their names, URLs, and inferred roles.
+/// Return the configured remotes with their names, URLs, and roles assigned
+/// by the default [`scrybe_vcs::RemoteRolePolicy`] (conventional remote
+/// names: `origin` / `mirror` / `backup`; anything else is `Other`).
 #[tauri::command]
 fn vcs_remotes() -> Result<Vec<serde_json::Value>, String> {
     let guard = VCS.lock().unwrap();
@@ -700,19 +666,6 @@ fn vcs_remotes() -> Result<Vec<serde_json::Value>, String> {
             })
         })
         .collect())
-}
-
-/// Poll for an MCP-driven `reload` signal on the current file path.
-/// Returns the path to reload, or `null` if no signal is pending.
-#[tauri::command]
-fn poll_reload_tab() -> Option<String> {
-    let p = std::path::Path::new("/tmp/scrybe-reload-tab.txt");
-    if !p.exists() {
-        return None;
-    }
-    let content = std::fs::read_to_string(p).ok()?;
-    let _ = std::fs::remove_file(p);
-    Some(content.trim().to_string())
 }
 
 /// Register a file path with the OS file watcher.
@@ -767,50 +720,6 @@ fn note_autosave(path: String) {
 // The frontend mirrors its UI state here so the MCP `state` tool can read
 // it, and polls the signal files below so the MCP `set_theme`/`view_mode`/
 // `set_vim` tools can drive the same controls a human clicks.
-
-/// Mirror the frontend's current UI state to `/tmp/scrybe-state.json`.
-/// Read by the MCP `state` tool. Best-effort; never blocks the UI.
-#[tauri::command]
-fn publish_state(state: serde_json::Value) -> Result<(), String> {
-    let s = serde_json::to_string(&state).map_err(|e| e.to_string())?;
-    std::fs::write("/tmp/scrybe-state.json", s).map_err(|e| e.to_string())
-}
-
-/// Read-and-delete a single-shot signal file written by an MCP tool.
-/// Returns the trimmed contents, or None if no signal is pending.
-fn poll_signal(path: &str) -> Option<String> {
-    let p = std::path::Path::new(path);
-    if !p.exists() {
-        return None;
-    }
-    let content = std::fs::read_to_string(p).ok()?;
-    let _ = std::fs::remove_file(p);
-    Some(content.trim().to_string())
-}
-
-/// Poll for an MCP `set_theme` signal (`default` | `dark` | `solarized`).
-#[tauri::command]
-fn poll_set_theme() -> Option<String> {
-    poll_signal("/tmp/scrybe-set-theme.txt")
-}
-
-/// Poll for an MCP `view_mode` signal (`both` | `edit` | `preview` | `cycle`).
-#[tauri::command]
-fn poll_view_mode() -> Option<String> {
-    poll_signal("/tmp/scrybe-view-mode.txt")
-}
-
-/// Poll for an MCP `set_vim` signal (`on` | `off`).
-#[tauri::command]
-fn poll_set_vim() -> Option<String> {
-    poll_signal("/tmp/scrybe-set-vim.txt")
-}
-
-/// Poll for an MCP `set_wrap` signal (`on` | `off`).
-#[tauri::command]
-fn poll_set_wrap() -> Option<String> {
-    poll_signal("/tmp/scrybe-set-wrap.txt")
-}
 
 fn executable_name(stem: &str) -> String {
     if cfg!(windows) {
@@ -928,13 +837,6 @@ pub fn run() {
             render_markdown,
             get_version,
             list_directory,
-            poll_close_tab,
-            poll_reload_tab,
-            publish_state,
-            poll_set_theme,
-            poll_view_mode,
-            poll_set_vim,
-            poll_set_wrap,
             export_docx,
             export_figures,
             watch_file,
@@ -965,7 +867,6 @@ pub fn run() {
             vcs_log,
             vcs_remotes,
             toggle_devtools,
-            log_append,
             get_initial_directory,
             get_initial_file,
             cli_rpc::cli_rpc_reply,

@@ -33,10 +33,9 @@ async fn main() {
             server.run_stdio();
         }
         Command::Tools => {
-            let reg = scrybe_mcp_server::ToolRegistry::new();
-            let tools = reg.list_tools_json();
-            for tool in tools["tools"].as_array().unwrap_or(&vec![]) {
-                println!("{}", tool["name"].as_str().unwrap_or("?"));
+            // The shared scrybe-tools registry is the one source of tool names.
+            for name in scrybe_tools::Registry::default().names() {
+                println!("{name}");
             }
         }
     }

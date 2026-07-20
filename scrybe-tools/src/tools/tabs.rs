@@ -8,7 +8,9 @@
 
 use serde_json::{json, Value};
 
-use crate::{Ctx, DataSchema, Facet, ToolError, ToolOutcome, ToolSpec, TransportError};
+use crate::{
+    Ctx, DataSchema, EngineFault, Facet, ToolError, ToolOutcome, ToolSpec, TransportError,
+};
 
 /// Version of this tool's `data` payload.
 const DATA_VERSION: u32 = 1;
@@ -37,11 +39,10 @@ fn input_schema() -> Value {
 }
 
 fn data_schema() -> Value {
-    json!({
-        "type": "object",
-        "properties": {
-            "v": { "const": DATA_VERSION },
-            "kind": { "const": "list_tabs" },
+    crate::schema::envelope(
+        "list_tabs",
+        DATA_VERSION,
+        json!({
             "tabs": {
                 "type": "array",
                 "items": {
@@ -52,38 +53,43 @@ fn data_schema() -> Value {
                         "is_dirty": { "type": "boolean" },
                         "view_mode": { "type": "string" },
                         "active": { "type": "boolean" }
-                    }
+                    },
+                    "required": ["path", "title", "is_dirty", "view_mode", "active"]
                 }
             },
             "count": { "type": "integer" }
-        },
-        "required": ["v", "kind", "tabs", "count"]
-    })
+        }),
+        &["tabs", "count"],
+    )
 }
 
-fn handler(ctx: &Ctx, _args: &Value) -> ToolOutcome {
+fn handler(ctx: &Ctx, _args: &Value) -> Result<ToolOutcome, EngineFault> {
     let empty = || json!({ "v": DATA_VERSION, "kind": "list_tabs", "tabs": [], "count": 0 });
     match ctx.transport.call("list_tabs", json!({})) {
         // Validate the reply against the typed contract, then re-emit it.
         Ok(value) => match serde_json::from_value::<scrybe_rpc::ListTabsResult>(value) {
-            Ok(res) => ToolOutcome::ok(json!({
+            Ok(res) => Ok(ToolOutcome::ok(json!({
                 "v": DATA_VERSION,
                 "kind": "list_tabs",
                 "count": res.tabs.len(),
                 "tabs": res.tabs,
-            })),
-            Err(e) => ToolOutcome::fail(
+            }))),
+            Err(e) => Ok(ToolOutcome::fail(
                 empty(),
                 ToolError::new("bad_reply", format!("malformed list_tabs reply: {e}")),
-            ),
+            )),
         },
-        Err(TransportError::NoApp) => ToolOutcome::fail(
+        Err(TransportError::NoApp) => Ok(ToolOutcome::fail(
             empty(),
             ToolError::new("no_live_app", "no Scrybe app is running to list tabs"),
-        ),
-        Err(TransportError::Io(msg)) => {
-            ToolOutcome::fail(empty(), ToolError::new("transport_error", msg))
-        }
+        )),
+        // The app answered with an in-band error: business, not engine.
+        Err(TransportError::Remote(err)) => Ok(ToolOutcome::fail(
+            empty(),
+            ToolError::new("app_error", format!("{}: {}", err.code, err.message)),
+        )),
+        // The transport failed mid-request: the app did not answer (A3).
+        Err(TransportError::Transport(msg)) => Err(EngineFault::Transport(msg)),
     }
 }
 
@@ -133,7 +139,7 @@ mod tests {
 
     #[test]
     fn no_live_app_is_a_business_failure_not_an_engine_fault() {
-        // Headless transport → NoApp → tool_error, isError stays false.
+        // Headless transport → NoApp → a `no_live_app` tool_error outcome.
         let out = Registry::default()
             .call("list_tabs", &Ctx::headless(), &json!({}))
             .expect("dispatch");

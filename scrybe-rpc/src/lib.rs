@@ -28,6 +28,8 @@ use std::path::PathBuf;
 /// to the live app through one implementation.
 pub mod client;
 
+pub use client::{ClientError, EnvelopeError, UnavailableKind};
+
 /// JSON-RPC 2.0 request envelope.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Request {
@@ -200,6 +202,76 @@ pub struct ReloadResult {
     pub was_dirty: bool,
 }
 
+// ── UI-parity methods (A2: the typed replacements for the /tmp signal files) ──
+
+/// Result of `state`: what the human is looking at right now. Mirrors the
+/// path bar, tab mode icon, theme dropdown, and Vim toggle — served straight
+/// from live frontend state (never a file).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct StateResult {
+    pub active_path: Option<String>,
+    pub active_title: Option<String>,
+    pub is_dirty: bool,
+    pub view_mode: String,
+    pub theme: String,
+    pub vim: bool,
+    pub wrap: bool,
+    pub open_paths: Vec<String>,
+}
+
+/// Params for `set_theme`: the editor + preview theme.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct SetThemeParams {
+    /// One of the app's theme names (`default`, `dark`, `solarized`).
+    pub theme: String,
+}
+
+/// Result of `set_theme`: echoes the applied theme.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct SetThemeResult {
+    pub theme: String,
+}
+
+/// Params for `view_mode`: a concrete mode or `cycle`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ViewModeParams {
+    /// `both`, `edit`, `preview`, or `cycle` (advance both→edit→preview).
+    pub mode: String,
+}
+
+/// Result of `view_mode`: the CONCRETE mode now active (cycle resolved).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ViewModeResult {
+    pub mode: String,
+}
+
+/// Params for `set_vim`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct SetVimParams {
+    pub enabled: bool,
+}
+
+/// Result of `set_vim`: echoes the applied setting.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct SetVimResult {
+    pub enabled: bool,
+}
+
+/// Params for `logs`: recent console output from the running app.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct LogsParams {
+    /// Max lines from the end of the in-memory ring (default 50, capped by
+    /// the frontend's ring size).
+    #[serde(default)]
+    pub tail: Option<u32>,
+}
+
+/// Result of `logs`: newest-last lines from the frontend's console ring.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct LogsResult {
+    pub lines: Vec<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct FindParams {
     pub pattern: String,
@@ -320,8 +392,27 @@ impl Reply {
 
 // ── JSON-RPC error codes ────────────────────────────────────────────────────
 //
-// Standard codes (-32700 to -32603) follow the spec; -32000 to -32099 is the
-// app-defined range we use for Scrybe-specific failure modes.
+// Standard codes (-32700 to -32603) follow the spec. Application codes live in
+// APP_ERR_RANGE below. The full registry is frozen in docs/rpc-contract-0.6.md.
+
+/// The reserved range for Scrybe application error codes, per the JSON-RPC 2.0
+/// "server error" convention: every `ERR_*` application code MUST fall inside
+/// `-32099..=-32000`, MUST be unique, and — once shipped in a release — MUST
+/// keep its meaning forever (the 0.6 contract fixture,
+/// `docs/rpc-contract-0.6.md`, is the compatibility artifact). Enforced by the
+/// `app_error_codes_unique_and_in_reserved_range` test.
+pub const APP_ERR_RANGE: std::ops::RangeInclusive<i32> = -32099..=-32000;
+
+/// Every application-defined error code, in one place. New codes MUST be added
+/// here (the registry test checks uniqueness + range membership against this
+/// slice) and documented in `docs/rpc-contract-0.6.md`.
+pub const APP_ERROR_CODES: &[i32] = &[
+    ERR_TAB_NOT_OPEN,
+    ERR_DIRTY_QUIT_REFUSED,
+    ERR_REPLY_TIMEOUT,
+    ERR_SECTION_NOT_FOUND,
+    ERR_DIRTY_RELOAD_REFUSED,
+];
 
 pub const ERR_PARSE: i32 = -32700;
 pub const ERR_INVALID_REQUEST: i32 = -32600;
@@ -630,23 +721,39 @@ mod tests {
     }
 
     #[test]
-    fn error_codes_are_distinct() {
-        // Sanity check: app-defined codes don't collide with each other or
-        // with reserved standard codes (-32700 to -32603).
-        let codes = [
-            ERR_TAB_NOT_OPEN,
-            ERR_DIRTY_QUIT_REFUSED,
-            ERR_REPLY_TIMEOUT,
-            ERR_SECTION_NOT_FOUND,
-            ERR_DIRTY_RELOAD_REFUSED,
-        ];
-        for &c in &codes {
-            assert!((-32099..=-32000).contains(&c), "code {c} outside app range");
+    fn app_error_codes_unique_and_in_reserved_range() {
+        // The contract registry: every application code lives in
+        // APP_ERROR_CODES, is unique, and stays inside the reserved
+        // APP_ERR_RANGE (-32099..=-32000). New codes extend the slice —
+        // this test then covers them automatically.
+        for &c in APP_ERROR_CODES {
+            assert!(
+                APP_ERR_RANGE.contains(&c),
+                "code {c} outside reserved app range {APP_ERR_RANGE:?}"
+            );
         }
-        let mut sorted = codes.to_vec();
+        let mut sorted = APP_ERROR_CODES.to_vec();
         sorted.sort_unstable();
         sorted.dedup();
-        assert_eq!(sorted.len(), codes.len(), "codes collide");
+        assert_eq!(sorted.len(), APP_ERROR_CODES.len(), "codes collide");
+    }
+
+    #[test]
+    fn standard_codes_stay_outside_the_app_range() {
+        // The spec-standard codes must never drift into (or collide with)
+        // the application range.
+        for c in [
+            ERR_PARSE,
+            ERR_INVALID_REQUEST,
+            ERR_METHOD_NOT_FOUND,
+            ERR_INVALID_PARAMS,
+            ERR_INTERNAL,
+        ] {
+            assert!(
+                !APP_ERR_RANGE.contains(&c),
+                "standard code {c} collides with the app range"
+            );
+        }
     }
 
     #[test]

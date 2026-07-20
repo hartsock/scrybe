@@ -3,11 +3,11 @@
 
 //! Scrybe MCP server — inbound MCP, exposes editor tools to external agents.
 //!
-//! Tools: open, read, section, edit, find, render, embed, extract, lint.
+//! A thin transport shim over the shared `scrybe_tools::Registry` — the ONE
+//! tool registry, dispatch, and schema source (shared with the CLI). See
+//! `server.rs`.
 //! Transport: stdio (primary), SSE (future).
 
 pub mod server;
-pub mod tools;
 
 pub use server::McpServer;
-pub use tools::ToolRegistry;

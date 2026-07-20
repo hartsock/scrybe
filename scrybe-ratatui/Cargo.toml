@@ -1,0 +1,22 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Shawn Hartsock and contributors
+
+[package]
+name = "scrybe-ratatui"
+version.workspace = true
+edition = "2021"
+description = "Render a scrybe-core Markdown document as styled ratatui text — an embeddable Markdown view for any ratatui app"
+license = "Apache-2.0"
+repository = "https://github.com/hartsock/scrybe"
+homepage = "https://github.com/hartsock/scrybe"
+readme = "README.md"
+keywords = ["markdown", "ratatui", "tui", "terminal", "widget"]
+categories = ["command-line-interface", "text-processing"]
+
+# The whole point of this crate is the tiny dependency surface (#194):
+# the AST and the terminal styling layer, nothing else. No crossterm, no
+# file IO, no clap, no terminal backend — consumers own their own event
+# loop and drop `MarkdownView` into their own layout.
+[dependencies]
+scrybe-core.workspace = true
+ratatui.workspace = true

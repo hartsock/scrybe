@@ -7,6 +7,26 @@ Copyright 2026 Shawn Hartsock and contributors
 
 **Status:** Proposed. Targets v0.4.0 (next release) through v0.7.0.
 **Date:** 2026-07-13
+**Update (2026-07-20, workstream A2a):** registry unification is **done**. The
+legacy `scrybe-mcp-server/src/tools.rs` `ToolRegistry` described in §1 has been
+deleted; `embed`/`extract`/`export` now live in the shared `scrybe-tools`
+registry (extract rides the verified-extraction API). The MCP server is a thin
+shim over the one registry — one dispatch, one schema source. §1 below is kept
+as the historical root-cause analysis.
+**Update (2026-07-20, workstream A4 — COMPLETE):** the MCP boundary is honest
+per the MCP spec (2025-11-25). Every tool serves a real `outputSchema` (the
+shared envelope: `v`/`kind`/optional `tool_error` + the tool's payload shape,
+factored through `scrybe_tools::schema::envelope`); successes carry
+`structuredContent` alongside the back-compat `content` text; `tools/list`
+descriptors gain `annotations.readOnlyHint`. **§5.3 below is superseded:** at
+the MCP boundary a business `tool_error` (incl. `no_live_app`) is now an
+`isError: true` result — a failed invocation reads as failed. Unknown tools and
+malformed `tools/call` params are JSON-RPC `-32602` protocol errors, not tool
+results. The domain taxonomy (`ToolOutcome`/`tool_error` vs `EngineFault`) is
+unchanged; only the `server.rs` adapter mapping changed. The full surface is
+frozen as `docs/mcp-contract-0.6.json`, pinned by the golden fixtures in
+`scrybe-mcp-server/tests/mcp_contract.rs`. The mapping table lives in the
+`server.rs` module docs.
 **Supersedes:** the hand-rolled `scrybe-mcp-server/src/server.rs` + `src/tools.rs`.
 **Related design:** `docs/design/cli-rpc.md` (the CLI↔GUI socket protocol this rebuild unifies onto).
 **Sequenced by:** `ROADMAP.md` (v0.4→v0.12) and `docs/TRIAGE.md`.
@@ -296,7 +316,7 @@ live app — the semantic half of the #108 fix.
 {
   "v": 1,
   "kind": "lint",
-  "content_id": "b3:…",          // scrybe-core ContentAddressable CID
+  "content_id": "af1349b9…",     // scrybe-core ContentAddressable BLAKE3 content digest (lowercase hex)
   "word_count": 812,
   "heading_count": 14,
   "max_heading_depth": 3,
@@ -414,10 +434,14 @@ Rewrite `server.rs` `handle()` so:
      "data": { "v": 1, "kind": "open", "tab": { … } } }
    ```
 
-3. **Per-tool business failures are data, not `isError`.** A "heading not found"
-   or "tab not open" is `isError: false` with `data.tool_error` populated —
-   the call *succeeded* in telling the agent "no". Only engine faults flip
-   `isError`. This is the crisp success/failure signal agents lack today.
+3. ~~**Per-tool business failures are data, not `isError`.**~~ **SUPERSEDED by
+   A4 (2026-07-20):** at the MCP boundary a business `tool_error` is now an
+   `isError: true` result — per the MCP spec, a failed invocation reads as
+   failed. The *domain* distinction survives intact (`tool_error` is still
+   data inside `ToolOutcome`, never an `EngineFault`), and the structured
+   error object (`structuredContent: {code, message, …}`) preserves the
+   machine-readable taxonomy. See the mapping table in
+   `scrybe-mcp-server/src/server.rs`.
 
 4. **New CLI sanity flags** (parity: also exposed as `scrybe --tools` /
    `scrybe --probe` and `scrybe-mcp-server --tools` / `--probe`):

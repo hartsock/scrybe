@@ -29,8 +29,8 @@ also the launcher for the Tauri GUI app: `scrybe file.md` locates the
 | `scrybe render [FILE]` | Render Markdown to HTML (stdin → stdout by default); `--theme`, `--full-html`, `--output` |
 | `scrybe lint FILE` | Word count, headings, code blocks, broken links; `--json` for machine output; exits 1 if broken links found |
 | `scrybe mermaid embed PNG SOURCE` | Embed Mermaid source into PNG iTXt chunk |
-| `scrybe mermaid extract PNG` | Print embedded Mermaid source |
-| `scrybe mermaid verify PNG` | Verify SHA-256 integrity of embedded source; exits 1 if tampered |
+| `scrybe mermaid extract PNG` | Print embedded Mermaid source, verifying its SHA-256 by default; exit 2 if tampered, `--unverified` to skip the check (forensics) |
+| `scrybe mermaid verify PNG` | Verify SHA-256 integrity of embedded source; exits 1 if tampered or digest missing |
 | `scrybe open [PATH]` | Launch the Scrybe GUI, optionally at a file or directory |
 | `scrybe version` | Print version and active feature flags |
 | `scrybe [PATH]` | Bare invocation with a path injects `open` automatically |

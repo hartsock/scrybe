@@ -202,11 +202,13 @@ fn inline_into(
                     ));
                 }
             }
-            Node::Image { alt, .. } => {
-                let label = if alt.is_empty() {
-                    "image"
-                } else {
+            Node::Image { alt, title, .. } => {
+                let label = if !alt.is_empty() {
                     alt.as_str()
+                } else if !title.is_empty() {
+                    title.as_str()
+                } else {
+                    "image"
                 };
                 cur.push(Span::styled(
                     format!("🖼 {label}"),
@@ -321,5 +323,22 @@ mod tests {
     fn no_trailing_blank_lines() {
         let t = render_source("# Title\n\nBody.\n\n\n");
         assert!(!t.lines.last().unwrap().spans.is_empty());
+    }
+
+    #[test]
+    fn image_label_uses_alt_text_not_title() {
+        // Regression: alt used to be overwritten with the Markdown title
+        // attribute; the bracket text is the real alt and must be the label.
+        let joined = plain(&render_source("![diagram](image.png \"Architecture\")\n")).join("\n");
+        assert!(joined.contains("🖼 diagram"), "got {joined:?}");
+        assert!(!joined.contains("Architecture"), "got {joined:?}");
+    }
+
+    #[test]
+    fn image_label_falls_back_to_title_then_placeholder() {
+        let titled = plain(&render_source("![](decorative.png \"Decoration\")\n")).join("\n");
+        assert!(titled.contains("🖼 Decoration"), "got {titled:?}");
+        let bare = plain(&render_source("![](plain.png)\n")).join("\n");
+        assert!(bare.contains("🖼 image"), "got {bare:?}");
     }
 }

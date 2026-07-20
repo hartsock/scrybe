@@ -24,7 +24,11 @@ except ImportError:
     __version__ = "0.0.0+unknown"
 
 try:
-    from scrybe._rust import ContentId, Document, render_markdown
+    from scrybe._rust import ContentDigest, Document, render_markdown
+
+    # Deprecated alias — the old name over-promised: this is a bare BLAKE3
+    # hex digest, not an IPFS/IPLD CID. Prefer ContentDigest.
+    ContentId = ContentDigest
 
     _RUST_AVAILABLE = True
 
@@ -60,11 +64,13 @@ except ImportError as _import_error:
         def __repr__(self) -> str:
             return f"<scrybe.{self._name}: Rust extension not built>"
 
+    ContentDigest = _Missing("ContentDigest")  # type: ignore[assignment,misc]
     ContentId = _Missing("ContentId")  # type: ignore[assignment,misc]
     Document = _Missing("Document")  # type: ignore[assignment,misc]
     render_markdown = _Missing("render_markdown")  # type: ignore[assignment]
 
 __all__ = [
+    "ContentDigest",
     "ContentId",
     "Document",
     "render_markdown",

@@ -15,6 +15,7 @@ use serde_json::Value;
 
 pub mod figures;
 pub mod lint;
+pub mod schema;
 pub mod tools;
 
 pub use figures::{export_figures, plan_figures, FigurePlan, FigureResult};
@@ -41,8 +42,11 @@ pub struct DataSchema {
 }
 
 /// A business-level failure: the tool ran and said "no" (e.g. "heading not
-/// found"). This is DATA carried inside the outcome, not an engine fault —
-/// the MCP `isError` flag stays `false`.
+/// found"). This is DATA carried inside the outcome, not an engine fault.
+/// Each surface decides its own presentation: the MCP adapter reports a
+/// failed invocation (`isError: true` with the `{code, message}` in
+/// `structuredContent` — A4); the CLI prints the error and keeps its exit
+/// semantics.
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct ToolError {
     /// Stable machine code, e.g. `"heading_not_found"`.
@@ -112,13 +116,17 @@ pub struct ToolSpec {
     pub mutates: bool,
     /// Tool group for progressive disclosure + feature gating.
     pub facet: Facet,
-    /// The one implementation, shared by both front ends.
-    pub handler: fn(&Ctx, &Value) -> ToolOutcome,
+    /// The one implementation, shared by both front ends. `Ok(outcome)` even
+    /// for business failures (a `tool_error` inside the outcome); `Err` is
+    /// reserved for [`EngineFault`]s — e.g. the transport failing mid-request.
+    pub handler: fn(&Ctx, &Value) -> Result<ToolOutcome, EngineFault>,
 }
 
 /// Engine fault: the dispatcher could not even run the tool (unknown tool, bad
-/// arguments, transport down). Surfaces as MCP `isError: true` / a non-zero CLI
-/// exit — distinct from a business [`ToolError`] carried inside `data`
+/// arguments, transport down). Surfaces as a non-zero CLI exit; on MCP,
+/// `UnknownTool` is a JSON-RPC `-32602` protocol error and the rest are
+/// `isError: true` results (A4 mapping in `scrybe-mcp-server/src/server.rs`).
+/// Distinct from a business [`ToolError`] carried inside the outcome
 /// (design §2.2, §5).
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
 pub enum EngineFault {
@@ -128,20 +136,34 @@ pub enum EngineFault {
     /// Arguments failed validation before the handler ran.
     #[error("invalid arguments: {0}")]
     BadArgs(String),
-    /// The transport to the live app failed.
+    /// The transport to the live app failed mid-request — socket I/O,
+    /// timeouts, oversized/garbled frames, or a malformed JSON-RPC envelope.
+    /// The app did NOT answer, so there is no business outcome to report:
+    /// this is an engine fault, never a `tool_error`. (The two conditions the
+    /// app *does* answer for stay business outcomes: no app at all →
+    /// `no_live_app`, and an in-band remote error → `app_error`.)
     #[error("transport error: {0}")]
     Transport(String),
 }
 
-/// Failure talking to the live app over the socket.
+/// Failure talking to the live app over the socket, in three semantic classes
+/// that mirror [`scrybe_rpc::ClientError`]'s taxonomy.
 #[derive(Debug, thiserror::Error)]
 pub enum TransportError {
-    /// No Scrybe app is running to service the request.
+    /// No Scrybe app is running to service the request
+    /// ([`scrybe_rpc::ClientError::is_not_running`]). A business condition —
+    /// tools report it as the `no_live_app` `tool_error`.
     #[error("no Scrybe app is running")]
     NoApp,
-    /// An I/O or protocol error on the socket.
+    /// The app ANSWERED with an in-band JSON-RPC error object. The transport
+    /// worked; this is a business outcome (tools report it as `app_error`).
+    #[error("app error {}: {}", .0.code, .0.message)]
+    Remote(scrybe_rpc::RpcError),
+    /// The transport itself failed: socket I/O, timeouts, frame/UTF-8/JSON
+    /// problems, or an envelope violation. The app did not answer — dispatch
+    /// maps this to [`EngineFault::Transport`], never to a business outcome.
     #[error("{0}")]
-    Io(String),
+    Transport(String),
 }
 
 /// Round-trips scrybe-rpc requests to the live app (design §2.3). The only place
@@ -177,13 +199,14 @@ pub struct LiveApp;
 impl Transport for LiveApp {
     fn call(&self, method: &str, params: Value) -> Result<Value, TransportError> {
         match scrybe_rpc::client::send(method, params) {
-            Ok(resp) => match resp.error {
-                Some(err) => Err(TransportError::Io(format!("{}: {}", err.code, err.message))),
-                None => Ok(resp.result.unwrap_or(Value::Null)),
-            },
-            // The client says "no Scrybe running" when the socket isn't there.
-            Err(e) if e.contains("no Scrybe running") => Err(TransportError::NoApp),
-            Err(e) => Err(TransportError::Io(e)),
+            Ok(result) => Ok(result),
+            // The one blessed no-app check — never message-text matching.
+            Err(e) if e.is_not_running() => Err(TransportError::NoApp),
+            // In-band remote error: the app answered. Business, not engine.
+            Err(scrybe_rpc::ClientError::Remote(err)) => Err(TransportError::Remote(err)),
+            // Everything else (I/O, timeouts, frame/UTF-8/JSON, envelope,
+            // mismatched id): the transport failed — an engine-fault class.
+            Err(e) => Err(TransportError::Transport(e.to_string())),
         }
     }
 
@@ -261,15 +284,15 @@ impl Registry {
         self.tools.is_empty()
     }
 
-    /// Dispatch a call. An unknown tool or a missing required argument is an
-    /// [`EngineFault`] (`Err`); a business failure is
-    /// `Ok(ToolOutcome { tool_error: Some(..) })`.
+    /// Dispatch a call. An unknown tool, a missing required argument, or a
+    /// transport failure mid-request is an [`EngineFault`] (`Err`); a business
+    /// failure is `Ok(ToolOutcome { tool_error: Some(..) })`.
     pub fn call(&self, name: &str, ctx: &Ctx, args: &Value) -> Result<ToolOutcome, EngineFault> {
         let spec = self
             .get(name)
             .ok_or_else(|| EngineFault::UnknownTool(name.to_string()))?;
         require_args(&(spec.input_schema)(), args)?;
-        Ok((spec.handler)(ctx, args))
+        (spec.handler)(ctx, args)
     }
 }
 
@@ -360,5 +383,39 @@ mod tests {
         let mut reg = Registry::new();
         reg.register(tools::render::spec());
         reg.register(tools::render::spec());
+    }
+
+    #[test]
+    fn every_data_schema_is_an_honest_envelope_never_a_placeholder() {
+        // A4: no tool may serve a bare `{"type":"object"}` placeholder. Every
+        // data schema wraps its payload in the shared envelope: `v` pinned to
+        // the spec's version, `kind` pinned to the tool name, `tool_error`
+        // described as the optional business-failure object.
+        let reg = Registry::default();
+        for name in reg.names() {
+            let spec = reg.get(name).unwrap();
+            let schema = (spec.data_schema.schema)();
+            assert_eq!(
+                schema["properties"]["kind"]["const"], name,
+                "tool {name}: `kind` must be pinned to the tool name"
+            );
+            assert_eq!(
+                schema["properties"]["v"]["const"], spec.data_schema.version,
+                "tool {name}: `v` must be pinned to the data-schema version"
+            );
+            assert!(
+                schema["properties"]["tool_error"].is_object(),
+                "tool {name}: envelope must describe the optional tool_error"
+            );
+            let required = schema["required"].as_array().unwrap();
+            assert!(
+                required.contains(&json!("v")) && required.contains(&json!("kind")),
+                "tool {name}: v and kind are required envelope keys"
+            );
+            assert!(
+                !required.contains(&json!("tool_error")),
+                "tool {name}: tool_error is never required (absent on success)"
+            );
+        }
     }
 }

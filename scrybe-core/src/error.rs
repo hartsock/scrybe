@@ -12,6 +12,8 @@ pub enum ScrybeError {
     Serde(#[from] serde_json::Error),
     #[error("CBOR encoding error: {0}")]
     Cbor(String),
+    #[error("invalid content digest: {0}")]
+    InvalidDigest(String),
     #[error("{0}")]
     Other(String),
 }

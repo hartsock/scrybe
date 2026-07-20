@@ -21,7 +21,8 @@ not make the toolchain more impressive.
 |---|---|---|
 | `scrybe-core/` | Rust | AST, Document, ContentAddressable (BLAKE3+CBOR), Plugin trait, Workspace |
 | `scrybe-render/` | Rust | HTML pipeline, syntect highlighting, KaTeX/Mermaid |
-| `scrybe-mcp-server/` | Rust | Inbound MCP server — tools: open/read/section/edit/save/find/render/embed/extract/lint/list_tabs/mermaid_to_png/export_figures/logs/reload/quit/close_tab + UI-parity tools state/set_theme/view_mode/set_vim/export |
+| `scrybe-tools/` | Rust | The ONE shared ToolSpec registry (handlers, schemas, dispatch) consumed by both the CLI and the MCP server |
+| `scrybe-mcp-server/` | Rust | Inbound MCP server — a thin stdio shim over `scrybe-tools`. Tools: open/read/section/edit/save/find/render/embed/extract/lint/list_tabs/mermaid_to_png/export_figures/logs/reload/quit/close_tab + UI-parity tools state/set_theme/view_mode/set_vim/export |
 | `scrybe-mcp-client/` | Rust | Outbound MCP — registers external agent servers |
 | `scrybe-mermaid/` | Rust | PNG iTXt codec (Mermaid source embedded in PNG metadata) |
 | `scrybe-panels/` | Rust | Bake-off orchestrator + SQLite calibration log |
@@ -162,6 +163,10 @@ Available tools: `open`, `read`, `section`, `edit`, `save`, `find`,
 `render`, `embed`, `extract`, `lint`, `list_tabs`, `mermaid_to_png`,
 `export_figures`, `logs`, `reload`, `quit`, `close_tab`, `state`,
 `set_theme`, `view_mode`, `set_vim`, `export`
+
+All tools are served by the one shared `scrybe-tools` registry (the same
+handlers, schemas, and dispatch the CLI uses), so the MCP and CLI surfaces
+match by construction.
 
 Edits land in the in-memory buffer and leave the tab dirty; `save` is the
 explicit persist (the agent-side twin of Cmd+S / 💾).

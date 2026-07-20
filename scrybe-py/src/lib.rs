@@ -6,13 +6,15 @@
 //! Module name: `scrybe._rust`
 //! Build: `maturin develop --features python,extension-module`
 
-pub use scrybe_core::{ContentAddressable, ContentId, Document, Workspace};
+#[allow(deprecated)] // compat shim: keep the old name importable downstream
+pub use scrybe_core::ContentId;
+pub use scrybe_core::{ContentAddressable, ContentDigest, Document, Workspace};
 pub use scrybe_render::{render_html, Theme};
 
 #[cfg(feature = "python")]
 mod python {
     use pyo3::prelude::*;
-    use scrybe_core::{ContentAddressable, ContentId, Document};
+    use scrybe_core::{ContentAddressable, ContentDigest, Document};
     use scrybe_render::{render_html, Theme};
 
     fn parse_theme(s: Option<&str>) -> Theme {
@@ -56,8 +58,15 @@ mod python {
             self.inner.title.clone()
         }
 
+        /// BLAKE3 digest (64 lowercase hex chars) of the raw source bytes.
+        fn content_digest(&self) -> String {
+            self.inner.content_digest().as_hex().to_string()
+        }
+
+        /// Deprecated: use `content_digest()`. This is a BLAKE3 hex digest,
+        /// not a CID.
         fn content_id(&self) -> String {
-            self.inner.content_id().as_hex().to_string()
+            self.content_digest()
         }
 
         fn render_html(&self, theme: Option<String>) -> String {
@@ -78,17 +87,17 @@ mod python {
         }
     }
 
-    #[pyclass(name = "ContentId")]
-    pub struct PyContentId {
-        pub inner: ContentId,
+    #[pyclass(name = "ContentDigest")]
+    pub struct PyContentDigest {
+        pub inner: ContentDigest,
     }
 
     #[pymethods]
-    impl PyContentId {
+    impl PyContentDigest {
         #[staticmethod]
         fn of(data: &[u8]) -> Self {
             Self {
-                inner: ContentId::of(data),
+                inner: ContentDigest::of(data),
             }
         }
 
@@ -105,7 +114,7 @@ mod python {
         }
 
         fn __repr__(&self) -> String {
-            format!("ContentId({:?})", self.inner.as_hex())
+            format!("ContentDigest({:?})", self.inner.as_hex())
         }
 
         fn __eq__(&self, other: &Self) -> bool {
@@ -129,7 +138,9 @@ mod python {
     #[pymodule]
     pub fn _rust(m: &Bound<'_, PyModule>) -> PyResult<()> {
         m.add_class::<PyDocument>()?;
-        m.add_class::<PyContentId>()?;
+        m.add_class::<PyContentDigest>()?;
+        // Deprecated Python-side alias: `ContentId` is the old (false) name.
+        m.add("ContentId", m.getattr("ContentDigest")?)?;
         m.add_function(wrap_pyfunction!(render_markdown, m)?)?;
         Ok(())
     }

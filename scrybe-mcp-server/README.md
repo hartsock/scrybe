@@ -18,39 +18,30 @@ direct filesystem access.
 
 ## Role in the architecture
 
-`scrybe-mcp-server` is the agent-facing surface of Scrybe. It holds an in-memory
-`Workspace` (from `scrybe-core`) and coordinates with `scrybe-render` and
-`scrybe-mermaid` to serve tool calls. The Tauri app launches it as a sidecar
-process. Agents connect via:
+`scrybe-mcp-server` is the agent-facing surface of Scrybe — a thin stdio shim
+over the shared `scrybe-tools` registry, the ONE tool registry (handlers,
+schemas, dispatch) it shares with the CLI, so the two surfaces match by
+construction. Stateful tools drive the *running app* over `~/.scrybe/sock`;
+in-process tools (`render`, `lint`, `embed`, `extract`, `export`,
+`mermaid_to_png`, `export_figures`) work headless. Agents connect via:
 
 ```sh
 claude mcp add scrybe -- scrybe-mcp-server stdio
 ```
 
-## Exposed tools (12)
+## Exposed tools
 
-| Tool | Description |
-|------|-------------|
-| `open` | Open a Markdown file or directory; returns document ID |
-| `read` | Return raw Markdown source of an open document |
-| `section` | Extract a heading section by H-level and 0-based index |
-| `edit` | Replace first occurrence of `old_text` with `new_text` |
-| `find` | Search for a string; returns matching lines with line numbers |
-| `render` | Render an open document to HTML (theme: default/dark/solarized) |
-| `embed` | Embed Mermaid source into a PNG as an iTXt metadata chunk |
-| `extract` | Extract Mermaid source from a PNG |
-| `lint` | Word count, heading count, code blocks, broken links |
-| `logs` | Tail recent console log entries from the running app |
-| `close_tab` | Close a tab in the running app by file path |
-| `quit` | Gracefully terminate the running Scrybe app window |
+The authoritative list is `scrybe-mcp-server tools` (or MCP `tools/list`):
+`open`, `read`, `section`, `edit`, `save`, `find`, `render`, `embed`,
+`extract`, `lint`, `list_tabs`, `mermaid_to_png`, `export_figures`, `export`,
+`logs`, `reload`, `close_tab`, `quit`, `state`, `set_theme`, `view_mode`,
+`set_vim`. See `AGENTS.md` (repo root) for the full per-tool reference.
 
 ## Key public types
 
 | Symbol | Description |
 |--------|-------------|
-| `McpServer` | Top-level server: owns the stdio transport loop |
-| `ToolRegistry` | Dispatches tool calls; holds the `Workspace` and id map |
-| `TOOL_NAMES` | `&[&str]` slice of all 12 tool name strings |
+| `McpServer` | Top-level server: owns the stdio transport loop and formats the MCP envelope around `scrybe_tools::Registry` outcomes |
 
 ## Build and test
 

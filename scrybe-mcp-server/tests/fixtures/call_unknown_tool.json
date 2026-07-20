@@ -1,0 +1,19 @@
+{
+  "request": {
+    "id": 46,
+    "jsonrpc": "2.0",
+    "method": "tools/call",
+    "params": {
+      "arguments": {},
+      "name": "nonexistent"
+    }
+  },
+  "response": {
+    "error": {
+      "code": -32602,
+      "message": "unknown tool: nonexistent"
+    },
+    "id": 46,
+    "jsonrpc": "2.0"
+  }
+}

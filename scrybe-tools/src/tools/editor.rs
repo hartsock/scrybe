@@ -5,12 +5,20 @@
 //! dispatched through the transport to the *live app* over `~/.scrybe/sock`
 //! (#122 Phase 2). These are **path-based** (the socket/CLI contract), unifying
 //! the MCP surface off the legacy `DocumentId`/shadow-`Workspace` path onto the
-//! one source of truth. With no live app they return a business `tool_error`
-//! (`no_live_app`), never an engine fault.
+//! one source of truth.
+//!
+//! Failure taxonomy (A3): with no live app they return a business `tool_error`
+//! (`no_live_app`); an in-band remote error from the app is the business
+//! `app_error` (the app answered — it said "no"). A transport failure
+//! mid-request — I/O, timeout, garbled frame, envelope violation — is
+//! [`EngineFault::Transport`]: the app did not answer, so pretending there is
+//! a business outcome would be a lie.
 
 use serde_json::{json, Value};
 
-use crate::{Ctx, DataSchema, Facet, ToolError, ToolOutcome, ToolSpec, TransportError};
+use crate::{
+    Ctx, DataSchema, EngineFault, Facet, ToolError, ToolOutcome, ToolSpec, TransportError,
+};
 
 const DATA_VERSION: u32 = 1;
 
@@ -28,8 +36,18 @@ pub(crate) fn specs() -> Vec<ToolSpec> {
 }
 
 /// Round-trip a socket `method` and wrap its result under `data` (kind = the
-/// tool name). A live-app failure becomes a business `tool_error`.
-fn dispatch(ctx: &Ctx, method: &str, kind: &'static str, params: Value) -> ToolOutcome {
+/// tool name).
+///
+/// Taxonomy: `NoApp` → business `no_live_app`; an in-band `Remote` error →
+/// business `app_error` (the app answered); a `Transport` failure →
+/// [`EngineFault::Transport`] — the app did NOT answer, so the dispatcher
+/// reports an engine fault instead of fabricating a business outcome.
+pub(crate) fn dispatch(
+    ctx: &Ctx,
+    method: &str,
+    kind: &'static str,
+    params: Value,
+) -> Result<ToolOutcome, EngineFault> {
     let base = || json!({ "v": DATA_VERSION, "kind": kind });
     match ctx.transport.call(method, params) {
         Ok(value) => {
@@ -39,20 +57,24 @@ fn dispatch(ctx: &Ctx, method: &str, kind: &'static str, params: Value) -> ToolO
                     obj.insert(k.clone(), v.clone());
                 }
             }
-            ToolOutcome::ok(data)
+            Ok(ToolOutcome::ok(data))
         }
-        Err(TransportError::NoApp) => ToolOutcome::fail(
+        Err(TransportError::NoApp) => Ok(ToolOutcome::fail(
             base(),
             ToolError::new(
                 "no_live_app",
                 format!("no Scrybe app is running for `{method}`"),
             ),
-        ),
-        Err(TransportError::Io(msg)) => ToolOutcome::fail(base(), ToolError::new("app_error", msg)),
+        )),
+        Err(TransportError::Remote(err)) => Ok(ToolOutcome::fail(
+            base(),
+            ToolError::new("app_error", format!("{}: {}", err.code, err.message)),
+        )),
+        Err(TransportError::Transport(msg)) => Err(EngineFault::Transport(msg)),
     }
 }
 
-fn str_arg<'a>(args: &'a Value, key: &str) -> &'a str {
+pub(crate) fn str_arg<'a>(args: &'a Value, key: &str) -> &'a str {
     args.get(key).and_then(Value::as_str).unwrap_or_default()
 }
 
@@ -73,7 +95,17 @@ fn open_spec() -> ToolSpec {
         },
         data_schema: DataSchema {
             version: DATA_VERSION,
-            schema: || json!({ "type": "object" }),
+            schema: || {
+                crate::schema::envelope(
+                    "open",
+                    DATA_VERSION,
+                    json!({
+                        "tab_id": { "type": "string", "description": "Stable id of the tab." },
+                        "reloaded": { "type": "boolean", "description": "True when an existing tab was refreshed from disk." }
+                    }),
+                    &["tab_id", "reloaded"],
+                )
+            },
         },
         mutates: true,
         facet: Facet::Core,
@@ -105,7 +137,18 @@ fn read_spec() -> ToolSpec {
         },
         data_schema: DataSchema {
             version: DATA_VERSION,
-            schema: || json!({ "type": "object" }),
+            schema: || {
+                crate::schema::envelope(
+                    "read",
+                    DATA_VERSION,
+                    json!({
+                        "path": { "type": "string" },
+                        "content": { "type": "string", "description": "The in-memory buffer (may differ from disk)." },
+                        "is_dirty": { "type": "boolean" }
+                    }),
+                    &["path", "content", "is_dirty"],
+                )
+            },
         },
         mutates: false,
         facet: Facet::Core,
@@ -142,7 +185,28 @@ fn find_spec() -> ToolSpec {
         },
         data_schema: DataSchema {
             version: DATA_VERSION,
-            schema: || json!({ "type": "object" }),
+            schema: || {
+                crate::schema::envelope(
+                    "find",
+                    DATA_VERSION,
+                    json!({
+                        "hits": {
+                            "type": "array",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "path": { "type": "string" },
+                                    "line": { "type": "integer", "description": "1-indexed line of the match." },
+                                    "column": { "type": "integer", "description": "1-indexed column where the match starts." },
+                                    "text": { "type": "string", "description": "The full line text." }
+                                },
+                                "required": ["path", "line", "column", "text"]
+                            }
+                        }
+                    }),
+                    &["hits"],
+                )
+            },
         },
         mutates: false,
         facet: Facet::Editor,
@@ -175,7 +239,18 @@ fn section_spec() -> ToolSpec {
         },
         data_schema: DataSchema {
             version: DATA_VERSION,
-            schema: || json!({ "type": "object" }),
+            schema: || {
+                crate::schema::envelope(
+                    "section",
+                    DATA_VERSION,
+                    json!({
+                        "heading": { "type": "string", "description": "The matched heading text." },
+                        "level": { "type": "integer", "description": "Heading level (1-6)." },
+                        "content": { "type": "string", "description": "The section's Markdown content." }
+                    }),
+                    &["heading", "level", "content"],
+                )
+            },
         },
         mutates: false,
         facet: Facet::Editor,
@@ -212,7 +287,18 @@ fn edit_spec() -> ToolSpec {
         },
         data_schema: DataSchema {
             version: DATA_VERSION,
-            schema: || json!({ "type": "object" }),
+            schema: || {
+                crate::schema::envelope(
+                    "edit",
+                    DATA_VERSION,
+                    json!({
+                        "applied": { "type": "boolean" },
+                        "size_after": { "type": "integer", "description": "Buffer size in bytes after the edit." },
+                        "is_dirty": { "type": "boolean", "description": "True until an explicit `save` persists the buffer." }
+                    }),
+                    &["applied", "size_after", "is_dirty"],
+                )
+            },
         },
         mutates: true,
         facet: Facet::Editor,
@@ -248,7 +334,18 @@ fn save_spec() -> ToolSpec {
         },
         data_schema: DataSchema {
             version: DATA_VERSION,
-            schema: || json!({ "type": "object" }),
+            schema: || {
+                crate::schema::envelope(
+                    "save",
+                    DATA_VERSION,
+                    json!({
+                        "path": { "type": "string" },
+                        "bytes": { "type": "integer", "description": "Bytes written to disk." },
+                        "was_dirty": { "type": "boolean", "description": "Whether the buffer had unsaved edits at save time." }
+                    }),
+                    &["path", "bytes", "was_dirty"],
+                )
+            },
         },
         mutates: true,
         facet: Facet::Editor,
@@ -284,7 +381,18 @@ fn reload_spec() -> ToolSpec {
         },
         data_schema: DataSchema {
             version: DATA_VERSION,
-            schema: || json!({ "type": "object" }),
+            schema: || {
+                crate::schema::envelope(
+                    "reload",
+                    DATA_VERSION,
+                    json!({
+                        "path": { "type": "string" },
+                        "bytes": { "type": "integer", "description": "Bytes re-read from disk." },
+                        "was_dirty": { "type": "boolean", "description": "Whether the buffer had unsaved edits at reload time." }
+                    }),
+                    &["path", "bytes", "was_dirty"],
+                )
+            },
         },
         mutates: true,
         facet: Facet::Editor,
@@ -401,5 +509,53 @@ mod tests {
             .unwrap();
         assert!(!out.is_ok());
         assert_eq!(out.tool_error.unwrap().code, "no_live_app");
+    }
+
+    /// A transport that fails every call with the given error.
+    struct Failing(fn() -> TransportError);
+    impl Transport for Failing {
+        fn call(&self, _method: &str, _params: Value) -> Result<Value, TransportError> {
+            Err((self.0)())
+        }
+        fn is_live(&self) -> bool {
+            true
+        }
+    }
+
+    #[test]
+    fn remote_app_error_is_a_business_outcome() {
+        // The app answered with an in-band JSON-RPC error: business, not
+        // an engine fault — the outcome carries an `app_error` tool_error.
+        let ctx = Ctx::with_transport(Box::new(Failing(|| {
+            TransportError::Remote(scrybe_rpc::RpcError {
+                code: scrybe_rpc::ERR_TAB_NOT_OPEN,
+                message: "not open: /a.md".into(),
+                data: None,
+            })
+        })));
+        let out = Registry::default()
+            .call("read", &ctx, &json!({ "path": "/a.md" }))
+            .expect("remote errors are business outcomes, not engine faults");
+        assert!(!out.is_ok());
+        let err = out.tool_error.unwrap();
+        assert_eq!(err.code, "app_error");
+        assert!(err.message.contains("not open"));
+    }
+
+    #[test]
+    fn transport_failure_is_an_engine_fault_not_a_business_outcome() {
+        // Taxonomy fix (A3): a mid-request transport failure means the app
+        // did NOT answer — dispatch must surface EngineFault::Transport, not
+        // dress it up as a business `app_error`.
+        let ctx = Ctx::with_transport(Box::new(Failing(|| {
+            TransportError::Transport("reply violates the JSON-RPC envelope".into())
+        })));
+        let err = Registry::default()
+            .call("read", &ctx, &json!({ "path": "/a.md" }))
+            .unwrap_err();
+        assert!(
+            matches!(err, crate::EngineFault::Transport(ref m) if m.contains("envelope")),
+            "expected EngineFault::Transport, got {err:?}"
+        );
     }
 }

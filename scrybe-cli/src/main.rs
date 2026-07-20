@@ -288,10 +288,17 @@ enum Command {
 
     /// Extract Mermaid source from a PNG iTXt metadata chunk.
     ///
-    /// Top-level shortcut for `scrybe mermaid extract`. Same args.
+    /// Top-level shortcut for `scrybe mermaid extract`. Same args and exit
+    /// codes: 0 = success, 1 = extraction failed (no payload / unreadable
+    /// PNG), 2 = verification failed (stored sha256 does not match the
+    /// extracted source).
     Extract {
         #[arg(value_name = "PNG")]
         png: std::path::PathBuf,
+        /// Skip digest verification and print the raw stored source
+        /// (forensics on tampered payloads).
+        #[arg(long)]
+        unverified: bool,
     },
 
     /// Print version and active feature flags.
@@ -309,10 +316,21 @@ enum MermaidCmd {
         #[arg(short, long)]
         out: Option<std::path::PathBuf>,
     },
-    /// Extract Mermaid source from a PNG.
+    /// Extract Mermaid source from a PNG, verifying its sha256 by default.
+    ///
+    /// The stored digest is checked against a freshly-computed hash of the
+    /// extracted source. Exit codes: 0 = success (a payload with no stored
+    /// digest prints a note to stderr), 1 = extraction failed (no payload /
+    /// unreadable PNG), 2 = verification failed (tampered — stored sha256
+    /// does not match the extracted source). Use --unverified to skip the
+    /// check and print the raw stored source for forensics.
     Extract {
         #[arg(value_name = "PNG")]
         png: std::path::PathBuf,
+        /// Skip digest verification and print the raw stored source
+        /// (forensics on tampered payloads).
+        #[arg(long)]
+        unverified: bool,
     },
     /// Verify the sha256 integrity of the embedded Mermaid source in a PNG.
     ///
@@ -457,12 +475,12 @@ fn main() -> anyhow::Result<()> {
                 for bl in &report.broken_links {
                     eprintln!("  - [{}]({})", bl.text, bl.url);
                 }
-                // Also print content-id.
+                // Also print the content digest.
                 eprintln!(
-                    "{:<30} {} (CID {})",
+                    "{:<30} {} (digest {})",
                     "File:",
                     input.display(),
-                    doc.content_id()
+                    doc.content_digest()
                 );
             }
 
@@ -479,35 +497,42 @@ fn main() -> anyhow::Result<()> {
                 std::fs::write(&dest, &embedded)?;
                 println!("Embedded into {}", dest.display());
             }
-            MermaidCmd::Extract { png } => {
-                let bytes = std::fs::read(&png)?;
-                let payload = scrybe_mermaid::extract(&bytes)?;
-                println!("{}", payload.source);
+            MermaidCmd::Extract { png, unverified } => {
+                run_mermaid_extract(&png, unverified)?;
             }
             MermaidCmd::Verify { png } => {
                 let bytes = std::fs::read(&png)?;
+                // `extract` verifies by default — a mismatch is a typed error.
                 match scrybe_mermaid::extract(&bytes) {
-                    Err(e) => {
-                        eprintln!("scrybe mermaid verify: failed to extract payload: {e}");
-                        std::process::exit(1);
-                    }
-                    Ok(payload) => {
-                        // Recompute the sha256 of the extracted source.
-                        use sha2::{Digest, Sha256};
-                        let mut hasher = Sha256::new();
-                        hasher.update(payload.source.as_bytes());
-                        let computed = hex::encode(hasher.finalize());
-
-                        if computed == payload.sha256 {
-                            println!("OK — sha256 {} matches embedded source", &computed[..16]);
-                        } else {
+                    Ok(payload) => match &payload.verification {
+                        scrybe_mermaid::VerificationStatus::Verified { digest, .. } => {
+                            println!(
+                                "OK — sha256 {} matches embedded source",
+                                digest_short(digest)
+                            );
+                        }
+                        scrybe_mermaid::VerificationStatus::NoDigest => {
                             eprintln!(
-                                "TAMPERED — stored sha256 {} does not match computed {}",
-                                &payload.sha256[..16],
-                                &computed[..16]
+                                "MISSING — payload carries no sha256 digest; nothing to verify"
                             );
                             std::process::exit(1);
                         }
+                    },
+                    Err(scrybe_mermaid::MermaidError::VerificationFailed {
+                        expected,
+                        actual,
+                        ..
+                    }) => {
+                        eprintln!(
+                            "TAMPERED — stored sha256 {} does not match computed {}",
+                            digest_short(&expected),
+                            digest_short(&actual)
+                        );
+                        std::process::exit(1);
+                    }
+                    Err(e) => {
+                        eprintln!("scrybe mermaid verify: failed to extract payload: {e}");
+                        std::process::exit(1);
                     }
                 }
             }
@@ -562,13 +587,11 @@ fn main() -> anyhow::Result<()> {
                 // the "one tab, one file, refresh on re-open" semantics.
                 match rpc_client::send("open", serde_json::json!({"path": canon.to_string_lossy()}))
                 {
-                    Ok(resp) => match resp.error {
-                        None => println!("Opening {} in Scrybe", canon.display()),
-                        Some(e) => {
-                            anyhow::bail!("scrybe open failed: {} ({})", e.message, e.code)
-                        }
-                    },
-                    Err(e) if e.contains("no Scrybe running") => {
+                    Ok(_) => println!("Opening {} in Scrybe", canon.display()),
+                    Err(scrybe_rpc::ClientError::Remote(e)) => {
+                        anyhow::bail!("scrybe open failed: {} ({})", e.message, e.code)
+                    }
+                    Err(e) if e.is_not_running() => {
                         // Fall through to launching the app.
                         launch_scrybe(Some(&canon)).map_err(|e| anyhow::anyhow!("{e}"))?;
                         println!("Opening {} in Scrybe", canon.display());
@@ -588,28 +611,23 @@ fn main() -> anyhow::Result<()> {
         Command::Save { path } => {
             let canon = path.canonicalize().unwrap_or_else(|_| path.clone());
             match rpc_client::send("save", serde_json::json!({"path": canon.to_string_lossy()})) {
-                Ok(resp) => match resp.error {
-                    // Reply-correlated save reports { path, bytes, was_dirty };
-                    // an older app replies the legacy {applied} ack with no
-                    // byte count — don't fabricate one.
-                    None => {
-                        let bytes = resp
-                            .result
-                            .as_ref()
-                            .and_then(|r| r.get("bytes"))
-                            .and_then(serde_json::Value::as_u64);
-                        match bytes {
-                            Some(b) => println!("Saved {} ({b} bytes)", canon.display()),
-                            None => println!("Saved {}", canon.display()),
-                        }
+                // Reply-correlated save reports { path, bytes, was_dirty };
+                // an older app replies the legacy {applied} ack with no
+                // byte count — don't fabricate one.
+                Ok(result) => {
+                    let bytes = result.get("bytes").and_then(serde_json::Value::as_u64);
+                    match bytes {
+                        Some(b) => println!("Saved {} ({b} bytes)", canon.display()),
+                        None => println!("Saved {}", canon.display()),
                     }
-                    // Not open: silent no-op per the documented CLI contract.
-                    Some(e) if e.code == scrybe_rpc::ERR_TAB_NOT_OPEN => {}
-                    Some(e) => {
-                        anyhow::bail!("scrybe save failed: {} ({})", e.message, e.code)
-                    }
-                },
-                Err(e) if e.contains("no Scrybe running") => {
+                }
+                // Not open: silent no-op per the documented CLI contract.
+                Err(scrybe_rpc::ClientError::Remote(e))
+                    if e.code == scrybe_rpc::ERR_TAB_NOT_OPEN => {}
+                Err(scrybe_rpc::ClientError::Remote(e)) => {
+                    anyhow::bail!("scrybe save failed: {} ({})", e.message, e.code)
+                }
+                Err(e) if e.is_not_running() => {
                     // Silent no-op per design: nothing open, nothing to save.
                 }
                 Err(e) => anyhow::bail!("scrybe save failed: {e}"),
@@ -622,13 +640,11 @@ fn main() -> anyhow::Result<()> {
                 "close",
                 serde_json::json!({"path": canon.to_string_lossy()}),
             ) {
-                Ok(resp) => match resp.error {
-                    None => println!("Closed {}", canon.display()),
-                    Some(e) => {
-                        anyhow::bail!("scrybe close failed: {} ({})", e.message, e.code)
-                    }
-                },
-                Err(e) if e.contains("no Scrybe running") => {
+                Ok(_) => println!("Closed {}", canon.display()),
+                Err(scrybe_rpc::ClientError::Remote(e)) => {
+                    anyhow::bail!("scrybe close failed: {} ({})", e.message, e.code)
+                }
+                Err(e) if e.is_not_running() => {
                     // Silent no-op.
                 }
                 Err(e) => anyhow::bail!("scrybe close failed: {e}"),
@@ -682,13 +698,11 @@ fn main() -> anyhow::Result<()> {
         }
         Command::Quit { force } => {
             match rpc_client::send("quit", serde_json::json!({"force": force})) {
-                Ok(resp) => match resp.error {
-                    None => println!("Quitting Scrybe"),
-                    Some(e) => {
-                        anyhow::bail!("scrybe quit failed: {} ({})", e.message, e.code)
-                    }
-                },
-                Err(e) if e.contains("no Scrybe running") => {
+                Ok(_) => println!("Quitting Scrybe"),
+                Err(scrybe_rpc::ClientError::Remote(e)) => {
+                    anyhow::bail!("scrybe quit failed: {} ({})", e.message, e.code)
+                }
+                Err(e) if e.is_not_running() => {
                     // Silent no-op.
                 }
                 Err(e) => anyhow::bail!("scrybe quit failed: {e}"),
@@ -723,11 +737,9 @@ fn main() -> anyhow::Result<()> {
             std::fs::write(&dest, &embedded)?;
             println!("Embedded into {}", dest.display());
         }
-        Command::Extract { png } => {
+        Command::Extract { png, unverified } => {
             // Top-level alias for `mermaid extract` — same code path.
-            let bytes = std::fs::read(&png)?;
-            let payload = scrybe_mermaid::extract(&bytes)?;
-            println!("{}", payload.source);
+            run_mermaid_extract(&png, unverified)?;
         }
 
         Command::Version => {
@@ -739,6 +751,49 @@ fn main() -> anyhow::Result<()> {
 }
 
 // ---------------------------------------------------------------------------
+// Mermaid extract handler (shared by `mermaid extract` and top-level `extract`)
+// ---------------------------------------------------------------------------
+
+/// First 16 hex chars of a digest for display — safe on short or garbage
+/// stored values (attacker-controlled input must never panic the CLI).
+fn digest_short(d: &str) -> &str {
+    d.get(..16).unwrap_or(d)
+}
+
+/// Extract embedded Mermaid source from `png` and print it.
+///
+/// Verifies the stored sha256 against the extracted source by default.
+/// Exit codes: 0 = success (no-digest payloads print a stderr note),
+/// 1 = extraction failure (no payload / unreadable PNG, via the returned
+/// error), 2 = verification failure (tampered).
+fn run_mermaid_extract(png: &std::path::Path, unverified: bool) -> anyhow::Result<()> {
+    let bytes = std::fs::read(png)?;
+
+    if unverified {
+        // Forensics path: raw stored fields, no digest check.
+        let payload = scrybe_mermaid::extract_unverified(&bytes)?;
+        println!("{}", payload.source);
+        return Ok(());
+    }
+
+    match scrybe_mermaid::extract(&bytes) {
+        Ok(payload) => {
+            if !payload.is_verified() {
+                eprintln!("note: payload carries no sha256 digest — source is unverified");
+            }
+            println!("{}", payload.source);
+            Ok(())
+        }
+        Err(e @ scrybe_mermaid::MermaidError::VerificationFailed { .. }) => {
+            eprintln!("scrybe mermaid extract: {e}");
+            eprintln!("(use --unverified to print the stored source anyway)");
+            std::process::exit(2);
+        }
+        Err(e) => Err(e.into()),
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Phase 2 read-side handlers
 // ---------------------------------------------------------------------------
 
@@ -747,13 +802,15 @@ fn require_running_gui<F: FnOnce(serde_json::Value) -> anyhow::Result<()>>(
     params: serde_json::Value,
     on_ok: F,
 ) -> anyhow::Result<()> {
+    // The client types every failure (A3): in-band app errors are `Remote`,
+    // no-app is `is_not_running()`, and malformed replies arrive pre-typed
+    // (envelope/frame/JSON violations) — no message-text matching anywhere.
     match rpc_client::send(method, params) {
-        Ok(resp) => match (resp.result, resp.error) {
-            (Some(r), None) => on_ok(r),
-            (None, Some(e)) => anyhow::bail!("scrybe {method}: {} ({})", e.message, e.code),
-            _ => anyhow::bail!("scrybe {method}: malformed response"),
-        },
-        Err(e) if e.contains("no Scrybe running") => {
+        Ok(result) => on_ok(result),
+        Err(scrybe_rpc::ClientError::Remote(e)) => {
+            anyhow::bail!("scrybe {method}: {} ({})", e.message, e.code)
+        }
+        Err(e) if e.is_not_running() => {
             anyhow::bail!(
                 "scrybe {method}: no Scrybe running — start the app first, or open the file with `scrybe <path>`"
             )

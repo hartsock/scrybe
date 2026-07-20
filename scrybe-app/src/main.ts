@@ -25,13 +25,17 @@ import { PluginManager } from "./plugins";
 import { McpPanel } from "./mcp_panel";
 import { VcsPanel } from "./vcs_panel";
 
-// Forward console output to /tmp/scrybe-debug.log so the scrybe MCP `logs`
-// tool can surface errors to Claude Code without needing DevTools open.
+// Keep recent console output in an in-memory ring so the socket `logs`
+// method can surface errors to agents without DevTools open. Replaces the
+// world-readable `/tmp/scrybe-debug.log` (A2: no predictable /tmp channels).
+const LOG_RING_MAX = 500;
+const logRing: string[] = [];
 function patchConsole() {
   const orig = { error: console.error.bind(console), warn: console.warn.bind(console), log: console.log.bind(console) };
   function fwd(level: string, args: unknown[]) {
     const msg = args.map(a => (a instanceof Error ? a.stack ?? a.message : typeof a === "object" ? JSON.stringify(a) : String(a))).join(" ");
-    invoke("log_append", { level, message: msg }).catch(() => {});
+    logRing.push(`${new Date().toISOString()} [${level}] ${msg}`);
+    if (logRing.length > LOG_RING_MAX) logRing.splice(0, logRing.length - LOG_RING_MAX);
   }
   console.error = (...a) => { orig.error(...a); fwd("ERROR", a); };
   console.warn  = (...a) => { orig.warn(...a);  fwd("WARN",  a); };
@@ -296,29 +300,28 @@ function setWrapEnabled(on: boolean): void {
   publishState();
 }
 
-/// Publish the current UI state to `/tmp/scrybe-state.json` so the MCP
-/// `state` tool can report what the human is looking at (active path,
-/// view mode, theme, vim). The human-side equivalents are the path bar,
-/// the tab mode icon, the theme dropdown, and the Vim toggle.
+/// Snapshot the current UI state — what the human is looking at (active
+/// path, view mode, theme, vim). Served live over the socket `state` method
+/// (A2: replaces the `/tmp/scrybe-state.json` mirror — no file, no staleness).
+function uiStateSnapshot(): Record<string, unknown> {
+  const tab = state.activeTab();
+  return {
+    active_path: tab?.path ?? null,
+    active_title: tab?.title ?? null,
+    is_dirty: tab?.isDirty ?? false,
+    view_mode: tab?.viewMode ?? "both",
+    theme: currentTheme,
+    vim: vimEnabled,
+    wrap: wrapEnabled,
+    open_paths: state.tabs.map(t => t.path).filter((p): p is string => !!p),
+  };
+}
+
+/// Keep the native menu's check items (theme radio, Vim, Wrap) in sync so
+/// menu, toolbar, and agents can never disagree for long. Fires per keystroke
+/// (via redrawTabs), so skip the IPC unless one of the three values changed.
 let lastMenuSync = "";
 function publishState(): void {
-  const tab = state.activeTab();
-  invoke("publish_state", {
-    state: {
-      active_path: tab?.path ?? null,
-      active_title: tab?.title ?? null,
-      is_dirty: tab?.isDirty ?? false,
-      view_mode: tab?.viewMode ?? "both",
-      theme: currentTheme,
-      vim: vimEnabled,
-      wrap: wrapEnabled,
-      open_paths: state.tabs.map(t => t.path).filter((p): p is string => !!p),
-    },
-  }).catch(() => { /* state mirror is best-effort */ });
-  // Mirror the same state onto the native menu's check items (theme radio,
-  // Vim, Wrap) so menu, toolbar, and MCP can never disagree for long.
-  // publishState fires per keystroke (via redrawTabs), so skip the IPC and
-  // the five native menu mutations unless one of the three values changed.
   const menuState = `${currentTheme}|${vimEnabled}|${wrapEnabled}`;
   if (menuState !== lastMenuSync) {
     lastMenuSync = menuState;
@@ -773,40 +776,10 @@ listen<string>("scrybe://open", event => {
   openFileByPath(event.payload);
 }).catch(console.error);
 
-// Poll for close_tab signals from the MCP server (500 ms).
-function closeTabByPath(path: string): void {
-  if (!path) {
-    if (state.activeTabId) closeTab(state.activeTabId);
-  } else {
-    const tab = state.tabs.find(t => t.path === path);
-    if (tab) closeTab(tab.id);
-  }
-}
-setInterval(async () => {
-  const path = await invoke<string | null>("poll_close_tab").catch(() => null);
-  if (path !== null) closeTabByPath(path);
-}, 500);
-
-// ─── MCP control pollers (human ↔ MCP parity) ────────────────────────────────
-//
-// The MCP server writes a signal file for each UI control it drives; the
-// frontend polls and applies it through the same code path as the human
-// toolbar control. See `scrybe-mcp-server/src/tools.rs`.
-setInterval(async () => {
-  const theme = await invoke<string | null>("poll_set_theme").catch(() => null);
-  if (theme && (theme === "default" || theme === "dark" || theme === "solarized")) {
-    applyTheme(theme);
-  }
-  const mode = await invoke<string | null>("poll_view_mode").catch(() => null);
-  if (mode === "cycle") cyclePreviewMode();
-  else if (mode) setViewMode(mode);
-  const vim = await invoke<string | null>("poll_set_vim").catch(() => null);
-  if (vim === "on") setVimEnabled(true);
-  else if (vim === "off") setVimEnabled(false);
-  const wrap = await invoke<string | null>("poll_set_wrap").catch(() => null);
-  if (wrap === "on") setWrapEnabled(true);
-  else if (wrap === "off") setWrapEnabled(false);
-}, 500);
+// A2: the /tmp signal-file pollers (close-tab, theme, view-mode, vim, wrap)
+// are gone — agents drive every UI control through typed socket methods
+// (`scrybe://cli-*` listeners below), the same code paths the human toolbar
+// uses. No predictable /tmp channels, no 500 ms polling loops.
 
 // ─── Reload: MCP-driven (poll) + OS file watcher (event) ─────────────────────
 
@@ -876,12 +849,6 @@ function applyConflictDisk(): void {
   }
   redrawTabs();
 }
-
-// MCP reload poll
-setInterval(async () => {
-  const path = await invoke<string | null>("poll_reload_tab").catch(() => null);
-  if (path !== null) await reloadTabFromDisk(path);
-}, 500);
 
 // OS file watcher events
 listen<string>("scrybe://file-changed", async event => {
@@ -1215,3 +1182,62 @@ listen<{ id: number; data: { path: string; start_line: number; end_line: number;
     await reply(id, { result: { applied: true, size_after: merged.length, is_dirty: true } });
   },
 ).catch(console.error);
+
+// ─── UI-parity socket methods (A2) ───────────────────────────────────────────
+//
+// Typed replacements for the retired /tmp signal files: each drives the SAME
+// code path as the human toolbar control and replies with what actually
+// happened — no polling, no files, no ambient channels.
+
+// `state` — what the human is looking at right now, served live.
+listen<{ id: number; data: unknown }>("scrybe://cli-state", async event => {
+  await reply(event.payload.id, { result: uiStateSnapshot() });
+}).catch(console.error);
+
+// `set_theme` — same entry point as the toolbar dropdown.
+listen<{ id: number; data: { theme: string } }>("scrybe://cli-set-theme", async event => {
+  const { id, data } = event.payload;
+  const t = data.theme;
+  if (t !== "default" && t !== "dark" && t !== "solarized") {
+    await reply(id, { error: { code: -32602, message: `unknown theme: ${t}` } });
+    return;
+  }
+  applyTheme(t);
+  await reply(id, { result: { theme: t } });
+}).catch(console.error);
+
+// `view_mode` — concrete mode or `cycle`; replies with the CONCRETE mode
+// now active (a code/text tab pins to `edit`, mirroring the human guard).
+listen<{ id: number; data: { mode: string } }>("scrybe://cli-view-mode", async event => {
+  const { id, data } = event.payload;
+  const tab = state.activeTab();
+  if (!tab) {
+    await reply(id, { error: { code: ERR_TAB_NOT_OPEN, message: "no active tab" } });
+    return;
+  }
+  const m = data.mode;
+  if (m === "cycle") {
+    cyclePreviewMode();
+  } else if (m === "both" || m === "edit" || m === "preview") {
+    setViewMode(m);
+  } else {
+    await reply(id, { error: { code: -32602, message: `unknown mode: ${m}` } });
+    return;
+  }
+  await reply(id, { result: { mode: state.activeTab()?.viewMode ?? "both" } });
+}).catch(console.error);
+
+// `set_vim` — same entry point as the toolbar toggle.
+listen<{ id: number; data: { enabled: boolean } }>("scrybe://cli-set-vim", async event => {
+  const { id, data } = event.payload;
+  setVimEnabled(data.enabled === true);
+  await reply(id, { result: { enabled: data.enabled === true } });
+}).catch(console.error);
+
+// `logs` — newest-last tail of the in-memory console ring.
+listen<{ id: number; data: { tail?: number | null } }>("scrybe://cli-logs", async event => {
+  const { id, data } = event.payload;
+  const requested = typeof data.tail === "number" && data.tail > 0 ? data.tail : 50;
+  const n = Math.min(requested, logRing.length);
+  await reply(id, { result: { lines: logRing.slice(logRing.length - n) } });
+}).catch(console.error);
