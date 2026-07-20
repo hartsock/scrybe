@@ -4,7 +4,7 @@ This package installs the `scrybe` command on your PATH, providing
 render, lint, mermaid embed/extract, and the GUI integration RPC client.
 
 For programmatic Python library access (Document, render_markdown,
-ContentId, etc.), install scrybe-py:
+ContentDigest, etc.), install scrybe-py:
 
     pip install scrybe-py
     >>> import scrybe
@@ -30,7 +30,12 @@ except ImportError:
 # Soft dependency on scrybe-py: re-export when present so users can drive
 # the Rust library directly without juggling two imports.
 try:
-    from scrybe import ContentId, Document, render_markdown  # type: ignore[import-not-found]
+    from scrybe import (  # type: ignore[import-not-found]
+        ContentDigest,
+        ContentId,  # deprecated alias for ContentDigest
+        Document,
+        render_markdown,
+    )
 
     _SCRYBE_LIB_AVAILABLE = True
 except ImportError:
@@ -52,12 +57,14 @@ except ImportError:
         def __call__(self, *args: object, **kwargs: object) -> None:
             raise ImportError(f"{self._name}: {_MISSING_MSG}")
 
+    ContentDigest = _Missing("ContentDigest")  # type: ignore[assignment,misc]
     ContentId = _Missing("ContentId")  # type: ignore[assignment,misc]
     Document = _Missing("Document")  # type: ignore[assignment,misc]
     render_markdown = _Missing("render_markdown")  # type: ignore[assignment]
 
 
 __all__ = [
+    "ContentDigest",
     "ContentId",
     "Document",
     "render_markdown",

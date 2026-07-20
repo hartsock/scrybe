@@ -54,7 +54,7 @@ fn data_schema() -> Value {
         "properties": {
             "v": { "const": DATA_VERSION },
             "kind": { "const": "lint" },
-            "content_id": { "type": "string", "description": "BLAKE3 content id of the source." },
+            "content_id": { "type": "string", "description": "BLAKE3 content digest of the source (64 lowercase hex chars)." },
             "word_count": { "type": "integer" },
             "heading_count": { "type": "integer" },
             "max_heading_depth": { "type": "integer" },
@@ -98,7 +98,9 @@ fn handler(_ctx: &Ctx, args: &Value) -> ToolOutcome {
     ToolOutcome::ok(json!({
         "v": DATA_VERSION,
         "kind": "lint",
-        "content_id": doc.content_id().to_string(),
+        // JSON key stays `content_id` — it is a versioned wire schema
+        // (DATA_VERSION); only the Rust-side vocabulary was renamed.
+        "content_id": doc.content_digest().to_string(),
         "word_count": report.word_count,
         "heading_count": report.heading_count,
         "max_heading_depth": report.max_heading_depth,
@@ -133,7 +135,7 @@ mod tests {
         assert_eq!(d["code_block_count"], 1);
         assert_eq!(d["has_math"], true);
         assert_eq!(d["clean"], true);
-        // BLAKE3 hex content id is present and non-trivial.
+        // BLAKE3 hex content digest is present and non-trivial.
         assert!(d["content_id"].as_str().unwrap().len() >= 32);
     }
 

@@ -457,12 +457,12 @@ fn main() -> anyhow::Result<()> {
                 for bl in &report.broken_links {
                     eprintln!("  - [{}]({})", bl.text, bl.url);
                 }
-                // Also print content-id.
+                // Also print the content digest.
                 eprintln!(
-                    "{:<30} {} (CID {})",
+                    "{:<30} {} (digest {})",
                     "File:",
                     input.display(),
-                    doc.content_id()
+                    doc.content_digest()
                 );
             }
 

@@ -268,12 +268,12 @@ CLI↔MCP parity gate, non-Markdown viewing, and the scrybe-py foundation.
 | CLI↔MCP parity gate (CI) | #125 | #123, #124 | Test: CLI subcommand set == MCP `tools/list` set; fill remaining CLI gaps. |
 | Close build issues (provided by dependency) | #61–#67 | #132 | Sequence layout + SVG assembly are the crate's job — close on spike-Pass. |
 | Non-Markdown / git-diff viewing | #44 | — | All text types + git diffs, preview off; agents can open non-md. |
-| scrybe-py Phase 1 | #6 | — | Usable library (Document, render, AST, content_id); thin PyO3. |
+| scrybe-py Phase 1 | #6 | — | Usable library (Document, render, AST, content_digest); thin PyO3. |
 
 **Exit:**
 - CI fails on any CLI↔MCP parity drift; every MCP tool has a CLI subcommand. (#125)
 - #61–#67 closed as provided-by-dependency (spike-Pass). (#132)
-- `import scrybe` gives Document/render/AST/content_id. (#6)
+- `import scrybe` gives Document/render/AST/content_digest. (#6)
 
 ---
 

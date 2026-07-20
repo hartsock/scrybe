@@ -11,20 +11,23 @@ Python on the outside, Rust on the inside.
 ## What it does
 
 Connects to a NATS server and provides two live streams scoped to the
-`ContentId` of the active document:
+`ContentDigest` (BLAKE3 hex) of the active document:
 
 - **SwarmChat** — conversational messages between agents and the user, on
   subject `scrybe.chat.<doc_cid>`.
-- **ActivityFeed** — structured events (agent name, action, doc CID) signalling
-  what agents are doing, on subject `scrybe.activity.<doc_cid>`.
+- **ActivityFeed** — structured events (agent name, action, doc digest)
+  signalling what agents are doing, on subject `scrybe.activity.<doc_cid>`.
 
-By scoping messages to the document's content identifier, multiple agents
+(The `doc_cid` wire subject/field names are historical; the value is the
+document's bare BLAKE3 hex digest, not an IPFS/IPLD CID.)
+
+By scoping messages to the document's content digest, multiple agents
 working on different documents never see each other's traffic.
 
 ## Role in the architecture
 
 `scrybe-swarm` is consumed by the Tauri backend to populate the swarm sidebar
-panel in the UI. It depends on `scrybe-core` for `ContentId` only; it has no
+panel in the UI. It depends on `scrybe-core` for `ContentDigest` only; it has no
 dependency on the render or VCS crates. The NATS connection details are
 configured by the operator (NATS server URL, credentials).
 
