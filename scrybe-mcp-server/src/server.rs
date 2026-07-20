@@ -10,17 +10,14 @@ use std::io::{BufRead, Write};
 
 use serde_json::Value;
 
-use crate::tools::ToolRegistry;
-
 /// The Scrybe MCP server.
 pub struct McpServer {
     /// Version string announced to clients.
     pub version: String,
-    /// Legacy hand-rolled registry — the source for tools not yet migrated.
-    registry: ToolRegistry,
-    /// The shared `scrybe-tools` registry, **preferred** over `registry` for any
-    /// tool it provides, so the MCP surface and the CLI share one handler (#122
-    /// Phase 2). The MCP server is migrating to be a thin shim over this.
+    /// The shared `scrybe-tools` registry — the ONE registry, dispatch, and
+    /// schema source, shared verbatim with the CLI so parity holds by
+    /// construction (#122). The MCP server is a thin transport shim over it;
+    /// the legacy hand-rolled `ToolRegistry` was deleted (A2a).
     tools: scrybe_tools::Registry,
 }
 
@@ -31,11 +28,10 @@ impl Default for McpServer {
 }
 
 impl McpServer {
-    /// Creates a new server with a fresh tool registry.
+    /// Creates a new server over the shared tool registry.
     pub fn new() -> Self {
         Self {
             version: env!("CARGO_PKG_VERSION").to_string(),
-            registry: ToolRegistry::new(),
             tools: scrybe_tools::Registry::default(),
         }
     }
@@ -139,38 +135,16 @@ impl McpServer {
             "notifications/initialized" => return None,
             "ping" => serde_json::json!({}),
             "tools/list" => {
-                // Legacy list, minus anything the shared registry now provides,
-                // plus the shared descriptors (shared registry wins on overlap).
-                let mut list = self.registry.list_tools_json();
-                let shared: std::collections::HashSet<&str> =
-                    self.tools.names().into_iter().collect();
-                if let Some(arr) = list.get_mut("tools").and_then(Value::as_array_mut) {
-                    arr.retain(|t| {
-                        !shared.contains(t.get("name").and_then(Value::as_str).unwrap_or(""))
-                    });
-                    arr.extend(self.shared_tool_descriptors());
-                }
-                list
+                // Purely the shared registry's descriptors — one schema source.
+                serde_json::json!({ "tools": self.shared_tool_descriptors() })
             }
             "tools/call" => {
                 let params = req.get("params")?;
                 let name = params["name"].as_str()?;
                 let args = params.get("arguments").unwrap_or(&Value::Null);
-                // Prefer the shared registry (parity with the CLI); fall back to
-                // the legacy registry for tools not yet migrated.
-                if self.tools.get(name).is_some() {
-                    self.call_shared(name, args)
-                } else {
-                    let content = self.registry.call_tool(name, args);
-                    // A legacy tool result carrying an `error` field is a failed
-                    // call; set `isError` so agents can tell success from failure
-                    // structurally instead of parsing the text payload.
-                    let is_error = content.get("error").is_some();
-                    serde_json::json!({
-                        "content": [{"type": "text", "text": content.to_string()}],
-                        "isError": is_error,
-                    })
-                }
+                // One dispatch: the shared registry. A truly-unknown tool is an
+                // `EngineFault::UnknownTool`, surfaced as `isError: true`.
+                self.call_shared(name, args)
             }
             other => {
                 // Unknown method → a real top-level JSON-RPC error object,
@@ -229,26 +203,78 @@ mod tests {
         assert!(resp["result"].is_object());
     }
 
-    #[test]
-    fn test_tools_list() {
-        let mut s = server();
+    /// The complete public MCP tool list for 0.6.0, sorted. `tools/list` must
+    /// serve EXACTLY this set — a change here is a deliberate surface change.
+    const TOOL_NAMES_0_6_0: &[&str] = &[
+        "close_tab",
+        "edit",
+        "embed",
+        "export",
+        "export_figures",
+        "extract",
+        "find",
+        "lint",
+        "list_tabs",
+        "logs",
+        "mermaid_to_png",
+        "open",
+        "quit",
+        "read",
+        "reload",
+        "render",
+        "save",
+        "section",
+        "set_theme",
+        "set_vim",
+        "state",
+        "view_mode",
+    ];
+
+    fn listed_names(s: &mut McpServer) -> Vec<String> {
         let req = json!({"jsonrpc": "2.0", "id": 3, "method": "tools/list"});
         let resp = s.handle(&req).unwrap();
-        let tools = resp["result"]["tools"].as_array().unwrap();
-        assert!(tools.len() >= 11);
+        resp["result"]["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|t| t["name"].as_str().unwrap().to_string())
+            .collect()
     }
 
     #[test]
-    fn test_tools_list_names() {
+    fn test_list_tools_names_are_unique() {
+        // One registry, one dispatch: no tool name may appear twice (A2a
+        // acceptance). The registry also panics on duplicate registration;
+        // this asserts the property on the actual wire surface.
+        let mut s = server();
+        let names = listed_names(&mut s);
+        let unique: std::collections::HashSet<&String> = names.iter().collect();
+        assert_eq!(unique.len(), names.len(), "duplicate tool names: {names:?}");
+    }
+
+    #[test]
+    fn test_list_tools_snapshot_is_the_0_6_0_surface() {
+        // Snapshot of the complete public tool list (sorted). If this fails you
+        // changed the 0.6.0 MCP surface — update the snapshot deliberately.
+        let mut s = server();
+        let mut names = listed_names(&mut s);
+        names.sort();
+        assert_eq!(names, TOOL_NAMES_0_6_0, "tools/list surface changed");
+    }
+
+    #[test]
+    fn test_tools_list_descriptors_carry_schema() {
+        // Every descriptor exposes the shared registry's inputSchema — the one
+        // schema source.
         let mut s = server();
         let req = json!({"jsonrpc": "2.0", "id": 4, "method": "tools/list"});
         let resp = s.handle(&req).unwrap();
-        let tools = resp["result"]["tools"].as_array().unwrap();
-        let names: Vec<&str> = tools.iter().map(|t| t["name"].as_str().unwrap()).collect();
-        for expected in &[
-            "open", "read", "section", "edit", "find", "render", "embed", "extract", "lint",
-        ] {
-            assert!(names.contains(expected), "missing tool: {expected}");
+        for tool in resp["result"]["tools"].as_array().unwrap() {
+            assert!(
+                tool["inputSchema"].is_object(),
+                "descriptor missing inputSchema: {tool}"
+            );
+            assert!(tool["description"].as_str().unwrap_or("").len() > 10);
         }
     }
 
@@ -419,6 +445,73 @@ mod tests {
         });
         let resp = s.handle(&req).unwrap();
         assert_eq!(resp["result"]["isError"], true);
+    }
+
+    // ── A2a: embed/extract/export are shared tools; the legacy registry is gone ──
+
+    #[test]
+    fn test_unknown_tool_is_error() {
+        // A truly-unknown tool is an engine fault surfaced as isError: true
+        // (ported from the legacy registry's unknown-tool test).
+        let mut s = server();
+        let req = json!({
+            "jsonrpc": "2.0", "id": 17, "method": "tools/call",
+            "params": {"name": "nonexistent", "arguments": {}}
+        });
+        let resp = s.handle(&req).unwrap();
+        assert_eq!(resp["result"]["isError"], true);
+        let text = resp["result"]["content"][0]["text"].as_str().unwrap();
+        assert!(text.contains("unknown tool"), "got: {text}");
+    }
+
+    #[test]
+    fn test_export_missing_path_is_engine_fault() {
+        // Ported from the legacy `test_export_requires_input`: the required
+        // input arg (now `path`) is gated by the shared dispatcher.
+        let mut s = server();
+        let req = json!({
+            "jsonrpc": "2.0", "id": 18, "method": "tools/call",
+            "params": {"name": "export", "arguments": {}}
+        });
+        let resp = s.handle(&req).unwrap();
+        assert_eq!(resp["result"]["isError"], true);
+    }
+
+    #[test]
+    fn test_extract_over_mcp_reports_verified() {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static N: AtomicU64 = AtomicU64::new(0);
+        let mut out = std::env::temp_dir();
+        out.push(format!(
+            "scrybe-mcp-extract-{}-{}.png",
+            std::process::id(),
+            N.fetch_add(1, Ordering::Relaxed)
+        ));
+
+        // Produce a PNG with embedded source via the shared mermaid_to_png…
+        let mut s = server();
+        let source = "graph TD; A-->B";
+        let req = json!({
+            "jsonrpc": "2.0", "id": 19, "method": "tools/call",
+            "params": {"name": "mermaid_to_png", "arguments": {
+                "source": source, "output_path": out.to_string_lossy()
+            }}
+        });
+        assert_eq!(s.handle(&req).unwrap()["result"]["isError"], false);
+
+        // …then recover it with the shared `extract` (in-process, headless-safe)
+        // and check the B5 verification report travels over MCP.
+        let req = json!({
+            "jsonrpc": "2.0", "id": 20, "method": "tools/call",
+            "params": {"name": "extract", "arguments": {"png_path": out.to_string_lossy()}}
+        });
+        let resp = s.handle(&req).unwrap();
+        assert_eq!(resp["result"]["isError"], false);
+        assert_eq!(resp["result"]["data"]["kind"], "extract");
+        assert_eq!(resp["result"]["data"]["source"], source);
+        assert_eq!(resp["result"]["data"]["verification"], "verified");
+
+        let _ = std::fs::remove_file(&out);
     }
 
     #[test]

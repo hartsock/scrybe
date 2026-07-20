@@ -7,6 +7,12 @@ Copyright 2026 Shawn Hartsock and contributors
 
 **Status:** Proposed. Targets v0.4.0 (next release) through v0.7.0.
 **Date:** 2026-07-13
+**Update (2026-07-20, workstream A2a):** registry unification is **done**. The
+legacy `scrybe-mcp-server/src/tools.rs` `ToolRegistry` described in §1 has been
+deleted; `embed`/`extract`/`export` now live in the shared `scrybe-tools`
+registry (extract rides the verified-extraction API). The MCP server is a thin
+shim over the one registry — one dispatch, one schema source. §1 below is kept
+as the historical root-cause analysis.
 **Supersedes:** the hand-rolled `scrybe-mcp-server/src/server.rs` + `src/tools.rs`.
 **Related design:** `docs/design/cli-rpc.md` (the CLI↔GUI socket protocol this rebuild unifies onto).
 **Sequenced by:** `ROADMAP.md` (v0.4→v0.12) and `docs/TRIAGE.md`.
