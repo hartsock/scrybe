@@ -9,7 +9,12 @@ All notable changes to Scrybe are documented here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/); versions are the workspace
 lock-step version (`[workspace.package] version`).
 
-## [0.6.0] — 2026-07-20 — "Contract"
+## [0.6.1] — 2026-07-20 — "Contract"
+
+> **Version history note:** the `v0.6.0` tag was consumed by a release run
+> whose build stage failed (pyo3 feature-gap E0382, a cross-target toolchain
+> pin gap — see #216) with **nothing published** to any registry. 0.6.1 is
+> the actual release of this content; there is no public 0.6.0 by design.
 
 The first release published across **every** channel — GitHub installers,
 PyPI, crates.io, and (new) **npm** (`scrybe-ai` + `@scrybe-ai/cli`). Before
