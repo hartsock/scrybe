@@ -13,6 +13,7 @@
 
 use serde_json::Value;
 
+pub mod autolaunch;
 pub mod figures;
 pub mod lint;
 pub mod schema;
@@ -196,12 +197,33 @@ impl Transport for Headless {
 /// `call` returns `NoApp` and pure tools should fall back to `Headless`.
 pub struct LiveApp;
 
+/// Map a `scrybe-rpc` client result onto the transport error taxonomy: no app
+/// running → [`TransportError::NoApp`], an in-band remote error →
+/// [`TransportError::Remote`], anything else (I/O, timeout, frame) →
+/// [`TransportError::Transport`]. Used for the post-auto-launch retry.
+fn map_send(res: Result<Value, scrybe_rpc::ClientError>) -> Result<Value, TransportError> {
+    match res {
+        Ok(result) => Ok(result),
+        Err(e) if e.is_not_running() => Err(TransportError::NoApp),
+        Err(scrybe_rpc::ClientError::Remote(err)) => Err(TransportError::Remote(err)),
+        Err(e) => Err(TransportError::Transport(e.to_string())),
+    }
+}
+
 impl Transport for LiveApp {
     fn call(&self, method: &str, params: Value) -> Result<Value, TransportError> {
-        match scrybe_rpc::client::send(method, params) {
+        match scrybe_rpc::client::send(method, params.clone()) {
             Ok(result) => Ok(result),
-            // The one blessed no-app check — never message-text matching.
-            Err(e) if e.is_not_running() => Err(TransportError::NoApp),
+            // No app running. If auto-launch is opted in (`SCRYBE_MCP_AUTOLAUNCH`),
+            // start the installed app, wait for its socket, and retry once;
+            // otherwise report NoApp (→ the tool's clean `no_live_app`).
+            Err(e) if e.is_not_running() => {
+                if crate::autolaunch::autolaunch_and_wait() {
+                    map_send(scrybe_rpc::client::send(method, params))
+                } else {
+                    Err(TransportError::NoApp)
+                }
+            }
             // In-band remote error: the app answered. Business, not engine.
             Err(scrybe_rpc::ClientError::Remote(err)) => Err(TransportError::Remote(err)),
             // Everything else (I/O, timeouts, frame/UTF-8/JSON, envelope,
