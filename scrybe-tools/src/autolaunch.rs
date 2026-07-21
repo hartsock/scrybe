@@ -171,11 +171,12 @@ mod tests {
         let sys = resolve_app(|_| None, |p| p == Path::new("/Applications/Scrybe.app"));
         assert_eq!(sys, Some(PathBuf::from("/Applications/Scrybe.app")));
 
+        let user_app = "/Users/me/Applications/Scrybe.app";
         let user = resolve_app(
             |k| (k == "HOME").then(|| "/Users/me".to_string()),
-            |p| p == Path::new("/Users/me/Applications/Scrybe.app"),
+            |p| p == Path::new(user_app),
         );
-        assert_eq!(user, Some(PathBuf::from("/Users/me/Applications/Scrybe.app")));
+        assert_eq!(user, Some(PathBuf::from(user_app)));
     }
 
     #[test]
