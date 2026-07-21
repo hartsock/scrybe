@@ -45,6 +45,7 @@ SUBCOMMANDS
 
   Standalone (no GUI required):
     render     Render Markdown to HTML.
+    view       View a Markdown file in the terminal (TUI viewer; q quits).
     lint       Lint a Markdown file and report statistics.
     mermaid    Embed/extract/verify Mermaid source in PNG iTXt metadata.
     embed      Top-level shortcut for `mermaid embed`.
@@ -62,7 +63,7 @@ CONNECTION MODEL
                 Linux: $SCRYBE_APP_BIN or scrybe-app on PATH).
       - `save`, `close`, `quit`  silent no-op (nothing open, nothing to do).
       - `read`, `find`, `section`, `edit`  error: no Scrybe running.
-      - `render`, `lint`, `mermaid`, `embed`, `extract`  run inline — no GUI required.
+      - `render`, `view`, `lint`, `mermaid`, `embed`, `extract`  run inline — no GUI required.
 
 EXAMPLES
     scrybe foo.md                  # open or refresh foo.md in the GUI
@@ -76,6 +77,7 @@ EXAMPLES
     scrybe quit                    # quit (prompts on dirty buffers)
     scrybe quit --force            # quit unconditionally
     scrybe render foo.md | tee foo.html
+    scrybe view foo.md             # read foo.md in the terminal (q quits)
     scrybe lint foo.md --json
     scrybe extract diagram.png > diagram.mmd
 
@@ -130,6 +132,21 @@ enum Command {
         /// message rather than silently ignoring the flag.
         #[arg(long)]
         watch: bool,
+    },
+
+    /// View a Markdown file in the terminal (TUI viewer).
+    ///
+    /// A single-pane, read-only viewer rendered with scrybe-ratatui — the
+    /// same look as the scrybe-tui split viewer, without a second install.
+    /// Keys: j/k or arrows scroll, Ctrl-d/Ctrl-u half-page, Space/PageDown/
+    /// PageUp page, g/G (or Home/End) jump to top/bottom, q or Esc quits.
+    /// Requires an interactive terminal on stdin and stdout; exits 2 when
+    /// run in a pipe. For split-screen viewing and live reload, use the
+    /// `scrybe-tui` binary.
+    View {
+        /// Markdown file to view.
+        #[arg(value_name = "FILE")]
+        file: std::path::PathBuf,
     },
 
     /// Lint a Markdown file and report statistics.
@@ -372,7 +389,7 @@ enum MermaidCmd {
 
 /// Known subcommand names. Anything else in argv[1] is treated as a path to open.
 const SUBCOMMANDS: &[&str] = &[
-    "render", "lint", "mermaid", "tabs", "open", "save", "close", "quit", "read", "find",
+    "render", "view", "lint", "mermaid", "tabs", "open", "save", "close", "quit", "read", "find",
     "section", "edit", "embed", "extract", "version", "help",
 ];
 
@@ -425,6 +442,8 @@ fn main() -> anyhow::Result<()> {
 
             write_output(output, &html)?;
         }
+
+        Command::View { file } => scrybe_cli::viewer::run(&file)?,
 
         Command::Lint { input, json } => {
             let source = std::fs::read_to_string(&input)?;
@@ -1049,4 +1068,33 @@ fn which_scrybe_bin() -> Result<String, String> {
         "scrybe-app not found. Install Scrybe.app to ~/Applications or build with: just app"
             .to_string(),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `scrybe view <FILE>` parses into the View subcommand (#162).
+    #[test]
+    fn view_subcommand_parses() {
+        let cli = Cli::try_parse_from(["scrybe", "view", "notes.md"]).expect("view parses");
+        match cli.command {
+            Command::View { file } => assert_eq!(file, std::path::PathBuf::from("notes.md")),
+            _ => panic!("expected the view subcommand"),
+        }
+    }
+
+    /// `view` requires a file argument — no zero-arg form.
+    #[test]
+    fn view_requires_a_file_argument() {
+        assert!(Cli::try_parse_from(["scrybe", "view"]).is_err());
+    }
+
+    /// `view` is a known subcommand, so the bare-path shortcut must not
+    /// rewrite `scrybe view foo.md` into `scrybe open view foo.md`.
+    #[test]
+    fn inject_open_leaves_view_alone() {
+        let args = vec!["scrybe".to_string(), "view".to_string(), "x.md".to_string()];
+        assert_eq!(inject_open_if_path(args.clone()), args);
+    }
 }

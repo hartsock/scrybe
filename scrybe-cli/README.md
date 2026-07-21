@@ -11,7 +11,7 @@ the outside, Rust on the inside.
 
 ## What it does
 
-Provides a `scrybe` command-line tool with four primary subcommands plus a
+Provides a `scrybe` command-line tool with a set of subcommands plus a
 bare invocation shortcut. The binary is self-contained — no Python runtime
 required at execution time when installed from the wheel.
 
@@ -27,6 +27,7 @@ also the launcher for the Tauri GUI app: `scrybe file.md` locates the
 | Command | Description |
 |---------|-------------|
 | `scrybe render [FILE]` | Render Markdown to HTML (stdin → stdout by default); `--theme`, `--full-html`, `--output` |
+| `scrybe view FILE` | View a Markdown file in the terminal (single-pane TUI): j/k scroll, g/G top/bottom, q quits; requires a TTY (exits 2 in a pipe) |
 | `scrybe lint FILE` | Word count, headings, code blocks, broken links; `--json` for machine output; exits 1 if broken links found |
 | `scrybe mermaid embed PNG SOURCE` | Embed Mermaid source into PNG iTXt chunk |
 | `scrybe mermaid extract PNG` | Print embedded Mermaid source, verifying its SHA-256 by default; exit 2 if tampered, `--unverified` to skip the check (forensics) |

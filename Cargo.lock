@@ -3947,9 +3947,12 @@ version = "0.6.2"
 dependencies = [
  "anyhow",
  "clap",
+ "crossterm",
+ "ratatui",
  "scrybe-core",
  "scrybe-mcp-server",
  "scrybe-mermaid",
+ "scrybe-ratatui",
  "scrybe-render",
  "scrybe-rpc",
  "scrybe-tools",
