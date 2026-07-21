@@ -8,6 +8,19 @@ Dependencies: `scrybe-core` + `ratatui`. No crossterm, no file IO, no event
 loop, no terminal backend — you own the loop; the widget drops into your
 layout.
 
+## Features
+
+The default surface above never grows on its own. Opt-in cargo features:
+
+- **`highlight`** (off by default): syntect syntax highlighting for fenced
+  code blocks — per-line 24-bit color using syntect's `base16-ocean.dark`
+  theme. Adds the `syntect` dependency. Unknown languages (and builds
+  without the feature) keep the plain code-block rendering. No API changes.
+
+```toml
+scrybe-ratatui = { version = "0.6", features = ["highlight"] }
+```
+
 ## Use
 
 ```rust

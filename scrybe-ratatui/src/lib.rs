@@ -26,8 +26,19 @@
 //! # }
 //! ```
 //!
-//! Future rendering concerns (syntect highlighting, terminal-graphics Mermaid)
-//! land here too, so every consumer inherits them (#164, #167).
+//! ## Cargo features
+//!
+//! The default dependency surface is deliberately tiny — `scrybe-core` +
+//! `ratatui`, nothing else (#194) — and stays that way unless you opt in:
+//!
+//! - **`highlight`** (off by default, #164): syntect syntax highlighting for
+//!   fenced code blocks. Adds the `syntect` dependency. Languages syntect
+//!   recognizes render with per-line color; unknown languages fall back to
+//!   the plain rendering, byte-identical to a build without the feature. No
+//!   API changes — [`render`]/[`render_source`] simply gain the behavior.
+//!
+//! Future rendering concerns (terminal-graphics Mermaid, #167) land here too,
+//! so every consumer inherits them.
 //!
 //! **ratatui compatibility:** `MarkdownView: StatefulWidget` ties this crate to
 //! a ratatui major line (currently 0.29); a ratatui bump is a semver event.

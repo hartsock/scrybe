@@ -25,6 +25,9 @@ ratatui.workspace = true
 # Paragraph widget wraps with. Revisit on any ratatui bump (itself a semver
 # event — see lib.rs).
 unicode-width = "=0.2.0"
+# Optional — pulled in only by the `highlight` feature (#164) so the
+# default dependency surface stays scrybe-core + ratatui.
+syntect = { workspace = true, optional = true }
 
 [dev-dependencies]
 # Tests pin `view::wrapped_height` to ratatui's own (unstable, feature-gated)
@@ -32,3 +35,10 @@ unicode-width = "=0.2.0"
 # consumers of the published crate — the library itself must not (and does
 # not) enable unstable ratatui features.
 ratatui = { workspace = true, features = ["unstable-rendered-line-info"] }
+
+[features]
+# Syntect syntax highlighting for fenced code blocks (#164). Off by
+# default to preserve the tiny dependency surface above; enabling it adds
+# syntect (and its transitive deps) and nothing else. Unknown languages
+# still fall back to the plain rendering.
+highlight = ["dep:syntect"]

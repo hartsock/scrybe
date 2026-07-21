@@ -4061,6 +4061,7 @@ version = "0.6.3"
 dependencies = [
  "ratatui",
  "scrybe-core",
+ "syntect",
  "unicode-width 0.2.0",
 ]
 
