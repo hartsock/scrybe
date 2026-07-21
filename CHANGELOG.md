@@ -9,6 +9,25 @@ All notable changes to Scrybe are documented here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/); versions are the workspace
 lock-step version (`[workspace.package] version`).
 
+## [0.6.3] — 2026-07-21
+
+### Added
+- **Opt-in MCP auto-launch** (#225, #226): with `SCRYBE_MCP_AUTOLAUNCH` set, a
+  stateful MCP tool called while the app is closed now launches the installed
+  app, waits for its socket, and retries once — resolving the app by install
+  location (`$SCRYBE_APP` → `/Applications` → `~/Applications`), not `PATH`
+  (a cask/DMG `.app` bundle is never on `PATH`). Off by default; macOS-only.
+
+### Fixed
+- **Cask `--zap`** (#227): now also removes
+  `~/Library/Preferences/io.github.hartsock.scrybe.plist` and
+  `~/Library/HTTPStorages/io.github.hartsock.scrybe`, which previously survived
+  an uninstall.
+
+### Docs
+- README documents the one-time `brew trust hartsock/scrybe` step Homebrew 6+
+  requires before a third-party-tap cask install (#224).
+
 ## [0.6.2] — 2026-07-20
 
 ### Added — install channels (#1, #2, #220)
