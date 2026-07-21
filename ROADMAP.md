@@ -5,12 +5,15 @@ Copyright 2026 Shawn Hartsock and contributors
 
 # Scrybe ROADMAP — v0.4.0 → v1.0.0
 
-**Current:** `v0.4.0` — "Keystone", shipped 2026-07-14 (lock-step
-`[workspace.package]` version, #128/#144). **Active milestone: `v0.5.0` — "Parity".**
+**Current:** `v0.6.2` — shipped 2026-07-20 (the "Contract" release train:
+0.5.0 "Parity" → 0.6.1 "Contract" → 0.6.2 installer channels; adversarial-review
+refactor mandate A1-A4/B1-B5 complete, npm/brew debut, all channels lock-step).
+**Milestone names have drifted from release numbers** — releases outran the
+milestone scopes; treat milestone titles as THEME buckets until renumbered.
 **Target:** `v1.0.0`, delivered across milestones **v0.4.0 → v0.12.0** (the
 renderer epic now **adopts** an upstream crate — see below — so the back half
 compresses; 1.0 arrives sooner than the milestone count implies).
-**Created:** 2026-07-13 · **Last reconciled:** 2026-07-17 · **Maintained per:** [`.claude/skills/repository-roadmap/SKILL.md`](.claude/skills/repository-roadmap/SKILL.md)
+**Created:** 2026-07-13 · **Last reconciled:** 2026-07-20 (post-0.6.2 sweep: closed verified-done #37/#85/#122/#123/#126/#132/#154/#161; successor #222; #146 re-scoped) · **Maintained per:** [`.claude/skills/repository-roadmap/SKILL.md`](.claude/skills/repository-roadmap/SKILL.md)
 
 > **GitHub issues are the state; this document is the map.** Every work item
 > carries a tracking issue number. When this document and GitHub disagree,
