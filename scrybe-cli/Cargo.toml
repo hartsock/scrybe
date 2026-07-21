@@ -25,12 +25,17 @@ scrybe-mermaid.workspace = true
 scrybe-mcp-server.workspace = true
 scrybe-rpc.workspace = true
 scrybe-tools.workspace = true
+# `scrybe view` (#162) renders through the published rendering crate —
+# scrybe-cli must NOT depend on the unpublished scrybe-tui (#194).
+scrybe-ratatui.workspace = true
 anyhow.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
 clap.workspace = true
+ratatui.workspace = true
+crossterm.workspace = true
 
 [lints]
 workspace = true

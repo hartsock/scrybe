@@ -7,6 +7,7 @@
 //! can be unit-tested without spawning a process.
 
 pub mod rpc_client;
+pub mod viewer;
 pub mod wrap;
 
 // Re-export the primary public API for convenience. The linter now lives in
