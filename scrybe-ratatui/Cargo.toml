@@ -20,3 +20,15 @@ categories = ["command-line-interface", "text-processing"]
 [dependencies]
 scrybe-core.workspace = true
 ratatui.workspace = true
+# Pinned to the same version ratatui 0.29 pins, so `view::wrapped_height`
+# measures graphemes with byte-identical width tables to the ones the
+# Paragraph widget wraps with. Revisit on any ratatui bump (itself a semver
+# event — see lib.rs).
+unicode-width = "=0.2.0"
+
+[dev-dependencies]
+# Tests pin `view::wrapped_height` to ratatui's own (unstable, feature-gated)
+# `Paragraph::line_count` as an oracle. Dev-dependencies never reach
+# consumers of the published crate — the library itself must not (and does
+# not) enable unstable ratatui features.
+ratatui = { workspace = true, features = ["unstable-rendered-line-info"] }
