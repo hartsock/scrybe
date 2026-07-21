@@ -17,6 +17,11 @@ pip install scrybe.ai                         # Python toolkit
 cargo install scrybe-cli scrybe-mcp-server    # from source via crates.io
 ```
 
+> **First Homebrew install (Homebrew 6+):** a cask from a third-party tap must be
+> trusted once. If you hit *"Refusing to load cask from untrusted tap"*, run
+> `brew trust hartsock/scrybe` (or the exact command Homebrew prints) and re-run
+> the install.
+
 Windows: `choco install scrybe` (pending community moderation).
 All installers are on [GitHub Releases](https://github.com/hartsock/scrybe/releases):
 dmg · setup.exe/msi · AppImage · deb · rpm.
