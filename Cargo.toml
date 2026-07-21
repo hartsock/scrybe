@@ -21,7 +21,7 @@ members = [
 # `version.workspace = true`, so a release bumps all crates in lock-step
 # from one place. (See RELEASE.md; issue #128.)
 [workspace.package]
-version = "0.6.2"
+version = "0.6.3"
 
 # Workspace-level dependency pins keep all crates in lock-step.
 [workspace.dependencies]
@@ -75,17 +75,17 @@ tauri-build = { version = "2", features = [] }
 # Internal crates — version pinned (=) so cargo publish accepts the
 # tarballs (path-deps without versions are rejected at publish time).
 # Workspace lock-step: every release bumps all members together.
-scrybe-core       = { path = "scrybe-core",       version = "=0.6.2" }
-scrybe-render     = { path = "scrybe-render",     version = "=0.6.2" }
-scrybe-mcp-client = { path = "scrybe-mcp-client", version = "=0.6.2" }
-scrybe-mcp-server = { path = "scrybe-mcp-server", version = "=0.6.2" }
-scrybe-mermaid    = { path = "scrybe-mermaid",    version = "=0.6.2" }
-scrybe-vcs        = { path = "scrybe-vcs",        version = "=0.6.2" }
-scrybe-py         = { path = "scrybe-py",         version = "=0.6.2" }
-scrybe-rpc        = { path = "scrybe-rpc",        version = "=0.6.2" }
-scrybe-tools      = { path = "scrybe-tools",      version = "=0.6.2" }
-scrybe-ratatui    = { path = "scrybe-ratatui",    version = "=0.6.2" }
-scrybe-mermaid-render = { path = "scrybe-mermaid-render", version = "=0.6.2" }
+scrybe-core       = { path = "scrybe-core",       version = "=0.6.3" }
+scrybe-render     = { path = "scrybe-render",     version = "=0.6.3" }
+scrybe-mcp-client = { path = "scrybe-mcp-client", version = "=0.6.3" }
+scrybe-mcp-server = { path = "scrybe-mcp-server", version = "=0.6.3" }
+scrybe-mermaid    = { path = "scrybe-mermaid",    version = "=0.6.3" }
+scrybe-vcs        = { path = "scrybe-vcs",        version = "=0.6.3" }
+scrybe-py         = { path = "scrybe-py",         version = "=0.6.3" }
+scrybe-rpc        = { path = "scrybe-rpc",        version = "=0.6.3" }
+scrybe-tools      = { path = "scrybe-tools",      version = "=0.6.3" }
+scrybe-ratatui    = { path = "scrybe-ratatui",    version = "=0.6.3" }
+scrybe-mermaid-render = { path = "scrybe-mermaid-render", version = "=0.6.3" }
 
 # Adopted pure-Rust Mermaid → SVG renderer (#132 spike-Pass, 2026-07-17).
 # SVG-only by default here; the `png` feature (resvg) is opted into per-crate.
