@@ -32,6 +32,16 @@ just check
 # `just check` misses them (v0.6.0: E0382 shipped to the release run).
 # PIPELINE PARITY: mirrors the ci.yml "Check feature-gated python bindings" step.
 cargo check -p scrybe-mermaid --features python
+# scrybe-ratatui `highlight` feature (#164) — off by default, but workspace
+# runs unify features (scrybe-tui enables it), so `just check`/`just test`
+# only ever see the feature-ON build. Lint + test the crate alone in BOTH
+# states so neither surface ships unseen (v0.6.0 lesson).
+# PIPELINE PARITY: mirrors the ci.yml lint-rust/test-rust
+# "feature-gated scrybe-ratatui highlight" steps.
+cargo clippy -p scrybe-ratatui --all-targets -- -D warnings
+cargo clippy -p scrybe-ratatui --all-targets --features highlight -- -D warnings
+cargo test -p scrybe-ratatui
+cargo test -p scrybe-ratatui --features highlight
 just test
 
 if command -v npm >/dev/null 2>&1; then

@@ -21,7 +21,8 @@ path = "src/main.rs"
 [dependencies]
 scrybe-core.workspace = true
 # The extracted rendering layer (#194) — re-exported from lib.rs for back-compat.
-scrybe-ratatui.workspace = true
+# `highlight` (#164): syntect code-block highlighting for the human TUI.
+scrybe-ratatui = { workspace = true, features = ["highlight"] }
 anyhow.workspace = true
 clap.workspace = true
 ratatui.workspace = true

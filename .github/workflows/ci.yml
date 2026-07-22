@@ -49,6 +49,17 @@ jobs:
         # ships straight to the release run (v0.6.0: E0382 in py_extract).
         # HOOK PARITY: mirrored by .githooks/pre-push.
         run: cargo check -p scrybe-mermaid --features python
+      - name: Clippy feature-gated scrybe-ratatui highlight (both states)
+        # Same rationale as the python-bindings check above: feature-gated
+        # code that the workspace run never sees ships unseen (v0.6.0).
+        # `highlight` (#164) is off by default, but workspace-wide clippy
+        # unifies features (scrybe-tui enables it), so the workspace run only
+        # ever lints the feature-ON build — lint the crate alone in BOTH
+        # states so the default (feature-off) surface stays clean too.
+        # HOOK PARITY: mirrored by .githooks/pre-push.
+        run: |
+          cargo clippy -p scrybe-ratatui --all-targets -- -D warnings
+          cargo clippy -p scrybe-ratatui --all-targets --features highlight -- -D warnings
 
   test-rust:
     name: Rust tests
@@ -65,6 +76,16 @@ jobs:
             librsvg2-dev patchelf libssl-dev pkg-config
       - name: test (excluding scrybe-app)
         run: cargo test --workspace --exclude scrybe-app
+      - name: test feature-gated scrybe-ratatui highlight (both states)
+        # Same rationale as lint-rust's "Check feature-gated python bindings":
+        # feature-gated code the workspace run never sees ships unseen
+        # (v0.6.0). The workspace test unifies features (scrybe-tui enables
+        # `highlight`), so it only exercises the feature-ON build — run the
+        # crate alone in BOTH states so the default surface is tested too.
+        # HOOK PARITY: mirrored by .githooks/pre-push.
+        run: |
+          cargo test -p scrybe-ratatui
+          cargo test -p scrybe-ratatui --features highlight
 
   # Windows coverage. The self-hosted farm above is Linux-only and the Linux
   # test job excludes scrybe-app, so Windows-specific breakage in scrybe-app

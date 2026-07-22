@@ -8,6 +8,10 @@
 //! terminals: headings, emphasis, lists, block quotes, fenced code, links,
 //! images. Mermaid/graphics are a later milestone (terminal graphics protocol),
 //! so a mermaid fence renders as an ordinary code block for now.
+//!
+//! With the optional `highlight` cargo feature (#164), fenced code blocks
+//! whose language syntect recognizes get per-line syntax highlighting; unknown
+//! languages — and every build without the feature — keep the plain rendering.
 
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span, Text};
@@ -84,11 +88,16 @@ impl Renderer {
                         Style::default().fg(Color::DarkGray),
                     )));
                 }
-                for line in content.split('\n') {
-                    self.lines.push(Line::from(vec![
-                        Span::styled("  │ ", Style::default().fg(Color::DarkGray)),
-                        Span::styled(line.to_string(), Style::default().fg(Color::Green)),
-                    ]));
+                match highlighted_code_lines(lang, content) {
+                    Some(lines) => self.lines.extend(lines),
+                    None => {
+                        for line in content.split('\n') {
+                            self.lines.push(Line::from(vec![
+                                Span::styled("  │ ", Style::default().fg(Color::DarkGray)),
+                                Span::styled(line.to_string(), Style::default().fg(Color::Green)),
+                            ]));
+                        }
+                    }
                 }
                 self.blank();
             }
@@ -150,6 +159,98 @@ impl Renderer {
                 self.lines.push(Line::from(spans));
             }
         }
+    }
+}
+
+/// Gutter-prefixed, syntect-styled body lines for a fenced code block, or
+/// `None` to use the plain rendering. `None` whenever the `highlight` feature
+/// is off, the language is unknown to syntect, or highlighting fails — the
+/// caller's fallback is the exact pre-#164 plain path in every one of those
+/// cases, so the default rendering is byte-identical with or without the
+/// feature.
+#[cfg(feature = "highlight")]
+fn highlighted_code_lines(lang: &str, content: &str) -> Option<Vec<Line<'static>>> {
+    highlight::code_lines(lang, content)
+}
+
+#[cfg(not(feature = "highlight"))]
+fn highlighted_code_lines(_lang: &str, _content: &str) -> Option<Vec<Line<'static>>> {
+    None
+}
+
+/// Syntect-backed highlighting for fenced code blocks (`highlight` feature,
+/// #164). Kept behind the feature so the crate's default dependency surface
+/// stays `scrybe-core` + `ratatui` (#194).
+#[cfg(feature = "highlight")]
+mod highlight {
+    use std::sync::LazyLock;
+
+    use ratatui::style::{Color, Modifier, Style};
+    use ratatui::text::{Line, Span};
+    use syntect::easy::HighlightLines;
+    use syntect::highlighting::{FontStyle, Style as SyntectStyle, Theme, ThemeSet};
+    use syntect::parsing::SyntaxSet;
+
+    /// Loaded once per process — parsing the syntax definitions is expensive.
+    /// Mirrors `scrybe-render`'s `OnceLock` pattern (`LazyLock` is the same
+    /// idea with the initializer declared at the static).
+    static SYNTAX_SET: LazyLock<SyntaxSet> = LazyLock::new(SyntaxSet::load_defaults_newlines);
+
+    /// One good default for terminals: syntect's stock `base16-ocean.dark`.
+    /// `scrybe-render`'s HTML pipeline defaults to `InspiredGitHub`, but that
+    /// is a light theme for light pages — ratatui apps overwhelmingly run on
+    /// dark terminals, so the TUI defaults dark. A configurable theme knob is
+    /// deliberately deferred (a future `RenderOptions`), not config now.
+    static THEME: LazyLock<Theme> = LazyLock::new(|| {
+        let mut themes = ThemeSet::load_defaults().themes;
+        themes
+            .remove("base16-ocean.dark")
+            .or_else(|| themes.into_values().next())
+            .expect("syntect ships at least one theme")
+    });
+
+    /// Highlight `content` per-line, returning gutter-prefixed lines matching
+    /// the plain rendering's chrome. `None` if `lang` isn't a syntax syntect
+    /// recognizes (or highlighting errors) — callers fall back to plain.
+    pub(super) fn code_lines(lang: &str, content: &str) -> Option<Vec<Line<'static>>> {
+        let ss = &*SYNTAX_SET;
+        let syntax = ss.find_syntax_by_token(lang)?;
+        let mut h = HighlightLines::new(syntax, &THEME);
+        let mut lines = Vec::new();
+        for line in content.split('\n') {
+            // Newline-inclusive grammars (load_defaults_newlines) need the
+            // trailing `\n` present to match; add it for highlighting only
+            // and strip it back out of the emitted spans.
+            let with_newline = format!("{line}\n");
+            let ranges = h.highlight_line(&with_newline, ss).ok()?;
+            let mut spans = vec![Span::styled("  │ ", Style::default().fg(Color::DarkGray))];
+            for (style, text) in ranges {
+                let text = text.trim_end_matches('\n');
+                if !text.is_empty() {
+                    spans.push(Span::styled(text.to_string(), convert(style)));
+                }
+            }
+            lines.push(Line::from(spans));
+        }
+        Some(lines)
+    }
+
+    /// Map a syntect style onto a ratatui one: 24-bit RGB foreground plus
+    /// BOLD/ITALIC/UNDERLINED modifiers. The background is deliberately
+    /// dropped so the block inherits the surrounding widget's background.
+    fn convert(s: SyntectStyle) -> Style {
+        let mut out =
+            Style::default().fg(Color::Rgb(s.foreground.r, s.foreground.g, s.foreground.b));
+        if s.font_style.contains(FontStyle::BOLD) {
+            out = out.add_modifier(Modifier::BOLD);
+        }
+        if s.font_style.contains(FontStyle::ITALIC) {
+            out = out.add_modifier(Modifier::ITALIC);
+        }
+        if s.font_style.contains(FontStyle::UNDERLINE) {
+            out = out.add_modifier(Modifier::UNDERLINED);
+        }
+        out
     }
 }
 
@@ -332,6 +433,97 @@ mod tests {
         let joined = plain(&render_source("![diagram](image.png \"Architecture\")\n")).join("\n");
         assert!(joined.contains("🖼 diagram"), "got {joined:?}");
         assert!(!joined.contains("Architecture"), "got {joined:?}");
+    }
+
+    /// The plain fallback must be byte-identical to the pre-#164 rendering in
+    /// BOTH feature states: an unknown language always renders the DarkGray
+    /// gutter + one Green span per line (regression guard for the `highlight`
+    /// feature's fallback path).
+    #[test]
+    fn unknown_lang_renders_plain_green() {
+        let t = render_source("```zz-not-a-lang\nplain text here\n```\n");
+        let line = t
+            .lines
+            .iter()
+            .find(|l| {
+                l.spans
+                    .iter()
+                    .any(|s| s.content.contains("plain text here"))
+            })
+            .expect("code line rendered");
+        assert_eq!(line.spans.len(), 2, "got {:?}", line.spans);
+        assert_eq!(line.spans[0].content.as_ref(), "  │ ");
+        assert_eq!(line.spans[0].style.fg, Some(Color::DarkGray));
+        assert_eq!(line.spans[1].content.as_ref(), "plain text here");
+        assert_eq!(line.spans[1].style.fg, Some(Color::Green));
+    }
+
+    /// An empty fence must not panic and still shows its language header.
+    #[test]
+    fn empty_fence_is_safe() {
+        let t = render_source("```rust\n```\n");
+        assert!(plain(&t).join("\n").contains("rust"));
+        let t = render_source("```\n```\n");
+        assert!(!t.lines.is_empty());
+    }
+
+    /// Without the `highlight` feature, a recognized language still uses the
+    /// plain rendering (the feature is opt-in; default surface unchanged).
+    #[cfg(not(feature = "highlight"))]
+    #[test]
+    fn rust_fence_stays_plain_without_highlight_feature() {
+        let t = render_source("```rust\nfn main() {}\n```\n");
+        let line = t
+            .lines
+            .iter()
+            .find(|l| l.spans.iter().any(|s| s.content.contains("fn main")))
+            .expect("code line rendered");
+        assert_eq!(line.spans.len(), 2, "got {:?}", line.spans);
+        assert_eq!(line.spans[1].style.fg, Some(Color::Green));
+    }
+
+    /// With the `highlight` feature, a rust fence gets syntect styling: more
+    /// than one distinct RGB foreground across its spans (issue #164).
+    #[cfg(feature = "highlight")]
+    #[test]
+    fn rust_fence_gets_multiple_highlight_colors() {
+        let t = render_source("```rust\nfn main() { let s = \"hi\"; }\n```\n");
+        let mut colors = std::collections::HashSet::new();
+        for line in &t.lines {
+            for span in &line.spans {
+                // Only the syntect path emits 24-bit RGB foregrounds.
+                if let Some(Color::Rgb(r, g, b)) = span.style.fg {
+                    colors.insert((r, g, b));
+                }
+            }
+        }
+        assert!(
+            colors.len() > 1,
+            "expected >1 distinct RGB foregrounds, got {colors:?}"
+        );
+    }
+
+    /// Highlighted lines keep the same gutter chrome as the plain rendering.
+    #[cfg(feature = "highlight")]
+    #[test]
+    fn highlighted_lines_keep_gutter_prefix() {
+        let t = render_source("```rust\nfn main() {}\n```\n");
+        let lines = plain(&t);
+        assert!(lines.iter().any(|l| l.contains("┌─ rust")), "got {lines:?}");
+        assert!(
+            lines
+                .iter()
+                .any(|l| l.starts_with("  │ ") && l.contains("fn main")),
+            "got {lines:?}"
+        );
+    }
+
+    /// Feature on, empty rust fence: the highlight path handles "" safely.
+    #[cfg(feature = "highlight")]
+    #[test]
+    fn empty_highlighted_fence_is_safe() {
+        let t = render_source("```rust\n```\n");
+        assert!(plain(&t).join("\n").contains("rust"));
     }
 
     #[test]
