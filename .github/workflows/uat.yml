@@ -1,0 +1,120 @@
+# UAT / live-integration tier (#192) — scheduled + release + manual, NEVER
+# per-PR-blocking. Exercises the surfaces the per-PR mock tier cannot: a real
+# scrybe-app on a real socket, a real terminal, and real registry installs.
+#
+# HOOK PARITY: deliberately NOT mirrored in .githooks/pre-push — this is the
+# expensive live tier (scrybe's testing philosophy: unit gates every PR; the
+# live tier runs nightly + at release). The scripts it calls are checked in
+# under tests/uat/ so local runs and CI share one implementation:
+#   bash tests/uat/live_app_uat.sh
+#   bash tests/uat/tui_drive.sh
+name: UAT
+
+on:
+  schedule:
+    - cron: "17 6 * * *" # nightly
+  workflow_dispatch:
+  release:
+    types: [published]
+
+concurrency:
+  group: uat-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  issues: write # the failure-notify step comments on the tracking issue
+
+jobs:
+  live-app:
+    name: Live app — socket + MCP round-trips
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Swatinem/rust-cache@v2
+      - name: System deps (Tauri + headless display)
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq \
+            libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev \
+            librsvg2-dev patchelf libssl-dev pkg-config \
+            xvfb dbus-x11 x11-utils
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: scrybe-app/package-lock.json
+      - name: Build frontend
+        run: cd scrybe-app && npm ci && npm run build
+      - name: Build binaries
+        run: cargo build -p scrybe-app -p scrybe-mcp-server -p scrybe-cli
+      - name: Run live-app UAT
+        run: bash tests/uat/live_app_uat.sh
+      - name: Upload app log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: uat-live-app-logs
+          path: /tmp/tmp.*/app.log
+          if-no-files-found: ignore
+
+  tui-drive:
+    name: TUI — real-terminal drives
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Swatinem/rust-cache@v2
+      - name: System deps
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq tmux
+      - name: Build binaries
+        run: cargo build -p scrybe-tui -p scrybe-cli
+      - name: Run TUI drives
+        run: bash tests/uat/tui_drive.sh
+
+  install-smoke:
+    # Real installs from the public registries — release + manual only (the
+    # registries only have the new version after a release publishes).
+    name: Install smoke (npm + pip)
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: npm install + version
+        run: |
+          npm install -g scrybe-ai
+          scrybe --version
+      - name: pip install + version (fresh venv)
+        run: |
+          python3 -m venv /tmp/uat-venv
+          /tmp/uat-venv/bin/pip install --quiet scrybe.ai
+          /tmp/uat-venv/bin/scrybe --version
+
+  brew-smoke:
+    # Validates the tap cask resolves + its dmg URL/sha are installable.
+    name: Install smoke (Homebrew cask)
+    if: github.event_name != 'schedule'
+    runs-on: macos-latest
+    timeout-minutes: 20
+    steps:
+      - name: brew install from the tap
+        run: |
+          brew install --cask hartsock/scrybe/scrybe
+          ls "/Applications/Scrybe.app" && echo "cask installed"
+
+  notify-failure:
+    name: Notify on scheduled failure
+    needs: [live-app, tui-drive]
+    if: failure() && github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Comment on the UAT tracking issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh issue comment 192 --repo "${{ github.repository }}" \
+            --body "Nightly UAT failed: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
