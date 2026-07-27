@@ -938,11 +938,11 @@ listen<boolean>("scrybe://cli-quit", async event => {
       if (!proceed) return;
     }
   }
-  // Tauri 2: closing the main window quits the app. The exit() plugin is the
-  // strongest hammer but pulls in the process plugin; a window close keeps
-  // dependency surface small and matches the standard menu Quit path.
-  const win = (await import("@tauri-apps/api/window")).getCurrentWindow();
-  await win.close();
+  // #232: window-close left the PROCESS (and the socket) alive in practice —
+  // a half-dead app agents could still drive. Exit deterministically via the
+  // quit_app command (AppHandle::exit — no process plugin) after the dirty
+  // checks above have run.
+  await invoke("quit_app");
 }).catch(console.error);
 
 // ─── Phase 2: read-side commands with reply correlation ────────────────────
