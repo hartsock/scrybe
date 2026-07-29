@@ -42,7 +42,7 @@ to add a `[workspace.package]` lock-step version and reconcile the missing
 |---|---|---|
 | **MCP rebuild / CLI↔MCP parity** (native-modulex) | #108, #46, #121 | Unify the two diverged IPC paths behind one `ToolSpec` registry over `scrybe-rpc`; adopt modulex's data-contract + progressive-disclosure + feature-gated seam. **Keystone.** |
 | **Mermaid-PNG round-trip + agent skills** | #119, #28 | Lossless Mermaid↔PNG (iTXt source+uuid+sha256), LLM-callable skill, inline render of embedded-source PNGs. #119 is the **v0.4 priority**. |
-| **Mermaid renderer** (#37) — **ADOPT, don't build** | #37 + #52–#85 (34) + #132 | **Re-scoped 2026-07-13:** adopt the pure-Rust crate `mermaid-rs-renderer` (MIT) instead of building `mmdc` from scratch. `scrybe-mermaid-render` becomes a thin wrapper (`render → inject `<metadata>` → resvg→PNG`). #52–#75 + PR #99 **close on the #132 spike-Pass**; #76–#85 kept, re-scoped to wrapper bits. See #37 decision + #132. |
+| **Mermaid renderer** (#37) — **ADOPTED** | #37 + #52–#85 (34) + #132 | **Re-scoped 2026-07-13, applied 2026-07-17:** adopted the pure-Rust crate `mermaid-rs-renderer` v0.3.1 (MIT). `scrybe-mermaid-render` is the thin wrapper (``render → inject `<metadata>` → resvg→PNG``). **#52–#76 + PR #99 closed** (provided by the dependency); **#37/#85 closed 2026-07-21** — epic complete. Remaining tail (2026-07-29 scrub): #77/#78 SSIM + #83 snapshots + #84 MPL-2.0 (v0.11), #79 PyO3 (v0.8, absorbs #80–#82). |
 | **Human editor UX** | #15, #111, #109, #120, #44, #45, #32 | fs-watch reload, scroll-sync toggle, tab bulk-close menu, print/PDF, non-Markdown viewing, vim/themes, file-location affordances. |
 | **scrybe-py library** | #6, #7, #8 | `pip install scrybe`: usable library → plugin protocol → reference plugins. Strictly sequential. |
 | **Packaging, distribution & CI guardrails** | #1, #2, #116 | Homebrew, Chocolatey, and a gitleaks + internal-specifics secret-scan CI privacy guardrail. |
@@ -88,6 +88,8 @@ remainder · `explore-spike` = time-boxed decision, not build work.
 > `scrybe-mermaid-render` wrapper shipped (#171/#172) and **#119 is closed**
 > (`scrybe mermaid png`). **#37 pulled forward to v0.5.** The table below is the
 > *original* build plan — historical; trust GitHub for live state.
+> *(Since then: #37/#85 closed 2026-07-21; #80–#82 folded into #79 on
+> 2026-07-29 — the remaining tail is #77/#78/#83/#84 + #79.)*
 >
 > **Prior re-scope (2026-07-13):** milestones below reflect the original build
 > plan; the renderer's Scrybe value-add — source in SVG `<metadata>` / PNG iTXt —
