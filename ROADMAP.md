@@ -5,19 +5,51 @@ Copyright 2026 Shawn Hartsock and contributors
 
 # Scrybe ROADMAP — v0.4.0 → v1.0.0
 
-**Current:** `v0.6.2` — shipped 2026-07-20 (the "Contract" release train:
-0.5.0 "Parity" → 0.6.1 "Contract" → 0.6.2 installer channels; adversarial-review
-refactor mandate A1-A4/B1-B5 complete, npm/brew debut, all channels lock-step).
-**Milestone names have drifted from release numbers** — releases outran the
-milestone scopes; treat milestone titles as THEME buckets until renumbered.
-**Target:** `v1.0.0`, delivered across milestones **v0.4.0 → v0.12.0** (the
-renderer epic now **adopts** an upstream crate — see below — so the back half
-compresses; 1.0 arrives sooner than the milestone count implies).
-**Created:** 2026-07-13 · **Last reconciled:** 2026-07-20 (post-0.6.2 sweep: closed verified-done #37/#85/#122/#123/#126/#132/#154/#161; successor #222; #146 re-scoped) · **Maintained per:** [`.claude/skills/repository-roadmap/SKILL.md`](.claude/skills/repository-roadmap/SKILL.md)
+**Current:** `v0.6.3` — tagged 2026-07-21 (release assets published 2026-07-29);
+5 commits unreleased on main: the `scrybe view` TUI train (#229–#231), the
+socket-quit fix (#233), and the UAT release-gate tier (#234).
+**Milestone drift resolved 2026-07-29:** the re-compaction this file promised
+after #132 has been executed — v0.4.0 and v0.10.0 closed, v0.8.0 retitled
+"Bindings (py)", v0.9.0 retitled "Authoring", all descriptions reconciled to the
+post-adoption reality (see "Re-compaction — 2026-07-29" below).
+**Target:** `v1.0.0`, delivered across milestones **v0.5.0 → v0.12.0** (the
+renderer epic closed early by adoption — #37/#85 closed 2026-07-21 — so 1.0
+arrives sooner than the milestone count implies).
+**Created:** 2026-07-13 · **Last reconciled:** 2026-07-29 (post-adoption backlog
+scrub + re-compaction) · **Maintained per:** [`.claude/skills/repository-roadmap/SKILL.md`](.claude/skills/repository-roadmap/SKILL.md)
 
 > **GitHub issues are the state; this document is the map.** Every work item
 > carries a tracking issue number. When this document and GitHub disagree,
 > **GitHub wins** — reconcile before trusting the prose.
+
+## Re-compaction — 2026-07-29
+
+A full-workflow backlog scrub audited all 34 open issues, every milestone, and
+the release statements against the adopted-renderer reality (`mermaid-rs-renderer`
+v0.3.1 via the `scrybe-mermaid-render` wrapper). Outcome — GitHub already
+reflects all of it:
+
+- **Renderer epic complete:** #37 (umbrella) and #85 (publish + pin) closed
+  2026-07-21. A 5-issue spot-check of the #52–#76 "provided by the dependency"
+  mass-close confirmed every sampled capability exists (one nuance: #64's
+  `<metadata>` provenance is provided by the *wrapper*, by design).
+- **Genuinely remaining renderer tail:** #84 (third-party license notice —
+  **rides the next release**; corrected 2026-07-29: resvg/usvg relicensed to
+  `Apache-2.0 OR MIT`, so the actual MPL-2.0 surface is the **desktop bundles
+  only** — `cssparser`/`selectors`/`dtoa-short`/`option-ext` via the tauri/dirs
+  chains; every wheel and crates.io package is MPL-free), #83 (golden-snapshot
+  upgrade gate — the unshipped half of #85's pin+gate), #77/#78 (SSIM fidelity,
+  moved v0.9 → v0.11), #79 (PyO3 surface, **absorbs #80–#82**, moved v0.10 → v0.8).
+- **Milestones:** v0.4.0 closed (#32 → v0.5.0); v0.10.0 closed (merged into
+  v0.8.0); v0.8.0 retitled **"Bindings (py)"**; v0.9.0 retitled **"Authoring"**
+  (#147 joins #31); descriptions of v0.5–v0.7 and v0.11 rewritten — no milestone
+  still describes the dead from-scratch "Renderer Phase N" plan.
+- **Issue bodies re-scoped by comment** (2026-07-29): #1 #2 #6 #7 #8 #28 #32
+  #77 #78 #83 #84 #124 #146 #166 #188.
+- **New issues the adoption owed us:** #235 (preview renders Mermaid via CDN
+  `mermaid@11`/KaTeX — offline-broken, diverges from native export; unify or
+  vendor), #236 (dependabot/upstream watch for the 0.3.1 pin), #237 (Mermaid
+  render smoke in the UAT release gate).
 
 ## Reconciliation — 2026-07-17
 
@@ -78,14 +110,15 @@ its own Mermaid source, losslessly, inside the image file.**
 | Surface | How | Tracking |
 |---|---|---|
 | **PNG → iTXt** | `scrybe-mermaid` embeds Mermaid source + UUID + SHA256 in a PNG `iTXt` chunk; `extract` recovers it. A rendered PNG is fully round-trippable — edit the diagram later without hunting for the `.md`. | shipped codec + #119 #121 #126 #28 |
-| **SVG → `<metadata>`** | the re-scoped renderer wrapper injects source + SHA256 into an SVG `<metadata>` element (namespace `https://scrybe.ai/ns/mermaid`) **after** the adopted engine renders — so provenance is Scrybe's, not the dependency's. | #37 (v0.6) |
+| **SVG → `<metadata>`** | the re-scoped renderer wrapper injects source + SHA256 into an SVG `<metadata>` element (namespace `https://scrybe.ai/ns/mermaid`) **after** the adopted engine renders — so provenance is Scrybe's, not the dependency's. | #37 (closed 2026-07-21; wrapper #171/#172 shipped) |
 | **Agent surface** | `mermaid_to_png` (#121), `markdown_extract_and_render` (#126, `## Fig NN:` → named PNGs), inline render of embedded-source PNGs (#28), `mermaid-png` skill (#119). | v0.4–v0.5 |
 
 This is the **ContentAddressable** philosophy applied to diagrams: the artifact
 carries its own proof of what it is. **Adopting a third-party renderer does not
 touch it** — we post-process the renderer's output to add the metadata. The
-provenance layer is delivered across v0.4 (#119), v0.5 (#28 / #121 / #126), and
-the v0.6 SVG wrapper (#37), and is a hard requirement of every renderer option.
+provenance layer was delivered across v0.4 (#119), v0.5 (#28 / #121 / #126), and
+the SVG wrapper (#37, pulled forward to v0.5 and closed 2026-07-21), and is a
+hard requirement of every renderer option.
 
 ---
 
@@ -112,15 +145,17 @@ only (unresolved GitHub "license: other"). Disposition **APPLIED**:
   layout, SVG emit, PNG-via-resvg) and draft **PR #99**.
 - **Kept, re-scoped to wrapper bits:** #77–#85 — conformance-track the *dependency*
   (pin + golden snapshots + optional SSIM), PyO3 over the wrapper, and the
-  pin-and-gate / release tail.
+  pin-and-gate / release tail. *(Since then: #85 closed 2026-07-21; #80–#82
+  folded into #79 on 2026-07-29 — the surviving tail is #77/#78/#83/#84 + #79.)*
 
 **Shipped:** the `scrybe-mermaid-render` wrapper — `render_svg` + Scrybe
 `<metadata>` provenance (#171) and `render_png` via resvg (#172) — and **#119 is
 closed**: `scrybe mermaid png` renders Mermaid → PNG with the source + UUID +
 SHA-256 embedded in iTXt, driven end-to-end (`png` → `extract` → `verify`).
-Because the renderer is now a *validated dependency* (not a 34-issue build),
-**#37 is pulled forward from v0.6 → v0.5**; it closes with its last child (#85,
-publish the wrapper). The v0.6–v0.11 renderer long pole is gone.
+Because the renderer became a *validated dependency* (not a 34-issue build),
+**#37 was pulled forward from v0.6 → v0.5 and closed with its last child #85 on
+2026-07-21.** The v0.6–v0.11 renderer long pole is gone; the surviving tail is
+#77/#78/#83/#84 (v0.11) and #79 (v0.8, absorbs #80–#82).
 
 [#132]: https://github.com/hartsock/scrybe/issues/132
 
@@ -133,22 +168,23 @@ This roadmap *sequences* existing plans; it does not replace them.
 - [`docs/design/cli-rpc.md`](docs/design/cli-rpc.md) — the CLI↔GUI socket protocol the rebuild unifies onto.
 - [`docs/design/vision-conversational-editing.md`](docs/design/vision-conversational-editing.md) — the conversational-editing north star; feeds **#147** (addressability) → **#148** (grounding) → **#149** (patches), built on **#122**.
 - [`docs/adr/0001-python-outside-rust-inside.md`](docs/adr/0001-python-outside-rust-inside.md) — the distribution philosophy.
-- **#132** — the crate-adoption spike + re-scope for the renderer epic (**#37**). Supersedes the from-scratch `PLAN.md` on the `feat/scrybe-mermaid-render` branch. Today only `scrybe-mermaid` (the iTXt PNG codec) ships; `scrybe-swarm` / `scrybe-panels` are in `experimental/`, not shipped members.
+- **#132** — the crate-adoption spike + re-scope for the renderer epic (**#37**). Supersedes the from-scratch `PLAN.md` (archived at the `archive/scrybe-mermaid-render-plan` tag; the branch is deleted). Both `scrybe-mermaid` (iTXt codec) and `scrybe-mermaid-render` (adopted-renderer wrapper) are shipped workspace members; `scrybe-swarm` / `scrybe-panels` remain in `experimental/`, not compiled.
 
 ## Epics at a glance
 
 | Epic | Milestones | Tracking |
 |---|---|---|
 | MCP rebuild / CLI↔MCP parity (native-modulex) | v0.4–v0.7 | **#122** (epic), #108 #46 #121 #28 #15 #123 #124 #125 #126 #127 |
-| **Conversational editing** (object IDs → grounding → patches) | v0.8–v0.10 | **#147** #148 #149 + [vision](docs/design/vision-conversational-editing.md); builds on **#122** |
+| **Conversational editing** (object IDs → grounding → patches) | v0.9+ | **#147** (v0.9) → #148 → #149 + [vision](docs/design/vision-conversational-editing.md); builds on **#122** |
 | **Mermaid provenance** (source in PNG/SVG metadata) ★ | v0.4–v0.6 | #119 #28 #121 #126 + #37 wrapper |
-| Mermaid renderer — **ADOPTED** `mermaid-rs-renderer` v0.3.1 (#132 ✓) | v0.5 (pulled fwd) | **#37**; wrapper #171/#172 shipped, #119 closed; #52–#76 closed, #77–#85 re-scoped |
+| Mermaid renderer — **ADOPTED** `mermaid-rs-renderer` v0.3.1 (#132 ✓) | v0.5 (pulled fwd) | **#37 + #85 CLOSED 2026-07-21 — epic complete.** Tail: #77/#78 SSIM + #83 snapshots + #84 MPL (v0.11), #79 PyO3 (v0.8, absorbs #80–#82) |
+| **Adoption follow-through** (preview unification, upstream watch, UAT smoke) | v0.7, v0.11 | #235 #237 (v0.7) · #236 (v0.11) |
 | Human editor UX | v0.4–v0.7 | #32 #15 #109 #45 #111 #120 #44 |
-| scrybe-py library | v0.7–v0.8 | #6 #7 #8 |
-| Packaging / distribution / CI guardrails | v0.4, v0.11 | #116 #1 #2 #128 |
+| scrybe-py library | v0.7–v0.8 | #6 #7 #8 #79 |
+| Packaging / distribution / CI guardrails | v0.4, v0.11 | #116 #1 #2 #128 #236 |
 | New feature plugins (v0) | v0.9, v0.12 | #31 #33 #34 |
 | Strategic explores (resolved) | v0.4 | #114 #115 → both **build-ours** |
-| **scrybe-tui viewer** (terminal lens on the AST) | v0.6 | **#154** (delivered viewer #155–#158; harness #159); follow-ups #162 #163 #164 (v0.6) · #165 #166 #167 (backlog) |
+| **scrybe-tui viewer** (terminal lens on the AST) | v0.6 | **#154** (delivered viewer #155–#158; harness #159); #162–#164 shipped (on main, unreleased) · #165 closed-superseded · #166 #167 backlog |
 | **Install / upgrade** — `scrybe upgrade` + npm shim | v0.5, v0.11 | **#146** (Part A shipped #151) |
 
 ### Conversational editing arc (post-#122)
@@ -157,7 +193,8 @@ The MCP rebuild (**#122**) is the platform; the next arc turns Scrybe into a
 *conversational editor* — the document is the shared state and conversation
 generates structured edits, rather than a chatbot bolted onto an editor. See
 [`docs/design/vision-conversational-editing.md`](docs/design/vision-conversational-editing.md).
-Three epics, in dependency order, ~v0.8–v0.10:
+Three epics, in dependency order, starting v0.9 (#147 is milestoned
+"v0.9.0 — Authoring"; #148/#149 stay unmilestoned until #147 lands):
 
 1. **#147 — object addressability.** Stable IDs over the AST (derived for named
    structure + a `.scrybe/` sidecar for fine anchors; embedded anchors opt-in).
@@ -168,12 +205,12 @@ Three epics, in dependency order, ~v0.8–v0.10:
 3. **#149 — patch-oriented editing.** Edits arrive as reviewable, revisioned patches
    (on `ContentAddressable` + `scrybe-vcs`), not blind overwrites.
 
-Detailed per-milestone placement lands as these are scheduled; they slot after the
-v0.4–v0.7 rebuild.
+Detailed per-milestone placement lands as these are scheduled; #148/#149 slot in
+as #147 delivers.
 
 ---
 
-## v0.4.0 — "Keystone" (SHIPPED 2026-07-14)
+## v0.4.0 — "Keystone" (SHIPPED 2026-07-14 · milestone closed 2026-07-29, #32 → v0.5)
 
 **Theme:** Make the MCP actually work and ship the priority Mermaid-PNG
 provenance skill (★), behind privacy guardrails, with the strategic spikes
@@ -229,6 +266,8 @@ independent editor quality-of-life increments.
 > `#136` (word-wrap) and the bugs `#140`/`#141`, which were **pulled forward and
 > shipped in 0.4.0** (#138/#143). Trust the milestone, not this table:
 > `gh issue list --repo hartsock/scrybe --milestone "v0.5.0 — Parity" --state all`.
+> **2026-07-29:** #32 (content-root-relative copy remainder) moved here from the
+> now-closed v0.4.0 milestone.
 
 ---
 
@@ -261,92 +300,91 @@ disclosure, and two editor increments.
 
 ---
 
-## v0.7.0 — "Geometry → Wrapper completion"
+## v0.7.0 — "Geometry → Parity & unification"
 
-**Theme:** Complete the renderer wrapper (PNG + the remaining parity closes), the
-CLI↔MCP parity gate, non-Markdown viewing, and the scrybe-py foundation.
+**Theme:** The CLI↔MCP parity gate, preview/export renderer unification, and the
+scrybe-py foundation remainder. (The former "close #61–#67" row was executed
+2026-07-18 — provided by the adopted crate; #44 non-Markdown viewing is closed.)
 
 | Item | Issue | Blocked by | Notes |
 |---|---|---|---|
-| CLI↔MCP parity gate (CI) | #125 | #123, #124 | Test: CLI subcommand set == MCP `tools/list` set; fill remaining CLI gaps. |
-| Close build issues (provided by dependency) | #61–#67 | #132 | Sequence layout + SVG assembly are the crate's job — close on spike-Pass. |
-| Non-Markdown / git-diff viewing | #44 | — | All text types + git diffs, preview off; agents can open non-md. |
-| scrybe-py Phase 1 | #6 | — | Usable library (Document, render, AST, content_digest); thin PyO3. |
+| CLI↔MCP parity gate (CI) | #125 | — | Test: CLI subcommand set == MCP `tools/list` set; fill remaining CLI gaps. (#123 closed; #124 rides v0.6.) |
+| Preview render unification / offline-proofing | #235 | — | Preview = CDN `mermaid@11` + KaTeX today; unify on `scrybe-mermaid-render` or vendor the JS. Must render offline. |
+| UAT renderer smoke | #237 | — | `mermaid png` / `render` / MCP `mermaid_to_png` provenance smoke in the release gate. |
+| scrybe-py Phase 1 remainder | #6 | — | `Document.ast()` + pytest wired into CI; the rest of Phase 1 shipped 0.6.x. |
 
 **Exit:**
 - CI fails on any CLI↔MCP parity drift; every MCP tool has a CLI subcommand. (#125)
-- #61–#67 closed as provided-by-dependency (spike-Pass). (#132)
-- `import scrybe` gives Document/render/AST/content_digest. (#6)
+- The app preview renders diagrams + math with networking disabled; the UAT gate covers the render paths. (#235, #237)
+- `import scrybe` exposes `Document.ast()`; pytest runs in CI. (#6)
 
 ---
 
-## v0.8.0 — "Bindings & plugins (py)"
+## v0.8.0 — "Bindings (py)" (retitled from "Sugiyama")
 
-**Theme:** The scrybe-py plugin protocol and reference plugins. (Former renderer
-Phase 3 layout issues #68–#73 close here as provided-by-dependency, spike-Pass.)
+**Theme:** The scrybe-py plugin protocol, reference plugins, and the Mermaid PyO3
+surface. (The former "Renderer Phase 3" layout issues #68–#73 were closed
+2026-07-18 — Sugiyama layout is internal to the adopted crate.)
 
 | Item | Issue | Blocked by | Notes |
 |---|---|---|---|
-| Close build issues (provided by dependency) | #68–#73 | #132 | Sugiyama layout is internal to the adopted crate — close on spike-Pass. |
-| scrybe-py Phase 2 plugin protocol | #7 | #6 | stdin/stdout tier + class-based tier. |
-| scrybe-py Phase 3 reference plugins | #8 | #7 | word-count, docx (align with `scrybe-plugin-docx`). |
+| scrybe-py Phase 2 plugin protocol (Tier 2) | #7 | #6 | Tier 1 stdin/stdout shipped on main; the class-based `scrybe.plugin` tier remains. |
+| scrybe-py Phase 3 reference plugins | #8 | #7 | word-count (class-based); the docx plugin already shipped — README section + mmdc→native decision remain. |
+| Mermaid PyO3 surface | #79 | — | Absorbs #80–#82 (2026-07-29): `render_mermaid_svg`/`render_mermaid_png` inside scrybe-py, provenance included. |
 
 **Exit:**
-- #68–#73 closed as provided-by-dependency. (#132)
-- Plugin protocol + two reference plugins run end-to-end. (#7, #8)
+- Plugin protocol Tier 2 + the class-based word-count plugin run end-to-end. (#7, #8)
+- `scrybe.render_mermaid_svg`/`render_mermaid_png` work from Python with provenance, tests green. (#79)
 
 ---
 
-## v0.9.0 — "Raster & authoring"
+## v0.9.0 — "Authoring" (retitled from "Raster")
 
-**Theme:** The renderer wrapper's **PNG** path (kept, re-scoped) + the
-highest-value new plugin.
+**Theme:** Inline AI authoring + the conversational-editing foundation. (The
+former "Renderer Phase 4" rows are gone: #74/#75 closed 2026-07-18; #76 closed —
+`render_png` shipped in the wrapper; #77/#78 SSIM moved to v0.11 Conformance.)
 
 | Item | Issue | Blocked by | Notes |
 |---|---|---|---|
-| Close build issues (provided by dependency) | #74, #75 | #132 | Flowchart SVG assembly is the crate's job — close on spike-Pass. |
-| Renderer PNG via resvg (kept, re-scoped) | #76–#78 | #37 | Rasterize the **metadata-bearing** SVG via Scrybe's resvg/tiny-skia; SSIM sanity vs `mmdc`. |
 | scrybe-quill inline AI authoring | #31 | — | Cmd+K, BYO OpenAI-compatible/Ollama, offline, no telemetry. |
+| Object addressability | #147 | — | Stable IDs over the AST; foundation of the conversational arc (#148/#149 follow as it lands). |
 
 **Exit:**
-- Wrapper rasterizes provenance-bearing SVG → PNG; SSIM sanity holds. ★ (#76–#78)
-- #74/#75 closed as provided-by-dependency. (#132)
 - Quill drafts/edits text against a local endpoint with no telemetry. (#31)
+- Stable object IDs resolvable over the MCP surface; #148 unblocked. (#147)
 
 ---
 
-## v0.10.0 — "Python surface"
+## v0.10.0 — CLOSED 2026-07-29 (merged into v0.8.0)
 
-**Theme:** The renderer wrapper's **PyO3** surface (kept, re-scoped) — wrap the
-adopted crate for Python.
-
-| Item | Issue | Blocked by | Notes |
-|---|---|---|---|
-| `render_to_svg` PyO3 (wraps the crate) | #79 | #37 | Python calls through the wrapper (adopted crate + provenance). |
-| `render_to_png` PyO3 (gated) | #80 | #76 | |
-| Package surface | #81 | #79 | `__init__` / `py.typed` / `pyproject`. |
-| pytest suite | #82 | #81 | `_RUST_AVAILABLE` guard. |
-
-**Exit:** `pip install scrybe-mermaid-render` renders SVG (and PNG when the feature is on) from Python via the adopted crate + provenance, tests green. ★ (#82)
+The PyO3 quartet #79–#82 folded into a single re-scoped **#79**, which lives in
+**"v0.8.0 — Bindings (py)"** — the Python surface ships inside `scrybe-py`, not
+as a standalone `scrybe-mermaid-render` wheel (the release matrix publishes no
+such wheel). The "Renderer Phase 5" this milestone was named for was superseded
+by the adoption (#132).
 
 ---
 
 ## v0.11.0 — "Conformance & distribution"
 
-**Theme:** Renderer **conformance = pin & gate the dependency** (kept,
-re-scoped) + near-1.0 native install channels.
+**Theme:** Pin-and-gate the **adopted** renderer + near-1.0 native install
+channels. (#85 — publish + pin — and the #37 umbrella closed 2026-07-21; what
+remains is the drift-detection half of the gate and two publish secrets.)
 
 | Item | Issue | Blocked by | Notes |
 |---|---|---|---|
-| Pin + golden-SVG snapshots vs upstream | #83 | #78 | **Re-scoped:** snapshot the adopted crate's output; track `mmdc`-parity per type. |
-| MPL-2.0 licensing (resvg/usvg + deps) | #84 | #76 | LICENSE-MPL-2.0 for the resvg/usvg distribution surface. |
-| Dependency upgrade gate + release (closes #37) | #85 | #82, #83, #84 | **Re-scoped:** pin `mermaid-rs-renderer` version + upgrade gate; publish the wrapper; tick #37 checklist. |
-| Homebrew formula | #1 | — | macOS install. |
-| Chocolatey package | #2 | — | Windows install. |
+| Golden-snapshot upgrade gate | #83 | — | Snapshot the adopted crate's SVG per diagram type; a version bump ⇒ reviewable diff. The unshipped half of #85's "pin + gate". |
+| SSIM fidelity grader | #77 | — | Report-only SSIM vs reference renders (moved from v0.9). |
+| SSIM threshold enforcement | #78 | #77 | Calibrate the threshold to real scores; consider merging into #77. |
+| MPL-2.0 distribution notice | #84 | — | **Pulled forward — rides the next release.** Corrected 2026-07-29: resvg/usvg are now `Apache-2.0 OR MIT`; the MPL-2.0 code in shipped artifacts is `cssparser`/`selectors`/`dtoa-short`/`option-ext`, statically linked into the **desktop bundles** (wheels/crates are MPL-free). |
+| Dependabot / upstream watch | #236 | — | The trigger for #83's gate; no dependabot.yml exists at all today. |
+| Homebrew tap push | #1 | — | Provision `TAP_GITHUB_TOKEN` + one Apple Silicon smoke; the cask channel is already built. |
+| Chocolatey push | #2 | — | Provision `CHOCO_API_KEY`; the nupkg is already staged each release. |
 
 **Exit:**
-- `scrybe-mermaid-render` wrapper published; dependency pinned + upgrade-gated; **#37 umbrella closes**. (#85)
-- `brew install` and `choco install` work against release artifacts. (#1, #2)
+- A `mermaid-rs-renderer` bump produces a reviewable (and, below threshold, failing) snapshot/SSIM diff. (#83, #77/#78, #236)
+- MPL-2.0 text + third-party notice ship in the desktop app bundles (the only artifacts carrying MPL code) — done at the next release, not held to v0.11. (#84)
+- `brew install --cask` resolves the current release; `choco install scrybe` is live on the community feed. (#1, #2)
 
 ---
 
@@ -362,12 +400,13 @@ editing mission, riding the now-mature plugin protocol.
 
 **Exit:** both plugins load via the plugin protocol and demo their v0 capability; 1.0 hardening has room. (#33, #34)
 
-> **Adoption dividend:** because #52–#75 close as the dependency provides them
-> (rather than being built one milestone at a time), the renderer stops gating
-> v0.8–v0.11. Once #132 passes, expect the tail (scrybe-py, quill, packaging,
-> plugins) to pull forward and **1.0 to arrive ahead of the v0.12 milestone
-> count.** That re-compaction is a follow-up roadmap PR executed *after* #132,
-> so the doc and GitHub milestones stay in lock-step until then.
+> **Adoption dividend — realized.** #52–#76 closed 2026-07-17/18 (provided by
+> the dependency; spot-verified 2026-07-29), #37/#85 closed 2026-07-21, and the
+> promised re-compaction executed 2026-07-29: v0.4.0/v0.10.0 closed, v0.8.0 →
+> "Bindings (py)", v0.9.0 → "Authoring", the SSIM/conformance tail consolidated
+> in v0.11. 1.0 now gates on parity (#125), the Python surface (#6–#8, #79),
+> authoring (#31, #147–#149), and conformance/distribution (v0.11) — not on
+> renderer construction.
 
 ---
 
@@ -394,8 +433,8 @@ Per `CLAUDE.md`'s zero-warning policy and `AGENTS.md`'s autonomy rules:
   groups.** Facet stubs are reserved in v0.7 but the tool groups themselves are
   post-1.0 unless a concrete need lands an issue.
 - **Windows named-pipe transport.** `cli_rpc.rs` is unix-only; `Transport` is the
-  clean seam. Re-enters when a Windows user files the need (tracked as a follow-up
-  to #108).
+  clean seam. **Re-entered:** tracked as **#222** (successor filed in the
+  post-0.6.2 sweep); unmilestoned until a Windows user pushes it up.
 - **Deprecating Scrybe in favor of Ferrite / markdown-tui-explorer.** Both
   #114/#115 spikes resolved **build-ours** — neither exposes an MCP/IPC surface
   to host Scrybe's live-buffer co-editing thesis. Re-enters only on a new spike.
