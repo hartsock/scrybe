@@ -22,11 +22,15 @@ cargo install scrybe-cli scrybe-mcp-server    # from source via crates.io
 > `brew trust hartsock/scrybe` (or the exact command Homebrew prints) and re-run
 > the install.
 
-Windows: `choco install scrybe` (pending community moderation).
+Windows: `choco install scrybe` (package staged each release; community-feed
+publication pending — see [#2](https://github.com/hartsock/scrybe/issues/2)).
 All installers are on [GitHub Releases](https://github.com/hartsock/scrybe/releases):
 dmg · setup.exe/msi · AppImage · deb · rpm.
 
-All packages version in lock-step: one release, one version, every channel.
+All packages version in lock-step: one release, one version. The brew tap and
+choco feed are catching up to automation — they may lag a release until
+[#1](https://github.com/hartsock/scrybe/issues/1) /
+[#2](https://github.com/hartsock/scrybe/issues/2) land their publish secrets.
 
 ## Quick start
 
