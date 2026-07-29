@@ -60,3 +60,9 @@ Direction: [`ROADMAP.md`](ROADMAP.md) — GitHub issues are the ground truth.
 
 Apache-2.0. Use it, build on it, ship it. Your documents stay plain text and
 belong to you.
+
+The desktop app bundles statically link a few MPL-2.0 crates from its GUI
+stack; the required notices ship with the app and live in
+[`THIRD-PARTY-LICENSES.md`](THIRD-PARTY-LICENSES.md) +
+[`LICENSE-MPL-2.0`](LICENSE-MPL-2.0). The Python wheels and crates.io
+packages contain no MPL code.
