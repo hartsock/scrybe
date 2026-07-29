@@ -25,12 +25,18 @@ not make the toolchain more impressive.
 | `scrybe-mcp-server/` | Rust | Inbound MCP server — a thin stdio shim over `scrybe-tools`. Tools: open/read/section/edit/save/find/render/embed/extract/lint/list_tabs/mermaid_to_png/export_figures/logs/reload/quit/close_tab + UI-parity tools state/set_theme/view_mode/set_vim/export |
 | `scrybe-mcp-client/` | Rust | Outbound MCP — registers external agent servers |
 | `scrybe-mermaid/` | Rust | PNG iTXt codec (Mermaid source embedded in PNG metadata) |
-| `scrybe-panels/` | Rust | Bake-off orchestrator + SQLite calibration log |
+| `scrybe-mermaid-render/` | Rust | Thin wrapper over the adopted `mermaid-rs-renderer`: SVG `<metadata>` provenance (source + sha256) + PNG via resvg |
+| `scrybe-rpc/` | Rust | CLI↔GUI socket protocol (typed JSON-RPC over `~/.scrybe/sock`) |
+| `scrybe-ratatui/` | Rust | Markdown → ratatui widget rendering (wrap-aware scrolling; opt-in syntect `highlight` feature) |
+| `scrybe-tui/` | Rust | Terminal Markdown viewer (`scrybe view` drives it) |
+| `experimental/scrybe-panels/` | Rust | Bake-off orchestrator + SQLite calibration log (parked; not a compiled workspace member) |
 | `scrybe-vcs/` | Rust | git2 wrapper, multi-remote VCS |
-| `scrybe-swarm/` | Rust | NATS swarm-chat sidebar + activity feed |
-| `scrybe-cli/` | Rust (maturin bin) | Headless CLI: render / lint / mermaid / open |
+| `experimental/scrybe-swarm/` | Rust | NATS swarm-chat sidebar + activity feed (parked; not a compiled workspace member) |
+| `scrybe-cli/` | Rust (maturin bin) | Headless CLI: render / lint / mermaid / open / view |
 | `scrybe-py/` | Rust + PyO3 | Python library bindings |
 | `scrybe-app/` | Rust + TypeScript | Tauri 2 desktop app |
+| `scrybe-plugin-docx/` | Python | Word export plugin (PyPI; not a cargo workspace member) |
+| `scrybe-meta/` | Python | `scrybe.ai` PyPI metapackage (pure Python; not a cargo workspace member) |
 
 ## Build Commands
 
