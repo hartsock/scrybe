@@ -27,6 +27,7 @@ const {
   documentStem,
   mermaidPngFilename,
   mermaidTitleFromSource,
+  normalizeSvgUrlReferences,
   rasterPixelSize,
 } = await import(moduleUrl);
 
@@ -63,6 +64,50 @@ test("Mermaid frontmatter title parsing handles common YAML scalars", () => {
     "Editor's view",
   );
   assert.equal(mermaidTitleFromSource("graph TD; A-->B"), "");
+});
+
+test("Mermaid inline titles cover unclassed live-SVG title renderers", () => {
+  assert.equal(
+    mermaidTitleFromSource("sequenceDiagram\n  title Request lifecycle\n  A->>B: go"),
+    "Request lifecycle",
+  );
+  assert.equal(
+    mermaidTitleFromSource("journey\n  title My working day\n  section Morning"),
+    "My working day",
+  );
+  assert.equal(
+    mermaidTitleFromSource("timeline\n  title History of tools\n  2026 : Scrybe"),
+    "History of tools",
+  );
+  assert.equal(
+    mermaidTitleFromSource("C4Context\n  title System landscape\n  Person(user, User)"),
+    "System landscape",
+  );
+  assert.equal(mermaidTitleFromSource("journey\n  title: 5: User"), "");
+});
+
+test("computed same-document SVG marker URLs stay self-contained", () => {
+  const ids = new Set(["arrowhead", "clip"]);
+  assert.equal(
+    normalizeSvgUrlReferences(
+      'url("tauri://localhost/#arrowhead") none',
+      "tauri://localhost/",
+      ids,
+    ),
+    "url(#arrowhead) none",
+  );
+  assert.equal(
+    normalizeSvgUrlReferences(
+      "url(https://example.com/markers.svg#arrowhead)",
+      "tauri://localhost/",
+      ids,
+    ),
+    "url(https://example.com/markers.svg#arrowhead)",
+  );
+  assert.equal(
+    normalizeSvgUrlReferences("url(#clip)", "tauri://localhost/", ids),
+    "url(#clip)",
+  );
 });
 
 test("Retina raster sizing preserves CSS layout and rejects unsafe canvases", () => {

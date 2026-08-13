@@ -41,19 +41,73 @@ export function documentStem(filename: string): string {
   return withoutExtension || "document";
 }
 
-/** Read Mermaid's user-visible `title:` value from optional YAML frontmatter. */
+/** Read Mermaid's user-visible title from frontmatter or known inline syntax. */
 export function mermaidTitleFromSource(source: string): string {
   const lines = source.replace(/^\uFEFF/, "").split(/\r?\n/);
-  if (lines[0]?.trim() !== "---") return "";
+  let diagramStart = 0;
 
-  for (let index = 1; index < lines.length; index += 1) {
-    const line = lines[index];
-    if (line.trim() === "---") break;
-    const match = line.match(/^\s*title\s*:\s*(.*?)\s*$/i);
-    if (!match) continue;
-    return parseYamlTitle(match[1]);
+  if (lines[0]?.trim() === "---") {
+    for (let index = 1; index < lines.length; index += 1) {
+      const line = lines[index];
+      if (line.trim() === "---") {
+        diagramStart = index + 1;
+        break;
+      }
+      const match = line.match(/^\s*title\s*:\s*(.*?)\s*$/i);
+      if (match) return parseYamlTitle(match[1]);
+    }
+  }
+
+  // Mermaid renders inline titles for these diagram families as unclassed
+  // root-level SVG text. Restrict parsing to those grammars so a flowchart
+  // node or journey task named "title" cannot become the filename.
+  const firstDiagramLine = lines.slice(diagramStart)
+    .findIndex(line => line.trim() && !line.trim().startsWith("%%"));
+  if (firstDiagramLine < 0) return "";
+  const headerIndex = diagramStart + firstDiagramLine;
+  const header = lines[headerIndex].trim();
+  if (!/^(?:sequenceDiagram|journey|timeline|C4(?:Context|Container|Component|Dynamic|Deployment)?)(?:\s|$)/i
+    .test(header)) return "";
+
+  for (let index = headerIndex + 1; index < lines.length; index += 1) {
+    const match = lines[index].match(/^\s*title[ \t]+(.+?)\s*$/i);
+    if (match) return parseInlineTitle(match[1]);
   }
   return "";
+}
+
+/** Normalize same-document computed SVG URLs back to portable fragment URLs. */
+export function normalizeSvgUrlReferences(
+  value: string,
+  documentUrl: string,
+  internalIds: ReadonlySet<string>,
+): string {
+  let page: URL;
+  try {
+    page = new URL(documentUrl);
+    page.hash = "";
+  } catch {
+    return value;
+  }
+
+  return value.replace(
+    /url\(\s*(["']?)([^"')]+)\1\s*\)/gi,
+    (match, _quote: string, rawUrl: string) => {
+      if (rawUrl.startsWith("#") || rawUrl.startsWith("data:")) return match;
+      try {
+        const resolved = new URL(rawUrl, documentUrl);
+        const fragment = decodeURIComponent(resolved.hash.slice(1));
+        resolved.hash = "";
+        if (fragment && resolved.href === page.href && internalIds.has(fragment)) {
+          return `url(#${fragment})`;
+        }
+      } catch {
+        // Leave malformed or truly external references for validation to
+        // reject with the normal self-contained-resource error.
+      }
+      return match;
+    },
+  );
 }
 
 /** Calculate the Retina canvas dimensions while enforcing browser-safe caps. */
@@ -198,6 +252,15 @@ function parseYamlTitle(rawValue: string): string {
   return value.replace(/\s+#.*$/, "").trim();
 }
 
+function parseInlineTitle(rawValue: string): string {
+  const value = rawValue.trim();
+  if ((value.startsWith('"') && value.endsWith('"')) ||
+      (value.startsWith("'") && value.endsWith("'"))) {
+    return parseYamlTitle(value);
+  }
+  return value;
+}
+
 /** Keep the complete filename under common 255-byte component limits. */
 function fitFilename(filename: string, maxBytes: number): string {
   const extension = filename.toLowerCase().endsWith(".png") ? ".png" : "";
@@ -217,6 +280,8 @@ function utf8Length(value: string): number {
 function inlineComputedStyles(original: Element, clone: Element): void {
   const originals = [original, ...Array.from(original.querySelectorAll("*"))];
   const clones = [clone, ...Array.from(clone.querySelectorAll("*"))];
+  const internalIds = new Set(originals.map(element => element.id).filter(Boolean));
+  const documentUrl = document.baseURI;
 
   originals.forEach((element, index) => {
     const target = clones[index] as HTMLElement | SVGElement | undefined;
@@ -225,7 +290,13 @@ function inlineComputedStyles(original: Element, clone: Element): void {
     for (let i = 0; i < computed.length; i += 1) {
       const property = computed.item(i);
       const value = computed.getPropertyValue(property);
-      if (value) target.style.setProperty(property, value, computed.getPropertyPriority(property));
+      if (value) {
+        target.style.setProperty(
+          property,
+          normalizeSvgUrlReferences(value, documentUrl, internalIds),
+          computed.getPropertyPriority(property),
+        );
+      }
     }
   });
 }

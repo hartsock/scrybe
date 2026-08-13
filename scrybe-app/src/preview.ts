@@ -57,7 +57,10 @@ export class PreviewPane {
     const wrapper = target.closest<HTMLElement>(".mermaid");
     if (!wrapper || !this.container.contains(wrapper)) return;
     const svg = wrapper.querySelector<SVGSVGElement>("svg");
-    if (!svg || !this.renderedDocument) return;
+    // The Mermaid wrapper spans the preview width. Preserve the normal
+    // context menu when the pointer is in its blank margins rather than on
+    // the rendered image itself.
+    if (!svg || !svg.contains(target) || !this.renderedDocument) return;
 
     event.preventDefault();
     const figures = Array.from(this.container.querySelectorAll<HTMLElement>(".mermaid"));
@@ -95,21 +98,24 @@ export class PreviewPane {
       "text.radarTitle",
       "g.chart-title > text",
       "g.main > g.title > text",
+      "g.wardley-map > text.wardley-title",
+      "text.cynefinTitle",
+      "g.ishikawa-head-group > text.ishikawa-head-label",
     ].join(", "))?.textContent?.trim();
     if (visibleTitle) return visibleTitle;
 
-    const frontmatterTitle = mermaidTitleFromSource(wrapper.dataset.scrybeSource ?? "");
-    const normalizedFrontmatterTitle = normalizeTitle(frontmatterTitle);
-    if (normalizedFrontmatterTitle) {
-      // Sequence, journey, and timeline render the visible title as an
-      // unclassed text node. Match the actual live text before falling back
-      // to the source scalar so the rendered view remains authoritative.
-      const renderedMatch = Array.from(svg.querySelectorAll<SVGTextElement>("text"))
-        .find(text => normalizeTitle(text.textContent ?? "") === normalizedFrontmatterTitle)
+    const sourceTitle = mermaidTitleFromSource(wrapper.dataset.scrybeSource ?? "");
+    const normalizedSourceTitle = normalizeTitle(sourceTitle);
+    if (normalizedSourceTitle) {
+      // Sequence, journey, timeline, and C4 render an inline title as an
+      // unclassed direct SVG child. Match that exact live node so what the
+      // user sees remains authoritative, without considering ordinary labels.
+      const renderedMatch = Array.from(svg.querySelectorAll<SVGTextElement>(":scope > text"))
+        .find(text => normalizeTitle(text.textContent ?? "") === normalizedSourceTitle)
         ?.textContent?.trim();
       if (renderedMatch) return renderedMatch;
     }
-    if (frontmatterTitle) return frontmatterTitle;
+    if (sourceTitle) return sourceTitle;
 
     const svgTitle = Array.from(svg.children)
       .find(child => child.localName === "title")
