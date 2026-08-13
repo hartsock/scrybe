@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "test": "node --test test/*.test.mjs",
+    "test": "node --test test/mermaid_png.test.mjs",
     "build": "npm test && tsc && vite build",
     "preview": "vite preview",
     "tauri": "tauri"

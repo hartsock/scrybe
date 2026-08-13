@@ -59,8 +59,8 @@ test("Mermaid frontmatter title parsing handles common YAML scalars", () => {
     "A: rendered view",
   );
   assert.equal(
-    mermaidTitleFromSource("---\ntitle: 'Shawn''s view'\n---\ngraph TD"),
-    "Shawn's view",
+    mermaidTitleFromSource("---\ntitle: 'Editor''s view'\n---\ngraph TD"),
+    "Editor's view",
   );
   assert.equal(mermaidTitleFromSource("graph TD; A-->B"), "");
 });
