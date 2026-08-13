@@ -72,6 +72,10 @@ test("Mermaid inline titles cover unclassed live-SVG title renderers", () => {
     "Request lifecycle",
   );
   assert.equal(
+    mermaidTitleFromSource("sequenceDiagram\n  title: Request lifecycle\n  A->>B: go"),
+    "Request lifecycle",
+  );
+  assert.equal(
     mermaidTitleFromSource("journey\n  title My working day\n  section Morning"),
     "My working day",
   );

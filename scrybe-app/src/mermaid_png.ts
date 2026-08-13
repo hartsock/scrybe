@@ -68,9 +68,12 @@ export function mermaidTitleFromSource(source: string): string {
   const header = lines[headerIndex].trim();
   if (!/^(?:sequenceDiagram|journey|timeline|C4(?:Context|Container|Component|Dynamic|Deployment)?)(?:\s|$)/i
     .test(header)) return "";
+  const sequenceDiagram = /^sequenceDiagram(?:\s|$)/i.test(header);
 
   for (let index = headerIndex + 1; index < lines.length; index += 1) {
-    const match = lines[index].match(/^\s*title[ \t]+(.+?)\s*$/i);
+    const match = lines[index].match(sequenceDiagram
+      ? /^\s*title(?:[ \t]+|\s*:\s*)(.+?)\s*$/i
+      : /^\s*title[ \t]+(.+?)\s*$/i);
     if (match) return parseInlineTitle(match[1]);
   }
   return "";
