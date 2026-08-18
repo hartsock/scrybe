@@ -24,12 +24,25 @@ const HR_WIDTH: usize = 60;
 /// `…`) so one wide cell can't blow a table out to an unreadable width.
 const MAX_COL_WIDTH: usize = 30;
 
+/// A hyperlink's location in rendered [`Text`], for click-to-open (#244).
+///
+/// `line` indexes into the `Text` returned alongside this span. Resolution
+/// is by matching `text` against the flattened plain-text content of that
+/// line rather than by tracking exact grapheme offsets through rendering —
+/// robust to any prefix a block quote or list marker prepends, at the cost
+/// of not disambiguating two links with byte-for-byte identical visible
+/// text on the same logical line (resolved left-to-right in that case; see
+/// [`crate::view::resolve_link_click`]).
+#[derive(Debug, Clone, PartialEq)]
+pub struct LinkSpan {
+    pub line: usize,
+    pub text: String,
+    pub href: String,
+}
+
 /// Render a parsed document to owned, styled terminal text.
 pub fn render(ast: &Ast) -> Text<'static> {
-    let mut r = Renderer::default();
-    r.blocks(&ast.nodes);
-    r.trim_trailing_blanks();
-    Text::from(r.lines)
+    render_with_links(ast).0
 }
 
 /// Convenience: parse Markdown source and render it in one call.
@@ -37,25 +50,74 @@ pub fn render_source(source: &str) -> Text<'static> {
     render(&Ast::parse(source))
 }
 
+/// Like [`render`], plus the location of every hyperlink in the output —
+/// for a host that wants click-to-open (#244). A separate entry point
+/// rather than changing [`render`]'s return type, so every existing caller
+/// that just wants `Text` is unaffected.
+pub fn render_with_links(ast: &Ast) -> (Text<'static>, Vec<LinkSpan>) {
+    let mut r = Renderer::default();
+    r.blocks(&ast.nodes);
+    r.trim_trailing_blanks();
+    (Text::from(r.lines), r.links)
+}
+
+/// [`render_with_links`], parsing `source` first.
+pub fn render_source_with_links(source: &str) -> (Text<'static>, Vec<LinkSpan>) {
+    render_with_links(&Ast::parse(source))
+}
+
 #[derive(Default)]
 struct Renderer {
     lines: Vec<Line<'static>>,
+    links: Vec<LinkSpan>,
 }
 
 impl Renderer {
+    /// Render a run of sibling block nodes — coalescing consecutive *inline*
+    /// siblings (bare `Text`/`Link`/etc., as pulldown-cmark emits for a tight
+    /// list item's content instead of wrapping it in a `Paragraph`) into one
+    /// `inline_lines` call, so e.g. `- see [docs](url) for more` renders as
+    /// one line instead of three (`Text`, `Link`, `Text` each becoming their
+    /// own line via the block-level fallback). A real block node still ends
+    /// the run and renders on its own via [`Self::block`].
     fn blocks(&mut self, nodes: &[Node]) {
-        for node in nodes {
-            self.block(node);
+        let mut i = 0;
+        while i < nodes.len() {
+            if is_inline(&nodes[i]) {
+                let start = i;
+                while i < nodes.len() && is_inline(&nodes[i]) {
+                    i += 1;
+                }
+                let (lines, links) = inline_lines(&nodes[start..i], Style::default());
+                self.absorb(lines, links);
+            } else {
+                self.block(&nodes[i]);
+                i += 1;
+            }
         }
     }
 
     /// Render a slice of block nodes into a fresh line buffer — used by block
     /// quotes and list items so they can prefix/indent each produced line.
-    fn sub(nodes: &[Node]) -> Vec<Line<'static>> {
+    /// Returned link lines are relative to the returned `Vec<Line>`; the
+    /// caller must offset `.line` by however many lines it already has
+    /// before splicing these in.
+    fn sub(nodes: &[Node]) -> (Vec<Line<'static>>, Vec<LinkSpan>) {
         let mut r = Renderer::default();
         r.blocks(nodes);
         r.trim_trailing_blanks();
-        r.lines
+        (r.lines, r.links)
+    }
+
+    /// Extend `self.lines`/`self.links` with block-relative output, offsetting
+    /// each link's line index by how many lines `self.lines` already holds.
+    fn absorb(&mut self, lines: Vec<Line<'static>>, links: Vec<LinkSpan>) {
+        let base = self.lines.len();
+        self.lines.extend(lines);
+        self.links.extend(links.into_iter().map(|mut l| {
+            l.line += base;
+            l
+        }));
     }
 
     fn blank(&mut self) {
@@ -75,15 +137,16 @@ impl Renderer {
                     format!("{} ", "#".repeat(*level as usize)),
                     Style::default().fg(Color::DarkGray),
                 );
-                let mut lines = inline_lines(children, heading_style(*level));
+                let (mut lines, links) = inline_lines(children, heading_style(*level));
                 if let Some(first) = lines.first_mut() {
                     first.spans.insert(0, marker);
                 }
-                self.lines.extend(lines);
+                self.absorb(lines, links);
                 self.blank();
             }
             Node::Paragraph { children } => {
-                self.lines.extend(inline_lines(children, Style::default()));
+                let (lines, links) = inline_lines(children, Style::default());
+                self.absorb(lines, links);
                 self.blank();
             }
             Node::FencedCode { lang, content } => {
@@ -107,11 +170,17 @@ impl Renderer {
                 self.blank();
             }
             Node::BlockQuote { children } => {
-                for line in Renderer::sub(children) {
+                let (sub_lines, sub_links) = Renderer::sub(children);
+                let base = self.lines.len();
+                for line in sub_lines {
                     let mut spans = vec![Span::styled("┃ ", Style::default().fg(Color::Cyan))];
                     spans.extend(line.spans);
                     self.lines.push(Line::from(spans));
                 }
+                self.links.extend(sub_links.into_iter().map(|mut l| {
+                    l.line += base;
+                    l
+                }));
                 self.blank();
             }
             Node::List { ordered, items } => {
@@ -137,8 +206,8 @@ impl Renderer {
             | Node::Link { .. }
             | Node::Image { .. }
             | Node::Html(_) => {
-                self.lines
-                    .extend(inline_lines(std::slice::from_ref(node), Style::default()));
+                let (lines, links) = inline_lines(std::slice::from_ref(node), Style::default());
+                self.absorb(lines, links);
             }
             // Structural leaves handled by their parents.
             Node::SoftBreak
@@ -167,7 +236,7 @@ impl Renderer {
                     cells
                         .iter()
                         .map(|c| match c {
-                            Node::TableCell { children } => flatten_cell(children),
+                            Node::TableCell { children } => flatten_inline(children),
                             _ => String::new(),
                         })
                         .collect(),
@@ -251,7 +320,9 @@ impl Renderer {
                 Node::ListItem { children } => children,
                 other => std::slice::from_ref(other),
             };
-            for (j, line) in Renderer::sub(children).into_iter().enumerate() {
+            let (sub_lines, sub_links) = Renderer::sub(children);
+            let base = self.lines.len();
+            for (j, line) in sub_lines.into_iter().enumerate() {
                 let prefix = if j == 0 {
                     marker.clone()
                 } else {
@@ -261,6 +332,10 @@ impl Renderer {
                 spans.extend(line.spans);
                 self.lines.push(Line::from(spans));
             }
+            self.links.extend(sub_links.into_iter().map(|mut l| {
+                l.line += base;
+                l
+            }));
         }
     }
 }
@@ -359,16 +434,16 @@ mod highlight {
 
 /// Flatten a table cell's inline children to plain text, collapsing soft/hard
 /// breaks to spaces (GFM table cells are single-line content).
-fn flatten_cell(nodes: &[Node]) -> String {
+fn flatten_inline(nodes: &[Node]) -> String {
     let mut out = String::new();
     for node in nodes {
         match node {
             Node::Text(s) | Node::InlineCode { content: s } => out.push_str(s),
             Node::Emphasis { children } | Node::Strong { children } => {
-                out.push_str(&flatten_cell(children));
+                out.push_str(&flatten_inline(children));
             }
             Node::Link { children, href, .. } => {
-                out.push_str(&flatten_cell(children));
+                out.push_str(&flatten_inline(children));
                 if !href.is_empty() {
                     out.push_str(&format!(" ({href})"));
                 }
@@ -417,6 +492,22 @@ fn pad(s: &str, width: usize, align: TableAlignment) -> String {
     }
 }
 
+/// Whether `node` is inline content that can occur bare as a direct child of
+/// a list item / block quote (pulldown-cmark's tight-list form, no wrapping
+/// `Paragraph`) rather than only inside one — see [`Renderer::blocks`].
+fn is_inline(node: &Node) -> bool {
+    matches!(
+        node,
+        Node::Text(_)
+            | Node::Emphasis { .. }
+            | Node::Strong { .. }
+            | Node::InlineCode { .. }
+            | Node::Link { .. }
+            | Node::Image { .. }
+            | Node::Html(_)
+    )
+}
+
 fn heading_style(level: u8) -> Style {
     let base = Style::default().add_modifier(Modifier::BOLD);
     match level {
@@ -429,12 +520,13 @@ fn heading_style(level: u8) -> Style {
 
 /// Render inline children into one or more lines, splitting on hard breaks and
 /// collapsing soft breaks to spaces (ratatui wraps long lines at draw time).
-fn inline_lines(nodes: &[Node], base: Style) -> Vec<Line<'static>> {
+fn inline_lines(nodes: &[Node], base: Style) -> (Vec<Line<'static>>, Vec<LinkSpan>) {
     let mut lines: Vec<Line<'static>> = Vec::new();
     let mut cur: Vec<Span<'static>> = Vec::new();
-    inline_into(nodes, base, &mut cur, &mut lines);
+    let mut links: Vec<LinkSpan> = Vec::new();
+    inline_into(nodes, base, &mut cur, &mut lines, &mut links);
     lines.push(Line::from(cur));
-    lines
+    (lines, links)
 }
 
 fn inline_into(
@@ -442,28 +534,51 @@ fn inline_into(
     base: Style,
     cur: &mut Vec<Span<'static>>,
     lines: &mut Vec<Line<'static>>,
+    links: &mut Vec<LinkSpan>,
 ) {
     for node in nodes {
         match node {
             Node::Text(s) => cur.push(Span::styled(s.clone(), base)),
-            Node::Emphasis { children } => {
-                inline_into(children, base.add_modifier(Modifier::ITALIC), cur, lines)
-            }
-            Node::Strong { children } => {
-                inline_into(children, base.add_modifier(Modifier::BOLD), cur, lines)
-            }
+            Node::Emphasis { children } => inline_into(
+                children,
+                base.add_modifier(Modifier::ITALIC),
+                cur,
+                lines,
+                links,
+            ),
+            Node::Strong { children } => inline_into(
+                children,
+                base.add_modifier(Modifier::BOLD),
+                cur,
+                lines,
+                links,
+            ),
             Node::InlineCode { content } => cur.push(Span::styled(
                 content.clone(),
                 Style::default().fg(Color::LightYellow),
             )),
             Node::Link { children, href, .. } => {
+                // CommonMark links don't nest, and record against the line
+                // in progress (`lines.len()`, since completed lines are
+                // already flushed there) — a hard break inside link text
+                // (vanishingly rare) would split the recorded text across
+                // lines and the click resolver just wouldn't match it.
+                let link_line = lines.len();
+                let link_text = flatten_inline(children);
                 let link = base.fg(Color::Blue).add_modifier(Modifier::UNDERLINED);
-                inline_into(children, link, cur, lines);
+                inline_into(children, link, cur, lines, links);
                 if !href.is_empty() {
                     cur.push(Span::styled(
                         format!(" ({href})"),
                         Style::default().fg(Color::DarkGray),
                     ));
+                }
+                if !link_text.is_empty() {
+                    links.push(LinkSpan {
+                        line: link_line,
+                        text: link_text,
+                        href: href.clone(),
+                    });
                 }
             }
             Node::Image { alt, title, .. } => {
@@ -572,6 +687,80 @@ mod tests {
         let joined = lines.join("\n");
         assert!(joined.contains("docs"));
         assert!(joined.contains("https://example.com"));
+    }
+
+    // -------------------------------------------------------------------
+    // LinkSpan tracking (#244 — click-to-open)
+    // -------------------------------------------------------------------
+
+    #[test]
+    fn render_with_links_finds_a_paragraph_link() {
+        let (_t, links) = render_source_with_links("[docs](https://example.com)\n");
+        assert_eq!(links.len(), 1);
+        assert_eq!(links[0].line, 0);
+        assert_eq!(links[0].text, "docs");
+        assert_eq!(links[0].href, "https://example.com");
+    }
+
+    #[test]
+    fn render_with_links_no_links_is_empty() {
+        let (_t, links) = render_source_with_links("just plain text\n");
+        assert!(links.is_empty());
+    }
+
+    #[test]
+    fn render_with_links_finds_link_after_a_heading() {
+        // Line index must be absolute in the final Text, not relative to the
+        // paragraph's own inline_lines call.
+        let (t, links) = render_source_with_links("# Title\n\n[docs](https://example.com)\n");
+        assert_eq!(links.len(), 1);
+        let line_text: String = t.lines[links[0].line]
+            .spans
+            .iter()
+            .map(|s| s.content.as_ref())
+            .collect();
+        assert!(
+            line_text.contains("docs"),
+            "link.line must point at the actual link line, got {line_text:?}"
+        );
+    }
+
+    #[test]
+    fn render_with_links_finds_link_inside_a_list_item() {
+        let (t, links) = render_source_with_links("- see [docs](https://example.com) for more\n");
+        assert_eq!(links.len(), 1);
+        assert_eq!(links[0].href, "https://example.com");
+        let line_text: String = t.lines[links[0].line]
+            .spans
+            .iter()
+            .map(|s| s.content.as_ref())
+            .collect();
+        assert!(line_text.starts_with(" • "), "got {line_text:?}");
+        assert!(line_text.contains("docs"));
+    }
+
+    #[test]
+    fn render_with_links_finds_link_inside_a_blockquote() {
+        let (t, links) = render_source_with_links("> see [docs](https://example.com)\n");
+        assert_eq!(links.len(), 1);
+        let line_text: String = t.lines[links[0].line]
+            .spans
+            .iter()
+            .map(|s| s.content.as_ref())
+            .collect();
+        assert!(line_text.starts_with("┃ "), "got {line_text:?}");
+    }
+
+    #[test]
+    fn render_with_links_two_links_same_line_both_found_in_order() {
+        let (_t, links) = render_source_with_links(
+            "[first](https://a.example) and [second](https://b.example)\n",
+        );
+        assert_eq!(links.len(), 2);
+        assert_eq!(links[0].text, "first");
+        assert_eq!(links[0].href, "https://a.example");
+        assert_eq!(links[1].text, "second");
+        assert_eq!(links[1].href, "https://b.example");
     }
 
     #[test]
@@ -751,6 +940,39 @@ mod tests {
         // Header only, no body rows — must not panic.
         let t = render_source("| Key |\n|-----|\n");
         assert!(!t.lines.is_empty());
+    }
+
+    // -------------------------------------------------------------------
+    // Tight-list inline coalescing — discovered writing #244's tests: a
+    // tight list item's content arrives as bare Text/Link/Text siblings
+    // (pulldown-cmark doesn't wrap it in Paragraph), and the old per-node
+    // block-level fallback rendered each sibling on its own line.
+    // -------------------------------------------------------------------
+
+    #[test]
+    fn tight_list_item_with_a_link_stays_on_one_line() {
+        let lines = plain(&render_source(
+            "- see [docs](https://example.com) for more\n",
+        ));
+        let item_lines: Vec<&String> = lines.iter().filter(|l| !l.is_empty()).collect();
+        assert_eq!(
+            item_lines.len(),
+            1,
+            "tight list item must render as one line, got {lines:?}"
+        );
+        assert_eq!(
+            item_lines[0].as_str(),
+            " • see docs (https://example.com) for more"
+        );
+    }
+
+    #[test]
+    fn tight_list_item_with_bold_and_link_stays_on_one_line() {
+        let lines = plain(&render_source(
+            "- **bold** then [a link](https://x.example) done\n",
+        ));
+        let item_lines: Vec<&String> = lines.iter().filter(|l| !l.is_empty()).collect();
+        assert_eq!(item_lines.len(), 1, "got {lines:?}");
     }
 
     #[test]
