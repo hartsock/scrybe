@@ -27,3 +27,7 @@ anyhow.workspace = true
 clap.workspace = true
 ratatui.workspace = true
 crossterm.workspace = true
+# Cross-platform "open this URL in the default browser" (#244) — `open` on
+# macOS, `xdg-open` on Linux, `cmd /c start` on Windows, chosen for you.
+# Already resolved to 5.3.4 in the workspace lockfile via scrybe-app's deps.
+open = "5.3"

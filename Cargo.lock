@@ -4112,6 +4112,7 @@ dependencies = [
  "anyhow",
  "clap",
  "crossterm",
+ "open",
  "ratatui",
  "scrybe-core",
  "scrybe-ratatui",

@@ -5,6 +5,7 @@
 
 use anyhow::Result;
 use clap::Parser;
+use crossterm::event::{DisableMouseCapture, EnableMouseCapture};
 use crossterm::execute;
 use crossterm::terminal::{
     disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
@@ -47,7 +48,10 @@ fn main() -> Result<()> {
 
 fn setup_terminal() -> Result<Terminal<CrosstermBackend<std::io::Stdout>>> {
     enable_raw_mode()?;
-    execute!(stdout(), EnterAlternateScreen)?;
+    // Mouse capture is what makes click-to-open-link (#244) possible — without
+    // it the terminal handles clicks itself (e.g. text selection) and crossterm
+    // never sees a MouseEvent.
+    execute!(stdout(), EnterAlternateScreen, EnableMouseCapture)?;
     // Restore the terminal even if a later panic unwinds past our teardown.
     let prev = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
@@ -59,5 +63,5 @@ fn setup_terminal() -> Result<Terminal<CrosstermBackend<std::io::Stdout>>> {
 
 fn restore_terminal() {
     let _ = disable_raw_mode();
-    let _ = execute!(stdout(), LeaveAlternateScreen);
+    let _ = execute!(stdout(), LeaveAlternateScreen, DisableMouseCapture);
 }
