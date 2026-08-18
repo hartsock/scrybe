@@ -21,9 +21,11 @@ pub use wrap::wrap_full_html;
 // Version info
 // ---------------------------------------------------------------------------
 
-/// Returns the crate version string.
+/// Returns the crate version string, including the Git commit the binary
+/// was built from (and a `-dirty` marker if the worktree had local changes),
+/// e.g. `0.6.3 (a1b2c3d4e5f6)`.
 pub fn version_string() -> &'static str {
-    env!("CARGO_PKG_VERSION")
+    scrybe_core::build_info::VERSION_WITH_COMMIT
 }
 
 /// Returns a list of active Cargo feature flags (as a static string).

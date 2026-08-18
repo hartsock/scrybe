@@ -98,10 +98,11 @@ fn render_markdown(source: String) -> String {
     render_html(&doc, Theme::Default).html
 }
 
-/// Return the application version string baked in at compile time.
+/// Return the application version string baked in at compile time,
+/// including the Git commit (and `-dirty` marker) it was built from.
 #[tauri::command]
 fn get_version() -> &'static str {
-    env!("CARGO_PKG_VERSION")
+    scrybe_core::build_info::VERSION_WITH_COMMIT
 }
 
 /// Terminate the app process (#232). The socket `quit` path used to close the
