@@ -1,9 +1,18 @@
 # Hook parity counterpart: .githooks/pre-push
 name: CI
 
-# Runs on self-hosted ARC runners for fast feedback on lint and tests.
-# Release builds (multi-platform installers) run on GitHub-hosted runners
-# via release.yml — those need Apple Silicon which isn't in the local farm.
+# GitHub-hosted runners (2026-08-18): the repo went public, so hosted-runner
+# minutes are free — moved off the self-hosted scrybe-k3s farm rather than
+# keep operating it (it was also cleaned up for disk space). Release builds
+# (multi-platform installers) already ran on GitHub-hosted runners via
+# release.yml. The crates.io publish job in release.yml still runs on
+# scrybe-k3s (it needs the Vault-injected CARGO_REGISTRY_TOKEN there) —
+# unrelated to this file, revisit separately if that runner goes away too.
+#
+# This also means macOS gets real per-PR coverage for the first time: before,
+# the self-hosted farm was Linux-only, so macOS testing was manual — on the
+# operator's own laptops — rather than CI. test-rust-macos below closes that
+# gap the same way test-rust-windows already did for Windows.
 
 on:
   push:
@@ -13,17 +22,11 @@ on:
 
 env:
   RUST_BACKTRACE: 1
-  # The scrybe-k3s runner image bakes CARGO_HOME=/usr/local/cargo (root-owned)
-  # which the runner user cannot write to, so cargo fails with "Permission
-  # denied (os error 13)" on the first index/cache write. Override to a
-  # tmpfs-backed path the runner user owns. Until this is fixed in the
-  # runner image, every cargo-touching job must inherit this env.
-  CARGO_HOME: /tmp/.cargo
 
 jobs:
   lint-rust:
     name: Rust lint
-    runs-on: scrybe-k3s
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -63,7 +66,7 @@ jobs:
 
   test-rust:
     name: Rust tests
-    runs-on: scrybe-k3s
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -87,7 +90,7 @@ jobs:
           cargo test -p scrybe-ratatui
           cargo test -p scrybe-ratatui --features highlight
 
-  # Windows coverage. The self-hosted farm above is Linux-only and the Linux
+  # Windows coverage. The Linux jobs above run on ubuntu-latest, and the Linux
   # test job excludes scrybe-app, so Windows-specific breakage in scrybe-app
   # (e.g. a test hardcoding a Unix "/tmp" path) went completely uncaught by CI
   # and only surfaced in the external nightly Windows check (#135). This job
@@ -116,9 +119,33 @@ jobs:
       - name: test (full workspace, incl. scrybe-app — mirrors the nightly Windows check)
         run: cargo test --workspace
 
+  # macOS coverage (2026-08-18) — same rationale as test-rust-windows above,
+  # for the platform that previously only got tested via the operator's own
+  # laptop pre-push hook rather than on every PR. No system-deps step needed:
+  # Tauri on macOS uses the WKWebView system framework, not webkit2gtk.
+  test-rust-macos:
+    name: Rust tests (macOS)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: scrybe-app/package-lock.json
+      - name: Build frontend (Tauri build script needs scrybe-app/dist)
+        working-directory: scrybe-app
+        run: |
+          npm ci
+          npm run build
+      - name: test (full workspace, incl. scrybe-app)
+        run: cargo test --workspace
+
   lint-ts:
     name: TypeScript lint
-    runs-on: scrybe-k3s
+    runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: scrybe-app
@@ -134,7 +161,7 @@ jobs:
 
   test-npm:
     name: npm shim tests
-    runs-on: scrybe-k3s
+    runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: npm
