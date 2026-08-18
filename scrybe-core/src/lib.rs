@@ -14,6 +14,7 @@
 //! - [`DocumentChange`] / [`DocumentHistory`] / [`TextRange`] — change tracking
 
 pub mod ast;
+pub mod build_info;
 pub mod change;
 pub mod content;
 pub mod document;
