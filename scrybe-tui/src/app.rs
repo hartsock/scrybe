@@ -7,9 +7,13 @@
 //! embeds [`crate::view`] directly; this is Scrybe's own thin host.
 
 use anyhow::{Context, Result};
-use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
+use crossterm::event::{
+    self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseButton, MouseEvent,
+    MouseEventKind,
+};
 use ratatui::backend::Backend;
-use ratatui::layout::{Constraint, Direction, Layout};
+use ratatui::buffer::Buffer;
+use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, Borders, Paragraph};
@@ -19,6 +23,7 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 
 use crate::render;
+use crate::render::LinkSpan;
 use crate::view::{MarkdownView, MarkdownViewState};
 use scrybe_core::ast::Ast;
 
@@ -29,18 +34,21 @@ struct Pane {
     path: Option<PathBuf>,
     mtime: Option<SystemTime>,
     text: Text<'static>,
+    /// Hyperlink locations in `text`, for click-to-open (#244).
+    links: Vec<LinkSpan>,
     state: MarkdownViewState,
 }
 
 impl Pane {
     fn from_source(source: &str, title: impl Into<String>) -> Self {
-        let text = render::render(&Ast::parse(source));
+        let (text, links) = render::render_with_links(&Ast::parse(source));
         let state = MarkdownViewState::new(text.lines.len());
         Self {
             title: title.into(),
             path: None,
             mtime: None,
             text,
+            links,
             state,
         }
     }
@@ -56,7 +64,9 @@ impl Pane {
 
     /// Re-render from `source`, preserving the scroll position where possible.
     fn set_source(&mut self, source: &str) {
-        self.text = render::render(&Ast::parse(source));
+        let (text, links) = render::render_with_links(&Ast::parse(source));
+        self.text = text;
+        self.links = links;
         self.state.set_line_count(self.text.lines.len());
     }
 
@@ -85,6 +95,11 @@ fn file_mtime(path: &Path) -> Option<SystemTime> {
     fs::metadata(path).and_then(|m| m.modified()).ok()
 }
 
+/// Whether terminal cell `(col, row)` falls within `area`.
+fn rect_contains(area: Rect, col: u16, row: u16) -> bool {
+    col >= area.x && col < area.x + area.width && row >= area.y && row < area.y + area.height
+}
+
 /// The viewer: one or more document panes, split horizontally or vertically,
 /// with a focused pane that receives scroll keys. Panes loaded from files
 /// reload live when the file changes on disk.
@@ -93,6 +108,13 @@ pub struct App {
     focus: usize,
     orientation: Direction,
     quit: bool,
+    /// Each pane's content area (post-border) from the last draw, for mapping
+    /// a mouse click's absolute terminal coordinates to a pane (#244).
+    pane_areas: Vec<Rect>,
+    /// The buffer actually drawn last frame — click resolution reads back
+    /// what's really on screen (link text is styled Blue+Underlined; see
+    /// `scrybe_ratatui::render`) rather than re-deriving word-wrap offsets.
+    last_buffer: Option<Buffer>,
 }
 
 impl App {
@@ -124,11 +146,14 @@ impl App {
         if panes.is_empty() {
             panes.push(Pane::from_source("", "(empty)"));
         }
+        let pane_areas = vec![Rect::default(); panes.len()];
         Self {
             panes,
             focus: 0,
             orientation: Direction::Horizontal,
             quit: false,
+            pane_areas,
+            last_buffer: None,
         }
     }
 
@@ -141,12 +166,15 @@ impl App {
     /// Run the event loop until the user quits.
     pub fn run<B: Backend>(&mut self, terminal: &mut Terminal<B>) -> Result<()> {
         while !self.quit {
-            terminal.draw(|f| self.draw(f))?;
+            let completed = terminal.draw(|f| self.draw(f))?;
+            // Snapshot what was actually drawn — click resolution (#244)
+            // reads this back rather than re-deriving word-wrap offsets.
+            self.last_buffer = Some(completed.buffer.clone());
             if event::poll(Duration::from_millis(250))? {
-                if let Event::Key(key) = event::read()? {
-                    if key.kind == KeyEventKind::Press {
-                        self.on_key(key);
-                    }
+                match event::read()? {
+                    Event::Key(key) if key.kind == KeyEventKind::Press => self.on_key(key),
+                    Event::Mouse(mouse) => self.on_mouse(mouse),
+                    _ => {}
                 }
             }
             // Pick up external edits between ticks (~250ms latency).
@@ -191,6 +219,73 @@ impl App {
         }
     }
 
+    /// A left click that landed on link text (#244) opens it in the default
+    /// browser via the `open` crate, which picks the right mechanism per OS
+    /// (`open` on macOS, `xdg-open` on Linux, `cmd /c start` on Windows) —
+    /// nothing here needs to know or care which platform it's running on.
+    fn on_mouse(&mut self, mouse: MouseEvent) {
+        if !matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left)) {
+            return;
+        }
+        if let Some(href) = self.resolve_link_at(mouse.column, mouse.row) {
+            // Best-effort: a browser failing to launch shouldn't crash the
+            // viewer. Nothing to surface it to in a pure TUI without adding
+            // a status-line error channel — a reasonable follow-up if this
+            // turns out to fail often in practice.
+            let _ = open::that(href);
+        }
+    }
+
+    /// Resolve a click at absolute terminal coordinates to a link's href.
+    ///
+    /// Reads the actually-rendered [`Buffer`] from the last frame rather
+    /// than re-deriving word-wrap row offsets: link text is styled
+    /// `Color::Blue` + `Modifier::UNDERLINED` (see `scrybe_ratatui::render`)
+    /// and nothing else in this renderer uses that combination, so the
+    /// buffer itself is the ground truth for "what link text is at this
+    /// screen cell" — walk outward from the click to the full contiguous
+    /// run of link-styled cells on that row, then match the run's text
+    /// against the clicked pane's recorded links. Two links with identical
+    /// visible text on the same rendered row resolve to whichever appears
+    /// first in that pane's link list (document order) — an accepted,
+    /// rare-in-practice limitation of matching by text rather than by a
+    /// tracked byte range.
+    fn resolve_link_at(&self, col: u16, row: u16) -> Option<String> {
+        let buf = self.last_buffer.as_ref()?;
+        let pane_idx = self
+            .pane_areas
+            .iter()
+            .position(|a| rect_contains(*a, col, row))?;
+        let area = self.pane_areas[pane_idx];
+
+        let is_link_style = |x: u16, y: u16| -> bool {
+            let cell = &buf[(x, y)];
+            cell.fg == Color::Blue && cell.modifier.contains(Modifier::UNDERLINED)
+        };
+        if !is_link_style(col, row) {
+            return None;
+        }
+        let mut left = col;
+        while left > area.x && is_link_style(left - 1, row) {
+            left -= 1;
+        }
+        let mut right = col;
+        while right + 1 < area.x + area.width && is_link_style(right + 1, row) {
+            right += 1;
+        }
+        let mut text = String::new();
+        for x in left..=right {
+            text.push_str(buf[(x, row)].symbol());
+        }
+        let text = text.trim();
+
+        self.panes[pane_idx]
+            .links
+            .iter()
+            .find(|l| l.text == text)
+            .map(|l| l.href.clone())
+    }
+
     fn draw(&mut self, f: &mut Frame) {
         let outer = Layout::vertical([Constraint::Min(1), Constraint::Length(1)]).split(f.area());
 
@@ -214,6 +309,9 @@ impl App {
                 .borders(Borders::ALL)
                 .border_style(border)
                 .title(Span::styled(format!(" {} ", pane.title), title));
+            // Content area post-border, for mapping a click to this pane
+            // (#244) — computed before `block` moves into `.block(block)`.
+            self.pane_areas[i] = block.inner(areas[i]);
             let view = MarkdownView::new(&pane.text).block(block);
             f.render_stateful_widget(view, areas[i], &mut pane.state);
         }
@@ -240,6 +338,100 @@ impl App {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ratatui::backend::TestBackend;
+
+    // -----------------------------------------------------------------------
+    // Click-to-open (#244) — resolve_link_at against a real drawn Buffer.
+    // `on_mouse` itself isn't tested here: it shells out via `open::that`,
+    // which must never run in a test (no real subprocess / external
+    // service). `resolve_link_at` is the pure part; that's what's covered.
+    // -----------------------------------------------------------------------
+
+    fn drawn(app: &mut App, width: u16, height: u16) {
+        let backend = TestBackend::new(width, height);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let completed = terminal.draw(|f| app.draw(f)).unwrap();
+        app.last_buffer = Some(completed.buffer.clone());
+    }
+
+    #[test]
+    fn click_on_rendered_link_resolves_its_href() {
+        let mut app = App::from_source("[docs](https://example.com)\n", "t.md");
+        drawn(&mut app, 40, 10);
+
+        let area = app.pane_areas[0];
+        let row = area.y;
+        let buf = app.last_buffer.as_ref().unwrap();
+        let link_col = (area.x..area.x + area.width)
+            .find(|&x| {
+                let cell = &buf[(x, row)];
+                cell.fg == Color::Blue && cell.modifier.contains(Modifier::UNDERLINED)
+            })
+            .expect("link cell rendered somewhere on the content row");
+
+        assert_eq!(
+            app.resolve_link_at(link_col, row),
+            Some("https://example.com".to_string())
+        );
+    }
+
+    #[test]
+    fn click_on_plain_text_resolves_to_none() {
+        let mut app = App::from_source("plain text, no links here\n", "t.md");
+        drawn(&mut app, 40, 10);
+        let area = app.pane_areas[0];
+        assert_eq!(app.resolve_link_at(area.x, area.y), None);
+    }
+
+    #[test]
+    fn click_outside_any_pane_resolves_to_none() {
+        let mut app = App::from_source("[docs](https://example.com)\n", "t.md");
+        drawn(&mut app, 40, 10);
+        // Row 9 of a 10-row backend is the footer hint line — outside every
+        // pane's content area.
+        assert_eq!(app.resolve_link_at(0, 9), None);
+    }
+
+    #[test]
+    fn two_links_with_identical_text_both_resolve_to_the_first_in_document_order() {
+        // Documented, accepted limitation: resolution matches by visible
+        // text, not by tracked position, so two links with byte-for-byte
+        // identical text can't be told apart by which one was physically
+        // clicked — both resolve to whichever comes first in the pane's
+        // link list. Real-world duplicate-visible-text links on one screen
+        // row are rare; this test exists so that behavior stays intentional
+        // rather than silently changing.
+        let mut app = App::from_source(
+            "[dup](https://first.example) and [dup](https://second.example)\n",
+            "t.md",
+        );
+        drawn(&mut app, 80, 10);
+        let area = app.pane_areas[0];
+        let row = area.y;
+        let buf = app.last_buffer.as_ref().unwrap();
+        let link_cols: Vec<u16> = (area.x..area.x + area.width)
+            .filter(|&x| {
+                let cell = &buf[(x, row)];
+                cell.fg == Color::Blue && cell.modifier.contains(Modifier::UNDERLINED)
+            })
+            .collect();
+        // Two separate "dup" runs, so there's a style gap between them.
+        let first_run_start = link_cols[0];
+        let second_run_start = *link_cols
+            .iter()
+            .find(|&&x| x > first_run_start + 3)
+            .expect("second link run present");
+
+        assert_eq!(
+            app.resolve_link_at(first_run_start, row),
+            Some("https://first.example".to_string())
+        );
+        assert_eq!(
+            app.resolve_link_at(second_run_start, row),
+            Some("https://first.example".to_string()),
+            "known limitation: text-matching can't disambiguate identical link text"
+        );
+    }
 
     #[test]
     fn j_scrolls_down_q_quits() {

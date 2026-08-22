@@ -56,7 +56,8 @@ SUBCOMMANDS
 
 CONNECTION MODEL
     When the Scrybe GUI is running, GUI/buffer-aware subcommands talk to
-    it over a Unix socket (~/.scrybe/sock; override with $SCRYBE_SOCK).
+    it over local IPC (~/.scrybe/sock on Unix; a per-user named pipe on
+    Windows; override either with $SCRYBE_SOCK).
 
     When it isn't:
       - `open`  launches the GUI with the given path (macOS: `open -a Scrybe`;
@@ -82,7 +83,8 @@ EXAMPLES
     scrybe extract diagram.png > diagram.mmd
 
 ENVIRONMENT
-    SCRYBE_SOCK     Override the default socket path (~/.scrybe/sock)
+    SCRYBE_SOCK     Override the local endpoint (~/.scrybe/sock on Unix;
+                    \\\\.\\pipe\\scrybe-<user> on Windows)
     SCRYBE_APP_BIN  Path to the GUI binary for launch-when-no-app on Linux
                     (macOS uses `open -a Scrybe`)
 

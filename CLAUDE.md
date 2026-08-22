@@ -26,7 +26,7 @@ not make the toolchain more impressive.
 | `scrybe-mcp-client/` | Rust | Outbound MCP — registers external agent servers |
 | `scrybe-mermaid/` | Rust | PNG iTXt codec (Mermaid source embedded in PNG metadata) |
 | `scrybe-mermaid-render/` | Rust | Thin wrapper over the adopted `mermaid-rs-renderer`: SVG `<metadata>` provenance (source + sha256) + PNG via resvg |
-| `scrybe-rpc/` | Rust | CLI↔GUI socket protocol (typed JSON-RPC over `~/.scrybe/sock`) |
+| `scrybe-rpc/` | Rust | CLI↔GUI local IPC (Unix socket / Windows named pipe) |
 | `scrybe-ratatui/` | Rust | Markdown → ratatui widget rendering (wrap-aware scrolling; opt-in syntect `highlight` feature) |
 | `scrybe-tui/` | Rust | Terminal Markdown viewer (`scrybe view` drives it) |
 | `experimental/scrybe-panels/` | Rust | Bake-off orchestrator + SQLite calibration log (parked; not a compiled workspace member) |

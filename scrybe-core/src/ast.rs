@@ -7,7 +7,29 @@
 //! the document structure as a tree of [`Node`]s. Rendering lives in
 //! `scrybe-render` (P1.3).
 
-use pulldown_cmark::{Event, HeadingLevel, Options, Parser, Tag, TagEnd};
+use pulldown_cmark::{Alignment, Event, HeadingLevel, Options, Parser, Tag, TagEnd};
+
+/// Column alignment for a table, mirroring `pulldown_cmark::Alignment`
+/// without exposing the upstream crate's type in Scrybe's public API.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum TableAlignment {
+    #[default]
+    None,
+    Left,
+    Center,
+    Right,
+}
+
+impl From<Alignment> for TableAlignment {
+    fn from(a: Alignment) -> Self {
+        match a {
+            Alignment::None => Self::None,
+            Alignment::Left => Self::Left,
+            Alignment::Center => Self::Center,
+            Alignment::Right => Self::Right,
+        }
+    }
+}
 
 /// A single node in the Markdown AST.
 #[derive(Debug, Clone, PartialEq)]
@@ -44,6 +66,17 @@ pub enum Node {
         alt: String,
         title: String,
     },
+    /// A GFM table: `alignments` has one entry per column; `rows` are
+    /// [`Node::TableRow`] nodes, the first of which is the header row.
+    Table {
+        alignments: Vec<TableAlignment>,
+        rows: Vec<Self>,
+    },
+    /// One row of a [`Node::Table`] — `header` distinguishes the header row
+    /// (rendered distinctly) from body rows. `cells` are [`Node::TableCell`].
+    TableRow { header: bool, cells: Vec<Self> },
+    /// One cell of a [`Node::TableRow`], containing inline content.
+    TableCell { children: Vec<Self> },
     /// A thematic break (`---` / `***`).
     HorizontalRule,
     /// A hard line break (`\\\n`).
@@ -73,6 +106,9 @@ enum Frame {
     Link { href: String, title: String },
     Image { src: String, title: String },
     FencedCode { lang: String },
+    Table { alignments: Vec<TableAlignment> },
+    TableRow { header: bool },
+    TableCell,
 }
 
 /// A parsed Markdown document as a tree of [`Node`]s.
@@ -164,7 +200,26 @@ impl Ast {
                         code_buf.clear();
                         stack.push((Frame::FencedCode { lang }, Vec::new()));
                     }
-                    // Ignore tags we don't model (tables, footnotes, etc.)
+                    Tag::Table(alignments) => {
+                        stack.push((
+                            Frame::Table {
+                                alignments: alignments.into_iter().map(Into::into).collect(),
+                            },
+                            Vec::new(),
+                        ));
+                    }
+                    // The header row's cells arrive directly inside
+                    // TableHead (no TableRow wrapper) — model it as one.
+                    Tag::TableHead => {
+                        stack.push((Frame::TableRow { header: true }, Vec::new()));
+                    }
+                    Tag::TableRow => {
+                        stack.push((Frame::TableRow { header: false }, Vec::new()));
+                    }
+                    Tag::TableCell => {
+                        stack.push((Frame::TableCell, Vec::new()));
+                    }
+                    // Ignore tags we don't model (footnotes, etc.)
                     _ => {}
                 },
 
@@ -247,6 +302,27 @@ impl Ast {
                                 // Strip the trailing newline that pulldown-cmark always adds.
                                 let content = content.trim_end_matches('\n').to_string();
                                 Some(Node::FencedCode { lang, content })
+                            } else {
+                                None
+                            }
+                        }
+                        TagEnd::Table => {
+                            if let Some((Frame::Table { alignments }, rows)) = stack.pop() {
+                                Some(Node::Table { alignments, rows })
+                            } else {
+                                None
+                            }
+                        }
+                        TagEnd::TableHead | TagEnd::TableRow => {
+                            if let Some((Frame::TableRow { header }, cells)) = stack.pop() {
+                                Some(Node::TableRow { header, cells })
+                            } else {
+                                None
+                            }
+                        }
+                        TagEnd::TableCell => {
+                            if let Some((Frame::TableCell, children)) = stack.pop() {
+                                Some(Node::TableCell { children })
                             } else {
                                 None
                             }

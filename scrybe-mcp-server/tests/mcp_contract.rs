@@ -116,34 +116,50 @@ fn unknown_tool_request() -> Value {
 /// Run `f` with `SCRYBE_SOCK` pointing at a path where no app listens.
 fn with_dead_socket<T>(f: impl FnOnce() -> T) -> T {
     let _guard = SOCK_GUARD.lock().unwrap_or_else(|e| e.into_inner());
+    #[cfg(unix)]
     let dir = tempfile::tempdir().expect("tempdir");
-    std::env::set_var("SCRYBE_SOCK", dir.path().join("no-app.sock"));
+    #[cfg(unix)]
+    let endpoint = dir.path().join("no-app.sock");
+    #[cfg(windows)]
+    let endpoint = unique_windows_pipe("no-app");
+    std::env::set_var("SCRYBE_SOCK", endpoint);
     let out = f();
     std::env::remove_var("SCRYBE_SOCK");
     out
 }
 
+#[cfg(windows)]
+fn unique_windows_pipe(tag: &str) -> PathBuf {
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("system clock after Unix epoch")
+        .as_nanos();
+    PathBuf::from(format!(
+        r"\\.\pipe\scrybe-contract-{tag}-{}-{nanos}",
+        std::process::id()
+    ))
+}
+
 /// Run `f` against a mock live app that answers EVERY request with the same
 /// in-band JSON-RPC error (echoing the request id, as the typed client
 /// requires). Reuses the `live_app_open` mock-socket pattern.
-#[cfg(unix)]
 fn with_remote_error_app<T>(f: impl FnOnce() -> T) -> T {
     use std::io::{BufRead, BufReader, Write};
-    use std::os::unix::net::UnixListener;
 
     let _guard = SOCK_GUARD.lock().unwrap_or_else(|e| e.into_inner());
+    #[cfg(unix)]
     let dir = tempfile::tempdir().expect("tempdir");
+    #[cfg(unix)]
     let sock = dir.path().join("scrybe.sock");
-    let listener = UnixListener::bind(&sock).expect("bind mock socket");
+    #[cfg(windows)]
+    let sock = unique_windows_pipe("remote-error");
+    let listener = scrybe_rpc::transport::listen_at(&sock).expect("bind mock endpoint");
     let server = std::thread::spawn(move || {
         for _ in 0..5 {
-            let Ok((stream, _)) = listener.accept() else {
+            let Ok(stream) = scrybe_rpc::transport::accept(&listener) else {
                 return;
             };
-            stream
-                .set_read_timeout(Some(std::time::Duration::from_secs(5)))
-                .ok();
-            let mut reader = BufReader::new(stream.try_clone().expect("clone"));
+            let mut reader = BufReader::new(&stream);
             let mut line = String::new();
             let n = reader.read_line(&mut line).unwrap_or(0);
             if n == 0 || line.trim().is_empty() {
@@ -153,7 +169,7 @@ fn with_remote_error_app<T>(f: impl FnOnce() -> T) -> T {
                 continue;
             };
             let id = req["id"].as_u64().unwrap_or(1);
-            let mut w = stream;
+            let mut w = &stream;
             let resp = format!(
                 r#"{{"jsonrpc":"2.0","id":{id},"error":{{"code":-32001,"message":"not open: /scrybe-fixtures/absent.md"}}}}"#
             );
@@ -269,7 +285,6 @@ fn call_no_live_app_matches_golden_fixture() {
 
 // ── (e) remote RPC error from the live app → isError: true, code app_error ──
 
-#[cfg(unix)]
 #[test]
 fn call_remote_app_error_matches_golden_fixture() {
     let fix = load("call_remote_app_error.json");
@@ -295,7 +310,6 @@ fn call_unknown_tool_matches_golden_fixture() {
 
 // ── deliberate regeneration ─────────────────────────────────────────────────
 
-#[cfg(unix)]
 #[test]
 #[ignore = "writes tests/fixtures/*.json and docs/mcp-contract-0.6.json; run only for a DELIBERATE contract change, then review + commit the diff"]
 fn regenerate_contract_artifacts() {
