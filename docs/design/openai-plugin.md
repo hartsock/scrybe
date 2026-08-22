@@ -58,7 +58,10 @@ The implementation must preserve these properties:
   overwritten.
 - **Trusted installation.** Detection may inspect the host, but installation
   only uses a hard-coded official Scrybe release origin, an immutable version
-  and digest, and an explicit approval capability.
+  and digest, a release manifest signature verified against a public key pinned
+  in the host, and an explicit approval capability. A checksum fetched from the
+  release channel alone is transport-integrity evidence, not release
+  authenticity.
 - **Plain-text sovereignty.** The plugin does not upload documents to a Scrybe
   service. Documents stay in the user's workspace and remain ordinary files.
 - **One tool engine.** Plugin tools are backed by `scrybe-tools`; schemas and
@@ -146,14 +149,17 @@ Read-only. Resolves an install or update from the official
 - exact version;
 - exact asset name and HTTPS URL;
 - expected SHA-256 digest;
+- signed release-manifest identity and verified key identifier;
 - publisher/repository identity;
 - whether elevation or visible installer UI is expected; and
 - a short-lived opaque `plan_id` bound to those exact values.
 
 The release workflow publishes a machine-readable checksum manifest alongside
-the assets. A release without a SHA-256 digest in that manifest or trusted
-release metadata is not installable through the plugin. The tool returns
-instructions rather than weakening verification.
+the assets and signs it with the release key. The host verifies that signature
+against its pinned public key before it trusts the manifest's asset name,
+version, and SHA-256 digest. A release without a valid signature and digest is
+not installable through the plugin. The tool returns instructions rather than
+weakening verification.
 
 ### `scrybe_setup_install`
 
@@ -253,6 +259,9 @@ require a hosted copy of the user's documents.
   elevation denial, installer failure, and post-install probe failure.
 - User or model strings never become executable names, command lines, download
   origins, or installer arguments.
+- A checksum manifest fetched from the release channel is never treated as an
+  independent trust root. The host verifies the manifest signature against its
+  bundled pinned public key before accepting its asset or digest.
 - Redirects are accepted only when the final HTTPS origin remains within the
   approved GitHub release asset path.
 - Release metadata and the downloaded asset are size-bounded.
@@ -273,8 +282,8 @@ require a hosted copy of the user's documents.
 - Trusted-path validation, PATH substitution, symlink/reparse escape, and
   version/contract mismatch tests.
 - Mocked release metadata and asset server tests for origin validation,
-  redirects, size bounds, digest verification, malformed metadata, and network
-  failure.
+  redirects, size bounds, signature and digest verification, malformed or
+  unsigned metadata, wrong-key signatures, and network failure.
 - Approval-capability tests for expiry, replay, mutation, and cross-plan use.
 - Staged-patch tests proving an agent cannot mutate the live buffer before an
   explicit, revision-bound human acceptance; cover rejection, expiry, replay,
