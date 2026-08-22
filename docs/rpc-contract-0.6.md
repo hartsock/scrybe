@@ -15,8 +15,10 @@
 
 ## Transport & framing
 
-- **Transport:** Unix-domain socket at `~/.scrybe/sock` (override:
-  `$SCRYBE_SOCK`). Windows named pipes are out of scope for 0.6.
+- **Transport:** Unix-domain socket at `~/.scrybe/sock`; per-user Windows
+  named pipe at `\\.\pipe\scrybe-<user>`. Override either endpoint with
+  `$SCRYBE_SOCK`; a Windows override MUST be a full `\\.\pipe\...` path.
+  Both transports carry the same frames and typed errors.
 - **Framing:** newline-delimited JSON-RPC 2.0. One request per line, one
   response per line. The reference client opens **one connection per
   request** and always uses request id `1`; the server MUST echo the request
@@ -25,9 +27,10 @@
   **16 MiB** (`scrybe_rpc::client::MAX_FRAME_BYTES`). The client stops
   reading at the cap and reports `FrameTooLarge` — it never allocates
   unboundedly.
-- **Timeouts:** the client applies a 5 s read timeout and a 5 s write timeout
-  (`READ_TIMEOUT` / `WRITE_TIMEOUT`). The server's own frontend-reply timeout
-  is also 5 s (surfaced in-band as `ERR_REPLY_TIMEOUT`).
+- **Timeouts:** the client applies 5 s connect, read, and write timeouts
+  (`CONNECT_TIMEOUT` / `READ_TIMEOUT` / `WRITE_TIMEOUT`). The server's own
+  frontend-reply timeout is also 5 s (surfaced in-band as
+  `ERR_REPLY_TIMEOUT`).
 
 ## Envelope rules (client-enforced)
 

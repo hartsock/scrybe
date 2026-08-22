@@ -4,11 +4,11 @@
 
 ## Goal
 
-A single `scrybe` binary that mirrors every MCP tool. Humans drive the GUI from the shell, agents drive Scrybe without an MCP client setup. When the GUI is running, CLI commands operate on its in-memory state via a Unix-domain socket; when it isn't, GUI-only commands launch the app, and read-only commands run inline against disk.
+A single `scrybe` binary that mirrors every MCP tool. Humans drive the GUI from the shell, agents drive Scrybe without an MCP client setup. When the GUI is running, CLI commands operate on its in-memory state through platform-local IPC; when it isn't, GUI-only commands launch the app, and read-only commands run inline against disk.
 
 ## Wire protocol
 
-JSON-RPC 2.0, newline-delimited, one line per request and one per response. Transport is a Unix-domain socket (Windows named pipe deferred to a follow-up). Default path is `~/.scrybe/sock`; override with `$SCRYBE_SOCK`.
+JSON-RPC 2.0, newline-delimited, one line per request and one per response. Unix uses `~/.scrybe/sock`; Windows uses the per-user `\\.\pipe\scrybe-<user>` named pipe. Override either endpoint with `$SCRYBE_SOCK`.
 
 > **The normative contract lives in [`docs/rpc-contract-0.6.md`](../rpc-contract-0.6.md)** —
 > the 0.6 compatibility artifact. It freezes the full method table
@@ -43,7 +43,7 @@ scrybe-rpc/                  Wire types — single source of truth for both side
 ├── Request, Response, RpcError, JsonRpcVersion("2.0")
 ├── OpenParams, SaveParams, CloseParams, QuitParams
 ├── OpenResult, AckResult
-└── default_socket_path()    ~/.scrybe/sock or $SCRYBE_SOCK
+└── default_socket_path()    Unix socket / Windows named pipe / $SCRYBE_SOCK
 
 scrybe-cli/                  CLI client — clap surface + RPC dialer
 ├── src/main.rs              clap subcommands + dispatch
@@ -72,9 +72,9 @@ scrybe-app/src-tauri/        GUI server — socket binder + dispatcher
 
 `cli_rpc::spawn(app)` is called from the Tauri `setup()` block alongside the file-watcher init. It:
 
-1. Resolves the socket path.
-2. Creates the parent directory if needed.
-3. Stale-socket recovery: if the socket file exists, try to connect. If connect succeeds, refuses to bind (another Scrybe is alive; the Tauri single-instance plugin also catches this from a different angle). If connect fails, unlinks and rebinds.
+1. Resolves the platform-local endpoint.
+2. On Unix, creates the parent directory if needed.
+3. On Unix, performs stale-socket recovery: if the socket file exists, try to connect. If connect succeeds, refuse to bind; if it fails, unlink and rebind. On Windows, bind the named pipe atomically and report an existing listener as already running.
 4. Spawns an accept thread; per-connection requests are handled in their own thread.
 
 The dispatcher is fire-and-forget for Phase 1: each method emits a typed Tauri event (`scrybe://cli-open`, `scrybe://cli-save`, `scrybe://cli-close`, `scrybe://cli-quit`) to the frontend, then immediately returns an ack response. The frontend handler does the actual work using the same code paths the autosave timer and the file-watcher already use.
@@ -110,12 +110,22 @@ The Reload action reuses `reloadTabFromDisk(path)` — the same function the fil
 - `embed` / `extract` promoted to top-level subcommands (`mermaid embed/extract` still works as before)
 - 13 integration tests + 23 wire-type unit tests + 5 rpc_client unit tests + 6 server-side unit tests
 
+### Windows transport (#222)
+
+- Per-user named-pipe client and desktop listener behind the shared
+  `scrybe-rpc::transport` interface
+- The same NDJSON framing, response validation, size cap, and typed errors as
+  the Unix path
+- Native Windows tests against the production listener, including a complete
+  request/reply, typed missing-endpoint result, bounded exhausted-instance
+  connect, and immediate peer-close classification
+- Live Windows proof through the installed desktop app, CLI, and MCP server
+
 ### Future / not yet in scope
 
 - Subprocess-based `assert_cmd` tests for `main.rs`'s clap dispatch (still 0% line coverage)
 - Buffer-aware `lint`/`render` (today they always run inline against disk; could route through the socket to lint the in-memory buffer when the GUI is running and the file is open)
 - `logs` command (MCP has it; not yet reflected in the CLI)
-- Windows named-pipe transport (currently `cfg(unix)` only)
 
 ## Test coverage
 
@@ -136,9 +146,8 @@ All non-dispatch-glue files clear the 80% target. `main.rs`'s dispatch arms are 
 ## Open follow-ups
 
 1. **Multi-window socket model.** Tauri's single-instance plugin guarantees one process and therefore one socket. If multi-window/multi-profile becomes a feature, this design needs revisiting.
-2. **Windows named-pipe support.** Currently a `cfg(unix)` story. Phase 2 or later will add a named-pipe transport sharing the same JSON-RPC framing.
-3. **Linux `scrybe-app` discovery.** `scrybe foo.md` with no GUI running on Linux uses `$SCRYBE_APP_BIN` first, then `scrybe-app` on `PATH`. macOS uses `open -a Scrybe`. Windows is deferred.
-4. **Coverage of `main.rs` dispatch arms.** Adding `assert_cmd`-based subprocess tests in Phase 2.
+2. **App discovery.** `scrybe foo.md` with no GUI running on Linux uses `$SCRYBE_APP_BIN` first, then `scrybe-app` on `PATH`. macOS uses `open -a Scrybe`. Windows launch discovery is still deferred; this does not affect an already-running app.
+3. **Coverage of `main.rs` dispatch arms.** Adding `assert_cmd`-based subprocess tests in Phase 2.
 
 
 A2 note: the UI-parity methods above replaced the `/tmp` signal files
