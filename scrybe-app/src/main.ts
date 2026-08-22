@@ -9,14 +9,16 @@ import "./styles/pathbar.css";
 import "./styles/print.css";
 import { invoke, convertFileSrc } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { homeDir } from "@tauri-apps/api/path";
+import { basename, dirname, homeDir, join } from "@tauri-apps/api/path";
 import { open as openExternal } from "@tauri-apps/plugin-shell";
 import { save as saveDialog } from "@tauri-apps/plugin-dialog";
 import { showToast } from "./toast";
 import { AppState } from "./state";
 import { renderTabBar } from "./tabs";
 import { createEditor, swapDocument, shouldSuppressAutosave, setEditorTheme, setVim, setWrap, setEditorLanguage, classifyFile } from "./editor";
-import { PreviewPane } from "./preview";
+import { PreviewPane, SAVE_MERMAID_PNG_EVENT } from "./preview";
+import type { MermaidPngExportDetail, MermaidPreviewDocument } from "./mermaid_png";
+import { documentStem, mermaidPngFilename, rasterizeMermaidSvg } from "./mermaid_png";
 import { buildToolbar, setToolbarViewMode, setToolbarTheme, setToolbarVim, setToolbarWrap } from "./toolbar";
 import type { Theme } from "./toolbar";
 import { renderPathBar } from "./pathbar";
@@ -88,6 +90,49 @@ const toolbarEl = document.getElementById("toolbar")!;
 const sidebarEl = document.getElementById("sidebar")!;
 
 const preview = new PreviewPane(previewEl);
+let previewRequestGeneration = 0;
+
+// Right-clicking a rendered Mermaid diagram snapshots the live Mermaid.js SVG,
+// opens the native PNG save dialog, then asks Rust only to embed the original
+// source and write the already-rendered pixels. The selected path may be in any
+// directory; the native dialog handles confirmation when it already exists.
+previewEl.addEventListener(SAVE_MERMAID_PNG_EVENT, async (event: Event) => {
+  const detail = (event as CustomEvent<MermaidPngExportDetail>).detail;
+  if (!detail.source) {
+    showToast("Could not recover this diagram's Mermaid source");
+    return;
+  }
+
+  try {
+    // Capture before opening the dialog so the PNG is the view that was
+    // actually under the pointer when the user right-clicked.
+    const pngBytes = await rasterizeMermaidSvg(detail.svg, previewEl);
+    const documentPath = detail.document.path;
+    const filename = documentPath ? await basename(documentPath) : "document.md";
+    const directory = documentPath ? await dirname(documentPath) : await homeDir();
+    const suggestedName = mermaidPngFilename(
+      documentStem(filename),
+      detail.figureNumber,
+      detail.figureTotal,
+      detail.title,
+    );
+    const dest = await saveDialog({
+      defaultPath: await join(directory, suggestedName),
+      filters: [{ name: "PNG image", extensions: ["png"] }],
+    });
+    if (!dest) return;
+
+    await invoke("save_mermaid_png", {
+      output: dest,
+      source: detail.source,
+      pngBytes,
+    });
+    showToast(`Exported ${dest.split(/[\\/]/).pop()}`, "info");
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    showToast(`Image export failed: ${message}`);
+  }
+});
 
 // Current editor/preview theme and Vim state. These are app-wide (not
 // per-tab) and are mirrored to the MCP `state` tool via `publishState`.
@@ -227,7 +272,8 @@ async function printActiveTab(): Promise<void> {
     showToast("Printing is available for Markdown documents", "info");
     return;
   }
-  await preview.render(tab.content);
+  const request = beginPreviewRequest(tab.id, tab.path);
+  await preview.render(tab.content, request.document);
   // KaTeX/Mermaid post-processing is async; give it a beat before the snapshot.
   await new Promise((r) => setTimeout(r, 250));
   // WKWebView ignores JS window.print(); route to the native print dialog.
@@ -407,6 +453,10 @@ window.addEventListener("keydown", (e) => {
 let saveTimer: ReturnType<typeof setTimeout> | null = null;
 
 const view = createEditor(editorEl, WELCOME, async (content) => {
+  // Invalidate earlier edit/plugin requests before the first await. This is
+  // separate from PreviewPane's render generation because plugin processing
+  // happens before a request reaches that class.
+  const previewGeneration = ++previewRequestGeneration;
   // Snapshot the flag synchronously — `shouldSuppressAutosave()` returns
   // true only while CodeMirror is mid-dispatch from `swapDocument`. By
   // the time we hit our first `await` below, the flag will have been
@@ -427,9 +477,12 @@ const view = createEditor(editorEl, WELCOME, async (content) => {
   const tab = state.activeTab();
   const savePath = tab?.path ?? null;
   const saveId   = tab?.id   ?? null;
+  const previewDocument = tab ? { id: tab.id, path: tab.path } : null;
 
   const processed = await pluginManager.runAll(content);
-  renderPreview(processed || content);
+  if (previewGeneration === previewRequestGeneration && previewDocument) {
+    renderPreview(processed || content, previewDocument, previewGeneration);
+  }
 
   // Programmatic loads must not schedule an autosave: doing so would
   // immediately call `note_autosave()` and open a 2 s self-write window
@@ -476,9 +529,29 @@ function applyViewMode(mode: string): void {
 /// Code/text tabs open edit-only and have no rendered preview, so this is a
 /// no-op for them; that stops source files from being parsed as Markdown into
 /// garbled HTML. The single gate every render-on-load/edit site routes through.
-function renderPreview(content: string): void {
-  if (state.activeTab()?.kind === "markdown") {
-    void preview.render(content);
+function beginPreviewRequest(id: string, path: string | null): {
+  generation: number;
+  document: MermaidPreviewDocument;
+} {
+  return {
+    generation: ++previewRequestGeneration,
+    document: { id, path },
+  };
+}
+
+function renderPreview(
+  content: string,
+  expectedDocument?: MermaidPreviewDocument,
+  generation?: number,
+): void {
+  const tab = state.activeTab();
+  if (tab?.kind === "markdown") {
+    const request = expectedDocument && generation !== undefined
+      ? { document: expectedDocument, generation }
+      : beginPreviewRequest(tab.id, tab.path);
+    if (request.generation !== previewRequestGeneration ||
+        request.document.id !== tab.id) return;
+    void preview.render(content, request.document);
   }
 }
 

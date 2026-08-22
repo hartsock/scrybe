@@ -19,7 +19,7 @@ pub mod lint;
 pub mod schema;
 pub mod tools;
 
-pub use figures::{export_figures, plan_figures, FigurePlan, FigureResult};
+pub use figures::{export_figures, plan_figures, write_embedded_png, FigurePlan, FigureResult};
 
 /// Tool group — drives progressive disclosure and feature gating (design §4).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

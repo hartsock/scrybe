@@ -16,9 +16,10 @@
 //! [`plan_figures`] is PURE (enumeration + naming, no IO); [`export_figures`]
 //! is the IO shell (render + embed + write).
 
+use std::io::Write;
 use std::path::{Path, PathBuf};
 
-use anyhow::Context;
+use anyhow::{ensure, Context};
 use scrybe_core::Ast;
 use scrybe_mermaid_render::{render_png, source_sha256};
 use serde_json::{json, Value};
@@ -27,6 +28,9 @@ use crate::{Ctx, DataSchema, EngineFault, Facet, ToolError, ToolOutcome, ToolSpe
 
 /// Version of the `export_figures` tool's `data` payload.
 const DATA_VERSION: u32 = 1;
+const MAX_CAPTURED_PNG_BYTES: usize = 8 * 1024 * 1024;
+const MAX_MERMAID_SOURCE_BYTES: usize = 1024 * 1024;
+const MAX_EMBEDDED_PNG_BYTES: usize = 16 * 1024 * 1024;
 
 /// A planned figure: where its PNG will be written and the Mermaid source it
 /// renders.
@@ -49,6 +53,122 @@ pub struct FigureResult {
     pub sha256: String,
     /// Size of the written PNG in bytes.
     pub bytes: usize,
+}
+
+struct EmbeddedPng {
+    uuid: String,
+    sha256: String,
+    bytes: Vec<u8>,
+}
+
+/// Embed Mermaid provenance into already-rendered PNG bytes and write them.
+///
+/// This is the WYSIWYG seam used by the desktop preview: JavaScript rasterizes
+/// the live Mermaid.js SVG, then this helper adds the exact source, UUID, and
+/// digest without re-rendering the image. Embedding completes in memory before
+/// the destination is opened, so invalid PNG bytes cannot clobber an existing
+/// file. A successful write deliberately replaces an existing destination.
+pub fn write_embedded_png(
+    png_bytes: &[u8],
+    source: &str,
+    output_path: &Path,
+) -> anyhow::Result<FigureResult> {
+    ensure!(
+        png_bytes.len() <= MAX_CAPTURED_PNG_BYTES,
+        "captured PNG is too large ({} bytes; limit is {} bytes)",
+        png_bytes.len(),
+        MAX_CAPTURED_PNG_BYTES
+    );
+    ensure!(
+        source.len() <= MAX_MERMAID_SOURCE_BYTES,
+        "Mermaid source is too large ({} bytes; limit is {} bytes)",
+        source.len(),
+        MAX_MERMAID_SOURCE_BYTES
+    );
+    let prepared = prepare_embedded_png(png_bytes, source)
+        .with_context(|| format!("embed source for {}", output_path.display()))?;
+    ensure!(
+        prepared.bytes.len() <= MAX_EMBEDDED_PNG_BYTES,
+        "source-bearing PNG is too large ({} bytes; limit is {} bytes)",
+        prepared.bytes.len(),
+        MAX_EMBEDDED_PNG_BYTES
+    );
+    atomic_replace(output_path, &prepared.bytes)?;
+    Ok(FigureResult {
+        path: output_path.to_string_lossy().into_owned(),
+        uuid: prepared.uuid,
+        sha256: prepared.sha256,
+        bytes: prepared.bytes.len(),
+    })
+}
+
+/// Write complete bytes to a same-directory temporary file, flush them, then
+/// atomically replace the destination. A late write failure therefore leaves a
+/// pre-existing image intact instead of truncating it.
+fn atomic_replace(output_path: &Path, bytes: &[u8]) -> anyhow::Result<()> {
+    let directory = output_path
+        .parent()
+        .filter(|path| !path.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+    let existing_permissions = match std::fs::metadata(output_path) {
+        Ok(metadata) => Some(metadata.permissions()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+        Err(error) => {
+            return Err(error).with_context(|| format!("inspect {}", output_path.display()));
+        }
+    };
+    let mut builder = tempfile::Builder::new();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        // Match a normal newly-created image (0666 filtered by umask), not
+        // tempfile's private 0600 default.
+        builder.permissions(std::fs::Permissions::from_mode(0o666));
+    }
+    let mut temporary = builder
+        .tempfile_in(directory)
+        .with_context(|| format!("create temporary file in {}", directory.display()))?;
+    temporary
+        .write_all(bytes)
+        .with_context(|| format!("write temporary PNG for {}", output_path.display()))?;
+    if let Some(permissions) = existing_permissions {
+        temporary
+            .as_file()
+            .set_permissions(permissions)
+            .with_context(|| format!("preserve permissions for {}", output_path.display()))?;
+    }
+    temporary
+        .as_file_mut()
+        .sync_all()
+        .with_context(|| format!("flush temporary PNG for {}", output_path.display()))?;
+    temporary
+        .persist(output_path)
+        .map_err(|error| error.error)
+        .with_context(|| format!("replace {}", output_path.display()))?;
+    Ok(())
+}
+
+fn prepare_embedded_png(png_bytes: &[u8], source: &str) -> anyhow::Result<EmbeddedPng> {
+    let uuid = uuid::Uuid::new_v4().to_string();
+    let bytes = scrybe_mermaid::embed_with_uuid(png_bytes, source, &uuid)?;
+    let payload = scrybe_mermaid::extract(&bytes).context("verify embedded Mermaid source")?;
+    ensure!(
+        payload.source == source,
+        "embedded Mermaid source did not round-trip"
+    );
+    ensure!(
+        payload.uuid == uuid,
+        "embedded Mermaid UUID did not round-trip"
+    );
+    ensure!(
+        payload.is_verified(),
+        "embedded Mermaid digest was not verified"
+    );
+    Ok(EmbeddedPng {
+        uuid,
+        sha256: source_sha256(source),
+        bytes,
+    })
 }
 
 /// Plan the sibling PNG figures for every Mermaid block in `doc_source`.
@@ -109,11 +229,9 @@ pub fn export_figures(doc_source: &str, doc_path: &Path) -> anyhow::Result<Vec<F
         // Same render → embed path as the `mermaid_to_png` tool.
         let png = render_png(&plan.source)
             .with_context(|| format!("render mermaid for {}", plan.path.display()))?;
-        let uuid = uuid::Uuid::new_v4().to_string();
-        let embedded = scrybe_mermaid::embed_with_uuid(&png, &plan.source, &uuid)
+        let embedded = prepare_embedded_png(&png, &plan.source)
             .with_context(|| format!("embed source for {}", plan.path.display()))?;
-        let sha256 = source_sha256(&plan.source);
-        prepared.push((plan.path, uuid, sha256, embedded));
+        prepared.push((plan.path, embedded));
     }
     // Prune this document's prior figure set before writing the fresh one, so a
     // re-export after the diagram count shrinks (5 → 2) or crosses a zero-pad
@@ -124,13 +242,14 @@ pub fn export_figures(doc_source: &str, doc_path: &Path) -> anyhow::Result<Vec<F
         prune_figures(doc_path)?;
     }
     let mut results = Vec::with_capacity(prepared.len());
-    for (path, uuid, sha256, embedded) in prepared {
-        std::fs::write(&path, &embedded).with_context(|| format!("write {}", path.display()))?;
+    for (path, embedded) in prepared {
+        std::fs::write(&path, &embedded.bytes)
+            .with_context(|| format!("write {}", path.display()))?;
         results.push(FigureResult {
             path: path.to_string_lossy().into_owned(),
-            uuid,
-            sha256,
-            bytes: embedded.len(),
+            uuid: embedded.uuid,
+            sha256: embedded.sha256,
+            bytes: embedded.bytes.len(),
         });
     }
     Ok(results)
@@ -423,6 +542,118 @@ mod tests {
             entries.is_empty(),
             "no files written for a diagram-free doc"
         );
+    }
+
+    #[test]
+    fn captured_png_overwrites_and_round_trips() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let output = dir.path().join("chosen-name.png");
+        std::fs::write(&output, b"old image").expect("seed destination");
+        let source = "graph TD; Live-->Preview";
+        let png = render_png(source).expect("render fixture");
+
+        let result = write_embedded_png(&png, source, &output).expect("write captured png");
+        let written = std::fs::read(&output).expect("read output");
+        assert!(written.starts_with(b"\x89PNG\r\n\x1a\n"));
+        assert_eq!(result.bytes, written.len());
+        assert_eq!(result.sha256, source_sha256(source));
+        assert!(uuid::Uuid::parse_str(&result.uuid).is_ok());
+
+        let payload = scrybe_mermaid::extract(&written).expect("extract embedded source");
+        assert_eq!(payload.source, source);
+        assert_eq!(payload.uuid, result.uuid);
+        assert!(matches!(
+            payload.verification,
+            scrybe_mermaid::VerificationStatus::Verified { .. }
+        ));
+    }
+
+    #[test]
+    fn invalid_captured_png_does_not_clobber_destination() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let output = dir.path().join("precious.png");
+        std::fs::write(&output, b"keep me").expect("seed destination");
+
+        let error = write_embedded_png(b"not a png", "graph TD; A-->B", &output)
+            .expect_err("invalid PNG must fail");
+        assert!(error.to_string().contains("embed source"));
+        assert_eq!(std::fs::read(&output).unwrap(), b"keep me");
+    }
+
+    #[test]
+    fn captured_png_without_iend_does_not_clobber_destination() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let output = dir.path().join("precious.png");
+        std::fs::write(&output, b"keep me").expect("seed destination");
+        let mut png = render_png("graph TD; A-->B").expect("render fixture");
+        png.truncate(png.len() - 12);
+
+        let error = write_embedded_png(&png, "graph TD; A-->B", &output)
+            .expect_err("PNG without IEND must fail");
+        assert!(error.to_string().contains("embed source"));
+        assert_eq!(std::fs::read(&output).unwrap(), b"keep me");
+    }
+
+    #[test]
+    fn oversized_captured_png_does_not_clobber_destination() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let output = dir.path().join("precious.png");
+        std::fs::write(&output, b"keep me").expect("seed destination");
+        let oversized = vec![0; MAX_CAPTURED_PNG_BYTES + 1];
+
+        let error = write_embedded_png(&oversized, "graph TD; A-->B", &output)
+            .expect_err("oversized PNG must fail");
+        assert!(error.to_string().contains("captured PNG is too large"));
+        assert_eq!(std::fs::read(&output).unwrap(), b"keep me");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn captured_png_uses_normal_new_file_mode_and_preserves_overwrite_mode() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let control = dir.path().join("control.png");
+        std::fs::File::create(&control).expect("create mode control");
+        let expected_new_mode = std::fs::metadata(&control)
+            .expect("control metadata")
+            .permissions()
+            .mode()
+            & 0o777;
+        let source = "graph TD; A-->B";
+        let png = render_png(source).expect("render fixture");
+        let new_output = dir.path().join("new.png");
+
+        write_embedded_png(&png, source, &new_output).expect("write new PNG");
+        let new_mode = std::fs::metadata(&new_output)
+            .expect("new metadata")
+            .permissions()
+            .mode()
+            & 0o777;
+        assert_eq!(new_mode, expected_new_mode);
+
+        std::fs::set_permissions(&new_output, std::fs::Permissions::from_mode(0o640))
+            .expect("set distinctive mode");
+        write_embedded_png(&png, source, &new_output).expect("overwrite PNG");
+        let overwritten_mode = std::fs::metadata(&new_output)
+            .expect("overwrite metadata")
+            .permissions()
+            .mode()
+            & 0o777;
+        assert_eq!(overwritten_mode, 0o640);
+    }
+
+    #[test]
+    fn captured_png_write_does_not_touch_siblings() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let output = dir.path().join("report_fig_01_flow.png");
+        let sibling = dir.path().join("report_fig_02_keep.png");
+        std::fs::write(&sibling, b"unrelated").expect("seed sibling");
+        let source = "graph LR; A-->B";
+        let png = render_png(source).expect("render fixture");
+
+        write_embedded_png(&png, source, &output).expect("write selected image");
+        assert_eq!(std::fs::read(&sibling).unwrap(), b"unrelated");
     }
 
     // -- tool spec + handler -------------------------------------------------

@@ -1,12 +1,22 @@
 // SPDX-License-Identifier: Apache-2.0
 import { invoke } from "@tauri-apps/api/core";
+import {
+  mermaidTitleFromSource,
+  type MermaidPngExportDetail,
+  type MermaidPreviewDocument,
+} from "./mermaid_png";
+
+export const SAVE_MERMAID_PNG_EVENT = "scrybe:save-mermaid-png";
 
 export class PreviewPane {
   private container: HTMLElement;
   private _theme: string = "default";
+  private renderGeneration = 0;
+  private renderedDocument: MermaidPreviewDocument | null = null;
 
   constructor(container: HTMLElement) {
     this.container = container;
+    this.container.addEventListener("contextmenu", event => this.saveMermaidFromContextMenu(event));
   }
 
   get theme(): string { return this._theme; }
@@ -17,23 +27,109 @@ export class PreviewPane {
   }
 
   renderImage(src: string): void {
+    this.renderGeneration += 1;
+    this.renderedDocument = null;
     this.container.innerHTML = `<img src="${src}" style="max-width:100%;height:auto;display:block;">`;
   }
 
-  async render(source: string): Promise<void> {
+  async render(source: string, document: MermaidPreviewDocument): Promise<void> {
+    const generation = ++this.renderGeneration;
     const html: string = await invoke("render_markdown", {
       source,
       theme: this._theme,
     });
+    if (generation !== this.renderGeneration) return;
+    this.renderedDocument = document;
     this.container.innerHTML = html;
-    this.postProcess();
+    await this.postProcess(generation);
   }
 
-  private postProcess(): void {
+  private async postProcess(generation: number): Promise<void> {
     this.renderMath();
-    this.renderMermaid();
     this.addCodeCopyButtons();
     this.interceptLinks();
+    await this.renderMermaid(generation);
+  }
+
+  private saveMermaidFromContextMenu(event: MouseEvent): void {
+    const target = event.target;
+    if (!(target instanceof Element)) return;
+    const wrapper = target.closest<HTMLElement>(".mermaid");
+    if (!wrapper || !this.container.contains(wrapper)) return;
+    const svg = wrapper.querySelector<SVGSVGElement>("svg");
+    // The Mermaid wrapper spans the preview width. Preserve the normal
+    // context menu when the pointer is in its blank margins rather than on
+    // the rendered image itself.
+    if (!svg || !svg.contains(target) || !this.renderedDocument) return;
+
+    event.preventDefault();
+    const figures = Array.from(this.container.querySelectorAll<HTMLElement>(".mermaid"));
+    const figureIndex = figures.indexOf(wrapper);
+    if (figureIndex < 0) return;
+
+    const detail: MermaidPngExportDetail = {
+      // `scrybeSource` is captured from textContent before Mermaid.js rewrites
+      // the wrapper. The renderer's historical data-source attribute is
+      // double-escaped for values such as `-->` and `<br/>`.
+      source: wrapper.dataset.scrybeSource ?? "",
+      figureNumber: figureIndex + 1,
+      figureTotal: figures.length,
+      title: this.mermaidTitle(wrapper, svg),
+      svg,
+      document: this.renderedDocument,
+    };
+    this.container.dispatchEvent(new CustomEvent<MermaidPngExportDetail>(
+      SAVE_MERMAID_PNG_EVENT,
+      { bubbles: true, detail },
+    ));
+  }
+
+  private mermaidTitle(wrapper: HTMLElement, svg: SVGSVGElement): string {
+    // Mermaid 11 has no universal diagram-title class. Restrict generic
+    // `*TitleText` matching to direct SVG children so class-node labels such
+    // as `classTitleText` cannot become the filename by accident.
+    const visibleTitle = svg.querySelector<SVGTextElement>([
+      ":scope > text[class$='TitleText']",
+      ":scope > text.titleText",
+      "text.pieTitleText",
+      ":scope > text.venn-title",
+      ":scope > text.treemapTitle",
+      ":scope > text.packetTitle",
+      "text.radarTitle",
+      "g.chart-title > text",
+      "g.main > g.title > text",
+      "g.wardley-map > text.wardley-title",
+      "text.cynefinTitle",
+      "g.ishikawa-head-group > text.ishikawa-head-label",
+    ].join(", "))?.textContent?.trim();
+    if (visibleTitle) return visibleTitle;
+
+    const sourceTitle = mermaidTitleFromSource(wrapper.dataset.scrybeSource ?? "");
+    const normalizedSourceTitle = normalizeTitle(sourceTitle);
+    if (normalizedSourceTitle) {
+      // Sequence, journey, timeline, and C4 render an inline title as an
+      // unclassed direct SVG child. Match that exact live node so what the
+      // user sees remains authoritative, without considering ordinary labels.
+      const renderedMatch = Array.from(svg.querySelectorAll<SVGTextElement>(":scope > text"))
+        .find(text => normalizeTitle(text.textContent ?? "") === normalizedSourceTitle)
+        ?.textContent?.trim();
+      if (renderedMatch) return renderedMatch;
+    }
+    if (sourceTitle) return sourceTitle;
+
+    const svgTitle = Array.from(svg.children)
+      .find(child => child.localName === "title")
+      ?.textContent?.trim();
+    if (svgTitle) return svgTitle;
+
+    let precedingHeading = "";
+    this.container.querySelectorAll<HTMLElement>("h1, h2, h3, h4, h5, h6")
+      .forEach(heading => {
+        if (heading.compareDocumentPosition(wrapper) & Node.DOCUMENT_POSITION_FOLLOWING) {
+          precedingHeading = heading.textContent?.trim() ?? precedingHeading;
+        }
+      });
+    return precedingHeading || "Diagram";
   }
 
   private interceptLinks(): void {
@@ -77,11 +173,28 @@ export class PreviewPane {
     });
   }
 
-  private renderMermaid(): void {
-    // @ts-ignore — Mermaid loaded via CDN
-    if (typeof window.mermaid !== "undefined") {
-      // @ts-ignore
-      window.mermaid.run({ nodes: this.container.querySelectorAll(".mermaid") });
+  private async renderMermaid(generation: number): Promise<void> {
+    const nodes = this.container.querySelectorAll<HTMLElement>(".mermaid");
+    // Preserve exact, entity-decoded source before Mermaid replaces the text
+    // with its live SVG. This source travels in the exported PNG metadata.
+    nodes.forEach(node => { node.dataset.scrybeSource = node.textContent ?? ""; });
+
+    const mermaid = (window as Window & {
+      mermaid?: { run(options: { nodes: NodeListOf<HTMLElement> }): Promise<void> };
+    }).mermaid;
+    if (mermaid) {
+      try {
+        // Make font selection/layout stable before Mermaid produces the live
+        // SVG. The context-menu exporter can then snapshot synchronously.
+        if (document.fonts?.ready) await document.fonts.ready;
+        if (generation !== this.renderGeneration ||
+            Array.from(nodes).some(node => !node.isConnected || !this.container.contains(node))) {
+          return;
+        }
+        await mermaid.run({ nodes });
+      } catch (error) {
+        console.error("Mermaid render failed:", error);
+      }
     }
   }
 
@@ -102,4 +215,8 @@ export class PreviewPane {
       pre.appendChild(btn);
     });
   }
+}
+
+function normalizeTitle(value: string): string {
+  return value.trim().replace(/\s+/g, " ");
 }

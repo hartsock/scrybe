@@ -31,6 +31,7 @@ scrybe-app/
 │   ├── main.ts            App bootstrap, window/tab lifecycle, MCP tab signal polling
 │   ├── editor.ts          CodeMirror 6 editor setup and state management
 │   ├── preview.ts         Live HTML preview pane
+│   ├── mermaid_png.ts     WYSIWYG Mermaid SVG → source-bearing PNG export
 │   ├── tabs.ts            Tab bar: open, close, switch, dirty indicator
 │   ├── sidebar.ts         File tree / folder browser
 │   ├── mcp_panel.ts       Agent MCP connection panel
@@ -67,6 +68,7 @@ Key `invoke(...)` targets exposed to the frontend:
 | Command | Description |
 |---------|-------------|
 | `render_markdown` | Markdown → HTML via `scrybe-render` |
+| `save_mermaid_png` | Embed source into a preview-rasterized PNG and save/replace it |
 | `read_file` / `list_directory` | Filesystem access |
 | `get_builtin_agents` / `set_agent_enabled` | Agent panel state |
 | `list_plugins` / `run_plugin` | Python plugin execution |
@@ -74,6 +76,17 @@ Key `invoke(...)` targets exposed to the frontend:
 | `vcs_open` / `vcs_status` / `vcs_stage_all` / `vcs_commit` / `vcs_fetch` / `vcs_log` / `vcs_remotes` | Git operations via `scrybe-vcs` (P4.8) |
 | `terminal_start` / `terminal_write` / `terminal_run` | Embedded shell (P4.11) |
 | `get_version` | Version string |
+
+## Save a rendered Mermaid diagram
+
+Right-click a Mermaid diagram in the Markdown preview to save exactly the
+displayed JavaScript-rendered image as a PNG. The native save dialog suggests
+`<document>_fig_<NN>_<title>.png`, lets you choose any folder, and can replace
+the destination after the native overwrite confirmation. Scrybe embeds the original
+Mermaid source, UUID, and SHA-256 in the PNG metadata so `scrybe extract` can
+recover and verify it later. This is the WYSIWYG human counterpart to the
+headless `mermaid_to_png` tool; their renderers differ, but their provenance
+contract is the same.
 
 ## Build and run
 
