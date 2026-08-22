@@ -49,6 +49,13 @@ The implementation must preserve these properties:
 - **Explicit commitment.** Agent edits may make the live buffer dirty. Saving to
   disk remains an explicit command and the authorship skill asks before save
   unless the user already requested persistence.
+- **Explicit acceptance before mutation.** An agent must stage a patch against
+  the live buffer and present it for review before it can change that buffer.
+  Only a distinct, user-approved acceptance action may apply the patch; a
+  request to edit, an approval to save, or a model tool call is not acceptance.
+  Acceptance is bound to the revision read when the patch was prepared, so a
+  human edit made during review invalidates the staged patch rather than being
+  overwritten.
 - **Trusted installation.** Detection may inspect the host, but installation
   only uses a hard-coded official Scrybe release origin, an immutable version
   and digest, and an explicit approval capability.
@@ -82,7 +89,9 @@ scrybe-plugin-host/
 `plugin.json` identifies Scrybe and points at the bundled skill and MCP
 configuration. `.mcp.json` launches `scrybe-plugin-host`. The host links the
 existing `scrybe-mcp-server` and `scrybe-tools` libraries in-process, then adds
-only the setup surface described below.
+the setup surface described below and an acceptance-gated authorship adapter.
+The adapter may expose proposal and acceptance capabilities, but it must not
+give an agent an unchecked path to the live-buffer mutation operation.
 
 The install-facing copy is:
 
@@ -197,11 +206,13 @@ than answer beside it. Its default loop is:
 2. open the requested document in Scrybe;
 3. read the live buffer and record its content/revision identity;
 4. resolve the requested section or object;
-5. propose or apply the smallest reviewable edit;
-6. read back the live buffer to detect intervening human edits;
-7. render or lint when the change affects presentation or structure;
-8. summarize what changed and leave the buffer dirty for human review; and
-9. save only when the user explicitly approves or originally requested save.
+5. prepare the smallest reviewable patch, bound to the read revision;
+6. present the patch and wait for explicit user acceptance;
+7. apply the accepted patch only if its precondition still matches the live
+   buffer, otherwise re-read and prepare a new patch;
+8. render or lint when the accepted change affects presentation or structure;
+9. summarize what changed and leave the buffer dirty for human review; and
+10. save only when the user explicitly approves or originally requested save.
 
 The skill treats a stale precondition as collaboration, not an error to erase:
 it re-reads, explains the conflict, and re-bases the proposed edit. It never
@@ -265,6 +276,10 @@ require a hosted copy of the user's documents.
   redirects, size bounds, digest verification, malformed metadata, and network
   failure.
 - Approval-capability tests for expiry, replay, mutation, and cross-plan use.
+- Staged-patch tests proving an agent cannot mutate the live buffer before an
+  explicit, revision-bound human acceptance; cover rejection, expiry, replay,
+  stale human edits during review, and the fact that save approval does not
+  authorize patch application.
 - Installer-launch abstraction tests proving exact executable and argument
   propagation without running an installer.
 - MCP contract tests for setup tools and parity tests proving core Scrybe tool
