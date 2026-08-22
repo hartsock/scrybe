@@ -749,8 +749,20 @@ mod tests {
         // on machines where a dev app happens to be running; the only other
         // live-transport test in this binary gates on BadArgs first, so the
         // env var cannot change its outcome.
-        let dir = tempfile::tempdir().expect("tempdir");
-        std::env::set_var("SCRYBE_SOCK", dir.path().join("no-app.sock"));
+        #[cfg(not(windows))]
+        let dead_dir = tempfile::tempdir().expect("tempdir");
+        #[cfg(not(windows))]
+        let dead_endpoint = dead_dir.path().join("no-app.sock");
+        #[cfg(windows)]
+        let dead_endpoint = std::path::PathBuf::from(format!(
+            r"\\.\pipe\scrybe-no-app-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("system clock after Unix epoch")
+                .as_nanos()
+        ));
+        std::env::set_var("SCRYBE_SOCK", dead_endpoint);
 
         let mut s = server();
         let resp = s

@@ -56,12 +56,16 @@ cargo test --workspace --exclude scrybe-app   # everything buildable without GTK
 
 ### Testing MCP ↔ live-app wiring without a GUI
 
-The MCP server talks to the running app over a unix socket (`scrybe-rpc`). To test
-that wiring deterministically (no display needed), **stand up a mock socket that
-speaks the `scrybe-rpc` protocol** and drive the tool against it. See
+The MCP server talks to the running app through `scrybe-rpc`: a Unix socket or
+Windows named pipe. To test that wiring deterministically (no display needed),
+**stand up a local endpoint that speaks the `scrybe-rpc` protocol** and drive the
+tool against it. See
 `scrybe-mcp-server/tests/live_app_open.rs` — it binds a `UnixListener`, points the
 client at it via `SCRYBE_SOCK`, and asserts `open` dials it (`live:true`). This is
-the fast, CI-friendly gate; the headless GUI run below is the visual confirmation.
+the fast Unix gate. On Windows, `scrybe-rpc/tests/windows_named_pipe.rs` binds a
+real named pipe through the production listener and verifies a complete client
+round trip plus typed missing-endpoint behavior. Windows CI executes it as part
+of `cargo test --workspace`.
 
 ## Frontend build (scrybe-app)
 

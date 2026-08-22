@@ -1,8 +1,9 @@
 //! CLI ↔ GUI RPC server.
 //!
-//! Binds a Unix-domain socket at `~/.scrybe/sock` (override: `$SCRYBE_SOCK`)
-//! and accepts JSON-RPC 2.0 requests. Each request is dispatched onto a
-//! Tauri event broadcast to the frontend, which already owns tab state.
+//! Binds the platform-local endpoint (`~/.scrybe/sock` on Unix, a per-user
+//! named pipe on Windows; override: `$SCRYBE_SOCK`) and accepts JSON-RPC 2.0
+//! requests. Each request is dispatched onto a Tauri event broadcast to the
+//! frontend, which already owns tab state.
 //!
 //! Fire-and-forget methods: `close`, `quit`.
 //! Each emits a typed event to the frontend and acks the caller.
@@ -23,13 +24,15 @@
 //!   5. If the frontend doesn't reply within `REPLY_TIMEOUT`, the channel
 //!      is dropped and the caller gets `ERR_REPLY_TIMEOUT`.
 //!
-//! ## Stale-socket recovery
+//! ## Unix stale-socket recovery
 //!
 //! On startup, if the socket file already exists, we try to connect to it.
 //! If the connect succeeds, the previous Scrybe is still alive and we
 //! refuse to start a second one. If it fails (ECONNREFUSED / ENOENT race),
 //! the file is unlinked and we rebind. Standard pattern.
 
+#[cfg(any(unix, windows))]
+use scrybe_rpc::transport;
 use scrybe_rpc::{
     default_socket_path, AckResult, CloseParams, EditParams, EventEnvelope, FindParams,
     JsonRpcVersion, OpenParams, QuitParams, ReadParams, Reply, Request, Response, SaveParams,
@@ -38,9 +41,8 @@ use scrybe_rpc::{
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Write};
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::Sender;
-use std::sync::{Arc, Mutex};
+use std::sync::Mutex;
 use std::thread;
 use std::time::Duration;
 use tauri::{AppHandle, Emitter};
@@ -69,27 +71,26 @@ pub fn cli_rpc_reply(id: u64, reply: Reply) {
     }
 }
 
-#[cfg(unix)]
-use std::os::unix::net::{UnixListener, UnixStream};
-
 /// Sentinel: refuse to bind if a live socket already exists. Returned from
 /// `spawn` so `setup()` can decide whether to surface this as a fatal error
 /// or fall through (typically: log and continue, since the GUI can still
 /// run without the CLI surface).
 #[derive(Debug, thiserror::Error)]
 pub enum SpawnError {
-    #[error("scrybe is already running (live socket at {0})")]
+    #[error("scrybe is already running (live local endpoint at {0})")]
     AlreadyRunning(PathBuf),
-    #[error("failed to bind socket {path}: {source}")]
+    #[error("failed to bind local endpoint {path}: {source}")]
     Bind {
         path: PathBuf,
         source: std::io::Error,
     },
+    #[cfg(unix)]
     #[error("failed to create socket parent directory {path}: {source}")]
     CreateDir {
         path: PathBuf,
         source: std::io::Error,
     },
+    #[cfg(unix)]
     #[error("failed to remove stale socket {path}: {source}")]
     RemoveStale {
         path: PathBuf,
@@ -97,8 +98,8 @@ pub enum SpawnError {
     },
 }
 
-/// Bind the socket and spawn the accept loop. Returns the live socket path
-/// on success so the caller can unlink it on shutdown.
+/// Bind the local endpoint and spawn the accept loop. Returns its address on
+/// success; Unix callers unlink the filesystem socket on shutdown.
 #[cfg(unix)]
 pub fn spawn(app: AppHandle) -> Result<PathBuf, SpawnError> {
     let path = default_socket_path();
@@ -117,7 +118,7 @@ pub fn spawn(app: AppHandle) -> Result<PathBuf, SpawnError> {
     *PENDING_REPLIES.lock().unwrap() = Some(HashMap::new());
 
     if path.exists() {
-        match UnixStream::connect(&path) {
+        match scrybe_rpc::client::try_connect_at(&path) {
             Ok(_) => return Err(SpawnError::AlreadyRunning(path)),
             Err(_) => {
                 std::fs::remove_file(&path).map_err(|e| SpawnError::RemoveStale {
@@ -128,7 +129,7 @@ pub fn spawn(app: AppHandle) -> Result<PathBuf, SpawnError> {
         }
     }
 
-    let listener = UnixListener::bind(&path).map_err(|e| SpawnError::Bind {
+    let listener = transport::listen_at(&path).map_err(|e| SpawnError::Bind {
         path: path.clone(),
         source: e,
     })?;
@@ -136,21 +137,14 @@ pub fn spawn(app: AppHandle) -> Result<PathBuf, SpawnError> {
     tracing::info!(socket = %path.display(), "scrybe-cli RPC server bound");
 
     let app_handle = app.clone();
-    let shutdown = Arc::new(AtomicBool::new(false));
-    let shutdown_clone = shutdown.clone();
-    thread::spawn(move || {
-        for stream in listener.incoming() {
-            if shutdown_clone.load(Ordering::Relaxed) {
-                break;
+    thread::spawn(move || loop {
+        match transport::accept(&listener) {
+            Ok(s) => {
+                let app = app_handle.clone();
+                thread::spawn(move || handle_connection(s, app));
             }
-            match stream {
-                Ok(s) => {
-                    let app = app_handle.clone();
-                    thread::spawn(move || handle_connection(s, app));
-                }
-                Err(e) => {
-                    tracing::warn!(error = %e, "scrybe-cli RPC accept error");
-                }
+            Err(e) => {
+                tracing::warn!(error = %e, "scrybe-cli RPC accept error");
             }
         }
     });
@@ -158,29 +152,51 @@ pub fn spawn(app: AppHandle) -> Result<PathBuf, SpawnError> {
     Ok(path)
 }
 
-#[cfg(not(unix))]
-pub fn spawn(_app: AppHandle) -> Result<PathBuf, SpawnError> {
-    // Windows named-pipe support is on the roadmap but not in Phase 1.
-    Err(SpawnError::Bind {
-        path: PathBuf::from("(unsupported on this platform)"),
-        source: std::io::Error::new(
-            std::io::ErrorKind::Unsupported,
-            "scrybe-cli RPC server is unix-only in Phase 1",
-        ),
-    })
-}
+#[cfg(windows)]
+pub fn spawn(app: AppHandle) -> Result<PathBuf, SpawnError> {
+    let path = default_socket_path();
 
-#[cfg(unix)]
-fn handle_connection(stream: UnixStream, app: AppHandle) {
-    let read_clone = match stream.try_clone() {
-        Ok(c) => c,
-        Err(e) => {
-            tracing::warn!(error = %e, "scrybe-cli RPC: stream clone failed");
-            return;
+    *PENDING_REPLIES.lock().unwrap() = Some(HashMap::new());
+
+    if scrybe_rpc::client::try_connect_at(&path).is_ok() {
+        return Err(SpawnError::AlreadyRunning(path));
+    }
+
+    let listener = match transport::listen_at(&path) {
+        Ok(listener) => listener,
+        Err(error) if error.kind() == std::io::ErrorKind::AddrInUse => {
+            return Err(SpawnError::AlreadyRunning(path));
+        }
+        Err(error) => {
+            return Err(SpawnError::Bind {
+                path,
+                source: error,
+            });
         }
     };
-    let reader = BufReader::new(read_clone);
-    let mut writer = stream;
+
+    tracing::info!(pipe = %path.display(), "scrybe-cli RPC server bound");
+
+    let app_handle = app.clone();
+    thread::spawn(move || loop {
+        match transport::accept(&listener) {
+            Ok(stream) => {
+                let app = app_handle.clone();
+                thread::spawn(move || handle_connection(stream, app));
+            }
+            Err(error) => {
+                tracing::warn!(error = %error, "scrybe-cli RPC accept error");
+            }
+        }
+    });
+
+    Ok(path)
+}
+
+#[cfg(any(unix, windows))]
+fn handle_connection(stream: transport::Stream, app: AppHandle) {
+    let reader = BufReader::new(&stream);
+    let mut writer = &stream;
 
     for line in reader.lines() {
         let line = match line {

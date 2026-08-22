@@ -17,9 +17,10 @@
 //! Newline-delimited JSON. One request per line, one response per line.
 //! Multiple requests on a single connection are processed FIFO.
 //!
-//! ## Socket location
+//! ## Local endpoint
 //!
-//! `~/.scrybe/sock` by default. Override with the `SCRYBE_SOCK` env var.
+//! Unix uses `~/.scrybe/sock`; Windows uses a per-user
+//! `\\.\pipe\scrybe-*` named pipe. Override either with `SCRYBE_SOCK`.
 
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -27,6 +28,7 @@ use std::path::PathBuf;
 /// JSON-RPC client dialer — shared by the CLI and the MCP server so both talk
 /// to the live app through one implementation.
 pub mod client;
+pub mod transport;
 
 pub use client::{ClientError, EnvelopeError, UnavailableKind};
 
@@ -466,12 +468,21 @@ impl Response {
     }
 }
 
-/// Resolve the socket path: `$SCRYBE_SOCK` if set, otherwise `~/.scrybe/sock`.
-/// Falls back to `/tmp/.scrybe-sock` only if `$HOME` is also unset.
+/// Resolve the local IPC endpoint.
+///
+/// Unix uses `$SCRYBE_SOCK` or `~/.scrybe/sock`. Windows uses
+/// `$SCRYBE_SOCK` or a per-user `\\.\pipe\scrybe-*` named pipe.
 pub fn default_socket_path() -> PathBuf {
+    #[cfg(windows)]
+    let home = std::env::var("USERPROFILE")
+        .ok()
+        .or_else(|| std::env::var("HOME").ok());
+    #[cfg(not(windows))]
+    let home = std::env::var("HOME").ok();
+
     resolve_socket_path(
         std::env::var("SCRYBE_SOCK").ok().as_deref(),
-        std::env::var("HOME").ok().as_deref(),
+        home.as_deref(),
     )
 }
 
@@ -482,9 +493,32 @@ fn resolve_socket_path(sock_override: Option<&str>, home: Option<&str>) -> PathB
     if let Some(s) = sock_override {
         return PathBuf::from(s);
     }
+
+    #[cfg(windows)]
+    {
+        let user = home
+            .and_then(|path| PathBuf::from(path).file_name().map(|name| name.to_owned()))
+            .and_then(|name| name.to_str().map(str::to_owned))
+            .unwrap_or_else(|| "user".to_string());
+        let safe_user: String = user
+            .chars()
+            .map(|character| {
+                if character.is_ascii_alphanumeric() || matches!(character, '-' | '_' | '.') {
+                    character
+                } else {
+                    '_'
+                }
+            })
+            .collect();
+        PathBuf::from(format!(r"\\.\pipe\scrybe-{safe_user}"))
+    }
+
+    #[cfg(not(windows))]
     if let Some(h) = home {
         return PathBuf::from(h).join(".scrybe").join("sock");
     }
+
+    #[cfg(not(windows))]
     PathBuf::from("/tmp/.scrybe-sock")
 }
 
@@ -763,15 +797,24 @@ mod tests {
     }
 
     #[test]
+    #[cfg(not(windows))]
     fn resolve_socket_path_uses_home_when_no_override() {
         let p = resolve_socket_path(None, Some("/home/test"));
         assert_eq!(p, PathBuf::from("/home/test/.scrybe/sock"));
     }
 
     #[test]
+    #[cfg(not(windows))]
     fn resolve_socket_path_falls_back_when_home_unset() {
         let p = resolve_socket_path(None, None);
         assert_eq!(p, PathBuf::from("/tmp/.scrybe-sock"));
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn resolve_socket_path_uses_per_user_named_pipe() {
+        let p = resolve_socket_path(None, Some(r"C:\Users\Test User"));
+        assert_eq!(p, PathBuf::from(r"\\.\pipe\scrybe-Test_User"));
     }
 
     #[test]

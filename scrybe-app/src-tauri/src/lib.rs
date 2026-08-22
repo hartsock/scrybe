@@ -115,6 +115,7 @@ fn quit_app(app: tauri::AppHandle) {
     // `exit` skips destructors, so the socket file would linger. A stale
     // socket is harmless (clients type it as not-running via ConnectionRefused,
     // #211) but tidy is better — best-effort unlink before exiting.
+    #[cfg(unix)]
     let _ = std::fs::remove_file(scrybe_rpc::default_socket_path());
     app.exit(0);
 }
