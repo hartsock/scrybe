@@ -94,6 +94,11 @@ Update references
 ```
 
 The editor previews the diff. The human accepts or edits. Conversation continues.
+The patch is staged only: an agent cannot mutate the live buffer merely because
+it was asked to make an edit. Applying a patch is a distinct, explicit human
+acceptance action, bound to the revision used to prepare the patch. If the
+human changes the document while reviewing, the patch becomes stale and must be
+re-read and re-based rather than overwrite the newer buffer.
 
 ### The Artifact is the Shared Workspace
 
@@ -186,8 +191,10 @@ This vision is not a pivot; it is the sharp form of the north star already in
    *before* the model is invoked. The model receives an object handle + revision +
    local context — never a whole document to search. This is the highest-leverage
    idea in the vision: it makes responses fast, deterministic, and cheap in tokens.
-2. **Edits are patches, not overwrites.** Every change is a reviewable, revisioned,
-   auditable patch — not a blind rewrite.
+2. **Edits are staged patches, not overwrites.** Every agent-proposed change is
+   a reviewable, revisioned, auditable patch — not a blind rewrite. It may
+   change the live buffer only after explicit human acceptance; saving is a
+   separate persistence decision.
 
 Both already have foundations in the codebase, which is what makes this an extension
 rather than a rewrite:
