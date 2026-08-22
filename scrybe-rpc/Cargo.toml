@@ -2,18 +2,22 @@
 name = "scrybe-rpc"
 version.workspace = true
 edition = "2021"
-description = "Scrybe CLI ↔ GUI wire protocol — JSON-RPC 2.0 types over a Unix socket."
+description = "Scrybe CLI ↔ GUI wire protocol over platform-local IPC."
 license = "Apache-2.0"
 repository = "https://github.com/hartsock/scrybe"
 homepage = "https://github.com/hartsock/scrybe"
 readme = "README.md"
-keywords = ["json-rpc", "ipc", "unix-socket", "scrybe"]
+keywords = ["json-rpc", "ipc", "named-pipe", "scrybe"]
 categories = ["network-programming", "encoding"]
 
 [dependencies]
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+interprocess.workspace = true
+windows-sys.workspace = true
 
 [lints]
 workspace = true

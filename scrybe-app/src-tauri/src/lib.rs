@@ -98,10 +98,11 @@ fn render_markdown(source: String) -> String {
     render_html(&doc, Theme::Default).html
 }
 
-/// Return the application version string baked in at compile time.
+/// Return the application version string baked in at compile time,
+/// including the Git commit (and `-dirty` marker) it was built from.
 #[tauri::command]
 fn get_version() -> &'static str {
-    env!("CARGO_PKG_VERSION")
+    scrybe_core::build_info::VERSION_WITH_COMMIT
 }
 
 /// Terminate the app process (#232). The socket `quit` path used to close the
@@ -114,6 +115,7 @@ fn quit_app(app: tauri::AppHandle) {
     // `exit` skips destructors, so the socket file would linger. A stale
     // socket is harmless (clients type it as not-running via ConnectionRefused,
     // #211) but tidy is better — best-effort unlink before exiting.
+    #[cfg(unix)]
     let _ = std::fs::remove_file(scrybe_rpc::default_socket_path());
     app.exit(0);
 }

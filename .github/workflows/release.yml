@@ -30,8 +30,10 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/')
     # Release builds always use GitHub-hosted runners:
     # - macOS arm64 requires Apple Silicon (M-series) runners on GitHub
-    # - Windows/Linux builds are unavailable on the local ARC farm
-    # CI lint/test uses self-hosted runners (see ci.yml).
+    # - Windows/Linux builds were unavailable on the old local ARC farm
+    # CI lint/test also moved to GitHub-hosted runners (see ci.yml,
+    # 2026-08-18) — only the crates.io publish job below still runs on
+    # scrybe-k3s, for its Vault-injected CARGO_REGISTRY_TOKEN.
     strategy:
       fail-fast: false
       matrix:

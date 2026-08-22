@@ -60,6 +60,8 @@ clap = { version = "4", features = ["derive", "env"] }
 ratatui = "0.29"
 crossterm = "0.28"
 which = "7"
+interprocess = "2.4.3"
+windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_System_Pipes"] }
 
 # PNG / image codec (scrybe-mermaid iTXt)
 png = "0.17"

@@ -15,12 +15,11 @@ truth.
 When the desktop app is running, the CLI talks to it instead of opening
 files directly. That makes commands like `scrybe open path/to/note.md`
 surface in the existing GUI session as a new tab. The conversation between
-the two processes goes over a Unix-domain socket (named pipe on Windows)
+the two processes goes over a Unix-domain socket or Windows named pipe
 using newline-delimited JSON-RPC 2.0.
 
-This crate is *just* the types and codec. It deliberately has no I/O — the
-client (`scrybe-cli`) and the server (`scrybe-app`) each implement their
-own transport on top.
+This crate owns the typed protocol, shared client, and platform transport so
+the CLI, MCP server, and desktop app cannot drift into different wire paths.
 
 ## Methods (Phase 1)
 
@@ -36,10 +35,12 @@ own transport on top.
 Newline-delimited JSON. One request per line, one response per line.
 Multiple requests on a single connection are processed FIFO.
 
-## Socket location
+## Local endpoint
 
-`~/.scrybe/sock` by default. Override with the `SCRYBE_SOCK` environment
-variable.
+Unix uses `~/.scrybe/sock`. Windows uses a per-user
+`\\.\pipe\scrybe-<user>` named pipe. Override either default with the
+`SCRYBE_SOCK` environment variable; on Windows the override must also be a
+full `\\.\pipe\...` named-pipe path.
 
 ## License
 

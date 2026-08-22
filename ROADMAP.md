@@ -68,6 +68,8 @@ against merged code + PRs and reconciled:
   #162–#167) and the **install/upgrade epic #146** (Part A shipped, #151).
 - **Windows CI**: the external nightly Windows check (#135) is now mirrored by a
   `test-rust-windows` job in `ci.yml`, so Windows breakage is caught at PR time.
+- **Windows live-editor IPC:** #222 adds the per-user named-pipe transport and
+  native round-trip coverage while preserving the 0.6 JSON-RPC contract.
 - **Renderer adopted (moved up from v0.6):** the #132 spike was *run* and
   **passed** → `mermaid-rs-renderer` v0.3.1 adopted; the `scrybe-mermaid-render`
   wrapper shipped (#171 SVG+provenance, #172 render_png) and **#119 is closed**
@@ -432,9 +434,6 @@ Per `CLAUDE.md`'s zero-warning policy and `AGENTS.md`'s autonomy rules:
 - **Bidirectional swarm / NATS features (`scrybe-swarm`) and `scrybe-vcs` tool
   groups.** Facet stubs are reserved in v0.7 but the tool groups themselves are
   post-1.0 unless a concrete need lands an issue.
-- **Windows named-pipe transport.** `cli_rpc.rs` is unix-only; `Transport` is the
-  clean seam. **Re-entered:** tracked as **#222** (successor filed in the
-  post-0.6.2 sweep); unmilestoned until a Windows user pushes it up.
 - **Deprecating Scrybe in favor of Ferrite / markdown-tui-explorer.** Both
   #114/#115 spikes resolved **build-ours** — neither exposes an MCP/IPC surface
   to host Scrybe's live-buffer co-editing thesis. Re-enters only on a new spike.

@@ -3,9 +3,10 @@
 
 //! Thin JSON-RPC client for talking to a running Scrybe GUI.
 //!
-//! Connects to the Unix-domain socket at `~/.scrybe/sock` (or `$SCRYBE_SOCK`),
-//! sends a single request, returns the reply's `result` value. One request per
-//! connection keeps the client trivially correct.
+//! Connects to the platform-local endpoint (`~/.scrybe/sock` on Unix or a
+//! per-user named pipe on Windows), sends a single request, and returns the
+//! reply's `result` value. One request per connection keeps the client
+//! trivially correct. `SCRYBE_SOCK` overrides either default.
 //!
 //! This lives in `scrybe-rpc` (not `scrybe-cli`) so **every** client — the CLI
 //! and the MCP server — dials the live app through one shared implementation.
@@ -29,13 +30,34 @@
 //! frozen in `docs/rpc-contract-0.6.md`.
 
 use crate::{default_socket_path, JsonRpcVersion, Request, RpcError};
+use std::io::{Read as _, Write};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 #[cfg(unix)]
-use std::io::{BufRead, BufReader, Read as _, Write};
+use std::io::{BufRead, BufReader};
+
+#[cfg(windows)]
+use std::time::Instant;
+
 #[cfg(unix)]
 use std::os::unix::net::UnixStream;
+
+#[cfg(windows)]
+use interprocess::os::windows::named_pipe::{pipe_mode::Bytes, DuplexPipeStream as WindowsStream};
+#[cfg(windows)]
+use interprocess::ConnectWaitMode;
+#[cfg(windows)]
+use std::os::windows::io::{AsHandle, AsRawHandle};
+#[cfg(windows)]
+use windows_sys::Win32::{
+    Foundation::{ERROR_BROKEN_PIPE, ERROR_PIPE_NOT_CONNECTED},
+    System::Pipes::PeekNamedPipe,
+};
+
+/// Per-request connection timeout. This prevents an exhausted Windows named
+/// pipe from blocking a CLI or MCP caller indefinitely.
+pub const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Per-request read timeout. Reply-based commands (open/read/find/section/edit)
 /// block until the GUI frontend replies; the app's own reply timeout is 5 s, so
@@ -199,6 +221,11 @@ pub fn try_connect() -> Result<UnixStream, ClientError> {
     try_connect_at(&default_socket_path())
 }
 
+#[cfg(windows)]
+pub fn try_connect() -> Result<WindowsStream<Bytes>, ClientError> {
+    try_connect_at(&default_socket_path())
+}
+
 /// Connect at an explicit socket path. Tests use this to avoid the
 /// `SCRYBE_SOCK` env-var race when running in parallel.
 #[cfg(unix)]
@@ -237,27 +264,61 @@ pub fn try_connect_at(path: &Path) -> Result<UnixStream, ClientError> {
     }
 }
 
-#[cfg(not(unix))]
+#[cfg(windows)]
+pub fn try_connect_at(path: &Path) -> Result<WindowsStream<Bytes>, ClientError> {
+    match WindowsStream::connect_by_path_with_wait_mode(
+        path.as_os_str(),
+        ConnectWaitMode::Timeout(CONNECT_TIMEOUT),
+    ) {
+        Ok(stream) => {
+            stream.set_nonblocking(true).map_err(ClientError::Io)?;
+            Ok(stream)
+        }
+        Err(error) => Err(map_connect_error(path, error)),
+    }
+}
+
+#[cfg(not(any(unix, windows)))]
 pub fn try_connect() -> Result<(), ClientError> {
     try_connect_at(Path::new("(unsupported)"))
 }
 
-#[cfg(not(unix))]
+#[cfg(not(any(unix, windows)))]
 pub fn try_connect_at(path: &Path) -> Result<(), ClientError> {
     Err(unsupported(path))
 }
 
-/// Non-unix has no socket transport (Phase 1), so no live app is ever
+/// Other targets have no local transport, so no live app is ever
 /// reachable — the honest outcome is the typed not-running condition
 /// (`is_not_running() == true`), NOT a transport engine fault: callers get
 /// the same business-level `no_live_app` / headless behavior they would on a
-/// unix host with no app running. (Windows named-pipe transport is a
-/// documented follow-up in `docs/rpc-contract-0.6.md`.)
-#[cfg(not(unix))]
+/// supported host with no app running.
+#[cfg(not(any(unix, windows)))]
 fn unsupported(path: &Path) -> ClientError {
     ClientError::SocketUnavailable {
         path: path.to_path_buf(),
         kind: UnavailableKind::NotFound,
+    }
+}
+
+#[cfg(windows)]
+fn map_connect_error(path: &Path, error: std::io::Error) -> ClientError {
+    match error.kind() {
+        std::io::ErrorKind::NotFound => ClientError::SocketUnavailable {
+            path: path.to_path_buf(),
+            kind: UnavailableKind::NotFound,
+        },
+        std::io::ErrorKind::ConnectionRefused => ClientError::SocketUnavailable {
+            path: path.to_path_buf(),
+            kind: UnavailableKind::ConnectionRefused,
+        },
+        std::io::ErrorKind::PermissionDenied => ClientError::PermissionDenied {
+            path: path.to_path_buf(),
+        },
+        std::io::ErrorKind::TimedOut | std::io::ErrorKind::WouldBlock => {
+            ClientError::ConnectTimeout
+        }
+        _ => ClientError::Io(error),
     }
 }
 
@@ -291,7 +352,28 @@ pub fn send_to(
     validate_envelope(&raw, REQUEST_ID)
 }
 
-#[cfg(not(unix))]
+#[cfg(windows)]
+pub fn send_to(
+    pipe: &Path,
+    method: &str,
+    params: serde_json::Value,
+) -> Result<serde_json::Value, ClientError> {
+    let mut stream = try_connect_at(pipe)?;
+    let req = Request {
+        jsonrpc: JsonRpcVersion,
+        id: REQUEST_ID,
+        method: method.to_string(),
+        params,
+    };
+    let mut frame = serde_json::to_vec(&req)
+        .map_err(|e| ClientError::Io(std::io::Error::new(std::io::ErrorKind::InvalidData, e)))?;
+    frame.push(b'\n');
+    write_named_pipe_frame(&mut stream, &frame)?;
+    let raw = read_named_pipe_frame(&mut stream)?;
+    validate_envelope(&raw, REQUEST_ID)
+}
+
+#[cfg(not(any(unix, windows)))]
 pub fn send_to(
     socket: &Path,
     _method: &str,
@@ -302,8 +384,9 @@ pub fn send_to(
 
 /// Read one newline-terminated reply frame, enforcing [`MAX_FRAME_BYTES`]
 /// before any unbounded allocation and typing timeout/EOF failures.
+#[cfg(any(unix, windows))]
 #[cfg(unix)]
-fn read_frame(stream: UnixStream) -> Result<Vec<u8>, ClientError> {
+fn read_frame(stream: impl std::io::Read) -> Result<Vec<u8>, ClientError> {
     // `take` caps how much the reader will ever pull, so a runaway server
     // cannot balloon `buf` past the limit (+1 to detect "too large").
     let mut reader = BufReader::new(stream).take(MAX_FRAME_BYTES as u64 + 1);
@@ -328,6 +411,106 @@ fn read_frame(stream: UnixStream) -> Result<Vec<u8>, ClientError> {
         )));
     }
     Ok(buf)
+}
+
+#[cfg(windows)]
+fn write_named_pipe_frame(
+    stream: &mut WindowsStream<Bytes>,
+    frame: &[u8],
+) -> Result<(), ClientError> {
+    let deadline = Instant::now() + WRITE_TIMEOUT;
+    let mut written = 0;
+    while written < frame.len() {
+        match stream.write(&frame[written..]) {
+            Ok(0) => {
+                return Err(ClientError::Io(std::io::Error::new(
+                    std::io::ErrorKind::WriteZero,
+                    "named pipe closed while writing request",
+                )));
+            }
+            Ok(count) => written += count,
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                if Instant::now() >= deadline {
+                    return Err(ClientError::WriteTimeout);
+                }
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            Err(error) => return Err(write_error(error)),
+        }
+    }
+    Ok(())
+}
+
+#[cfg(windows)]
+fn read_named_pipe_frame(stream: &mut WindowsStream<Bytes>) -> Result<Vec<u8>, ClientError> {
+    let deadline = Instant::now() + READ_TIMEOUT;
+    let mut frame = Vec::new();
+    let mut chunk = [0_u8; 8192];
+    loop {
+        match stream.read(&mut chunk) {
+            Ok(0) => {
+                if named_pipe_peer_is_connected(stream)? {
+                    if Instant::now() >= deadline {
+                        return Err(ClientError::ReadTimeout);
+                    }
+                    std::thread::sleep(Duration::from_millis(5));
+                } else {
+                    let message = if frame.is_empty() {
+                        "server closed connection without responding"
+                    } else {
+                        "connection closed mid-frame"
+                    };
+                    return Err(ClientError::Io(std::io::Error::new(
+                        std::io::ErrorKind::UnexpectedEof,
+                        message,
+                    )));
+                }
+            }
+            Ok(count) => {
+                frame.extend_from_slice(&chunk[..count]);
+                if frame.len() > MAX_FRAME_BYTES {
+                    return Err(ClientError::FrameTooLarge {
+                        bytes: frame.len(),
+                        limit: MAX_FRAME_BYTES,
+                    });
+                }
+                if let Some(newline) = frame.iter().position(|byte| *byte == b'\n') {
+                    frame.truncate(newline + 1);
+                    return Ok(frame);
+                }
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                if Instant::now() >= deadline {
+                    return Err(ClientError::ReadTimeout);
+                }
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            Err(error) => return Err(read_error(error)),
+        }
+    }
+}
+
+#[cfg(windows)]
+fn named_pipe_peer_is_connected(stream: &WindowsStream<Bytes>) -> Result<bool, ClientError> {
+    let succeeded = unsafe {
+        PeekNamedPipe(
+            stream.as_handle().as_raw_handle(),
+            std::ptr::null_mut(),
+            0,
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+        )
+    };
+    if succeeded != 0 {
+        return Ok(true);
+    }
+
+    let error = std::io::Error::last_os_error();
+    match error.raw_os_error().map(|code| code as u32) {
+        Some(ERROR_BROKEN_PIPE | ERROR_PIPE_NOT_CONNECTED) => Ok(false),
+        _ => Err(read_error(error)),
+    }
 }
 
 /// Type a write-side I/O failure: timeout kinds become [`ClientError::WriteTimeout`].
