@@ -61,7 +61,9 @@ The implementation must preserve these properties:
   and digest, a release manifest signature verified against a public key pinned
   in the host, and an explicit approval capability. A checksum fetched from the
   release channel alone is transport-integrity evidence, not release
-  authenticity.
+  authenticity. After the host begins at that official origin, redirect
+  destinations are untrusted delivery transports: only the signed artifact
+  identity and content address authorize execution.
 - **Plain-text sovereignty.** The plugin does not upload documents to a Scrybe
   service. Documents stay in the user's workspace and remain ordinary files.
 - **One tool engine.** Plugin tools are backed by `scrybe-tools`; schemas and
@@ -149,7 +151,8 @@ Read-only. Resolves an install or update from the official
 - exact version;
 - exact asset name and HTTPS URL;
 - expected SHA-256 digest;
-- signed release-manifest identity and verified key identifier;
+- signed release-manifest identity, content address, size bound, and verified
+  key identifier;
 - publisher/repository identity;
 - whether elevation or visible installer UI is expected; and
 - a short-lived opaque `plan_id` bound to those exact values.
@@ -157,9 +160,12 @@ Read-only. Resolves an install or update from the official
 The release workflow publishes a machine-readable checksum manifest alongside
 the assets and signs it with the release key. The host verifies that signature
 against its pinned public key before it trusts the manifest's asset name,
-version, and SHA-256 digest. A release without a valid signature and digest is
-not installable through the plugin. The tool returns instructions rather than
-weakening verification.
+version, platform, architecture, size, and SHA-256 digest. A release without a
+valid signature and digest is not installable through the plugin. Redirects
+after the initial hard-coded official release endpoint are untrusted transports,
+not trust decisions: the downloaded bytes must still match the signed artifact
+identity and content address before they may be launched. The tool returns
+instructions rather than weakening verification.
 
 ### `scrybe_setup_install`
 
@@ -262,9 +268,15 @@ require a hosted copy of the user's documents.
 - A checksum manifest fetched from the release channel is never treated as an
   independent trust root. The host verifies the manifest signature against its
   bundled pinned public key before accepting its asset or digest.
-- Redirects are accepted only when the final HTTPS origin remains within the
-  approved GitHub release asset path.
-- Release metadata and the downloaded asset are size-bounded.
+- Redirects are permitted only after the initial request to the hard-coded
+  official release endpoint. Their destinations are untrusted transports, not
+  authorities: HTTPS is required; credentials and non-standard ports are
+  rejected; redirects are bounded; and each resolved and connected address is
+  checked to reject loopback, private, link-local, and other reserved networks.
+  The connection check prevents DNS rebinding from bypassing that rule.
+- Release metadata and the downloaded asset are size-bounded. The downloaded
+  asset is never launched until its size, signed identity, and SHA-256 content
+  address all verify.
 - Temporary files use restrictive permissions and are removed after success or
   failure.
 - Logs redact user paths where possible and never contain document contents,
@@ -282,7 +294,8 @@ require a hosted copy of the user's documents.
 - Trusted-path validation, PATH substitution, symlink/reparse escape, and
   version/contract mismatch tests.
 - Mocked release metadata and asset server tests for origin validation,
-  redirects, size bounds, signature and digest verification, malformed or
+  untrusted redirect handling, redirect and size bounds, private-address and
+  DNS-rebinding rejection, signature and digest verification, malformed or
   unsigned metadata, wrong-key signatures, and network failure.
 - Approval-capability tests for expiry, replay, mutation, and cross-plan use.
 - Staged-patch tests proving an agent cannot mutate the live buffer before an
