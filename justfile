@@ -1,5 +1,9 @@
 # Scrybe development tasks
 
+# Tauri uses the workspace Cargo target directory, which may be overridden by
+# CARGO_TARGET_DIR or a Cargo configuration.
+cargo_target_dir := `cargo metadata --manifest-path scrybe-app/src-tauri/Cargo.toml --no-deps --format-version 1 | sed -n 's/.*"target_directory":"\([^"]*\)".*/\1/p'`
+
 default:
     @just --list
 
@@ -31,9 +35,9 @@ install-app: app install-python-toolkit
     rm -rf ~/Applications/Scrybe.app
     rm -f ~/venv/bin/scrybe-app
     mkdir -p ~/venv/bin
-    cp scrybe-app/target/release/bundle/macos/Scrybe.app/Contents/MacOS/scrybe-app ~/venv/bin/scrybe-app
+    cp {{cargo_target_dir}}/release/bundle/macos/Scrybe.app/Contents/MacOS/scrybe-app ~/venv/bin/scrybe-app
     mkdir -p ~/Applications
-    cp -R scrybe-app/target/release/bundle/macos/Scrybe.app ~/Applications/
+    cp -R {{cargo_target_dir}}/release/bundle/macos/Scrybe.app ~/Applications/
 
 # Alias for people looking for the app-specific install recipe.
 app-install: install-app
@@ -47,6 +51,7 @@ install-python-toolkit:
     cd scrybe-mcp-server && VIRTUAL_ENV="$HOME/venv" ~/venv/bin/maturin develop --release
     cd scrybe-cli && VIRTUAL_ENV="$HOME/venv" ~/venv/bin/maturin develop --release
     cd scrybe-plugin-docx && ~/venv/bin/python -m pip install -e .
+    cd scrybe-meta && ~/venv/bin/python -m pip install -e .
 
 # Install all Python packages in editable/dev mode (compiles Rust binaries)
 editable:
@@ -55,6 +60,7 @@ editable:
     cd scrybe-mcp-server && maturin develop --release
     cd scrybe-cli && maturin develop --release
     cd scrybe-plugin-docx && python -m pip install -e .
+    cd scrybe-meta && python -m pip install -e .
 
 # Build the Tauri desktop app (requires npm install first)
 app:

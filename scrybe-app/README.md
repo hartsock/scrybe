@@ -92,7 +92,7 @@ cargo tauri build
 cargo test -p scrybe-app
 ```
 
-On macOS the production build produces `scrybe-app/target/release/bundle/macos/Scrybe.app`.
+On macOS the production build produces `<Cargo target directory>/release/bundle/macos/Scrybe.app`; use `cargo metadata --no-deps --format-version 1` to identify a custom target directory.
 Install to `~/Applications/Scrybe.app` for the CLI launcher to find it automatically.
 
 From the repository root, `just install-app` builds and installs the desktop app
