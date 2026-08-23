@@ -49,6 +49,10 @@ addressed by canonical `path`.
 > `export_figures` tools mirror the path bar, theme dropdown, View button,
 > Vim toggle, the Export button, and the "Export Diagrams…" menu item
 > respectively.
+>
+> Host installation lifecycle controls are the deliberate exception: installing
+> or removing a shell command mutates the local machine rather than a document,
+> so it is available through the native app and local CLI but never through MCP.
 
 > `embed`, `extract`, `export`, `mermaid_to_png`, `export_figures`, `render`,
 > and `lint` are **in-process** — they work headless, no running app needed.

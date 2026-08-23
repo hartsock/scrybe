@@ -3,10 +3,13 @@
 
 //! Native menu bar — File / Edit / View (#184).
 //!
-//! Every custom item routes to the frontend over a single `scrybe://menu`
+//! Editor controls route to the frontend over a single `scrybe://menu`
 //! event carrying the item id; the frontend dispatches to the same
 //! single-entry-point functions the toolbar buttons and the MCP pollers
 //! already share, so the human ↔ MCP parity rule holds with no new tools.
+//! Host installation lifecycle items are deliberately local-only: exposing
+//! PATH mutation through MCP would turn an editor control into remote system
+//! administration.
 //! The Edit menu is all predefined items — required once the default menu
 //! is replaced, or the webview loses its clipboard shortcuts.
 //!
@@ -42,6 +45,10 @@ pub const MENU_IDS: &[&str] = &[
     "toggle_vim",
     "toggle_wrap",
     "close_window",
+    #[cfg(target_os = "macos")]
+    "install_shell_command",
+    #[cfg(target_os = "macos")]
+    "uninstall_shell_command",
 ];
 
 /// Validate a menu event id against the contract. Returns the id back as
@@ -218,12 +225,29 @@ pub fn build(app: &AppHandle<Wry>) -> tauri::Result<Menu<Wry>> {
     // On macOS the first submenu becomes the application menu.
     #[cfg(target_os = "macos")]
     {
+        let install_shell_command = MenuItem::with_id(
+            app,
+            "install_shell_command",
+            "Install or Repair 'scrybe' Command…",
+            true,
+            None::<&str>,
+        )?;
+        let uninstall_shell_command = MenuItem::with_id(
+            app,
+            "uninstall_shell_command",
+            "Remove 'scrybe' Command…",
+            true,
+            None::<&str>,
+        )?;
         let app_menu = Submenu::with_items(
             app,
             "Scrybe",
             true,
             &[
                 &PredefinedMenuItem::about(app, None, None)?,
+                &PredefinedMenuItem::separator(app)?,
+                &install_shell_command,
+                &uninstall_shell_command,
                 &PredefinedMenuItem::separator(app)?,
                 &PredefinedMenuItem::hide(app, None)?,
                 &PredefinedMenuItem::hide_others(app, None)?,

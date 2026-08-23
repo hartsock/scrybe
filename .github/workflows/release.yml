@@ -40,12 +40,15 @@ jobs:
         include:
           - platform: macos-latest      # M-series Apple Silicon
             args: "--target aarch64-apple-darwin"
+            triple: aarch64-apple-darwin
             label: macos-arm64
           - platform: ubuntu-22.04
             args: ""
+            triple: x86_64-unknown-linux-gnu
             label: linux-x86_64
           - platform: windows-latest
             args: ""
+            triple: x86_64-pc-windows-msvc
             label: windows-x86_64
           # macOS Intel (macos-13 runner) was dropped from the matrix:
           # GitHub-hosted Intel Mac runners have multi-hour queue times
@@ -67,7 +70,7 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
         with:
-          targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin' || '' }}
+          targets: ${{ matrix.triple }}
 
       - uses: Swatinem/rust-cache@v2
 
@@ -85,6 +88,7 @@ jobs:
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SCRYBE_TARGET_TRIPLE: ${{ matrix.triple }}
         with:
           projectPath: scrybe-app
           tagName: ${{ github.ref_name }}
@@ -115,7 +119,16 @@ jobs:
             See [CHANGELOG.md](https://github.com/hartsock/scrybe/blob/main/CHANGELOG.md) for details.
           releaseDraft: true
           prerelease: false
-          args: ${{ matrix.args }}
+          args: "--config src-tauri/tauri.bundle.conf.json ${{ matrix.args }}"
+
+      - name: Verify bundled CLI
+        if: runner.os == 'macOS'
+        run: |
+          set -eu
+          CLI="$(find target -path '*/bundle/macos/Scrybe.app/Contents/MacOS/scrybe' -type f -print -quit)"
+          test -n "$CLI"
+          test -x "$CLI"
+          "$CLI" --version
 
   # ── OS package channels (tag-only) ────────────────────────────────────────
   #

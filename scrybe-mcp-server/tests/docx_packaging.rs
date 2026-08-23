@@ -60,8 +60,8 @@ fn local_install_wires_docx_exporter() {
         "app install should include the Python runtime tools"
     );
     assert!(
-        justfile.contains("scrybe-app/target/release/bundle/macos/Scrybe.app"),
-        "app install should use Tauri's project-local macOS bundle output"
+        justfile.contains("{{cargo_target_dir}}/release/bundle/macos/Scrybe.app"),
+        "app install should use Cargo's configured target directory"
     );
     assert!(
         justfile.contains(

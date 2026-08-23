@@ -45,7 +45,7 @@ cargo test -p scrybe-ratatui --features highlight
 just test
 
 if command -v npm >/dev/null 2>&1; then
-    (cd scrybe-app && npm ci && npm run build)
+    (cd scrybe-app && npm ci && npm run build && npm run test:packaging)
 else
     echo "npm not found; skipping TypeScript build"
 fi

@@ -26,18 +26,20 @@ fmt:
 
 clean:
     cargo clean
+    rm -f scrybe-app/src-tauri/scrybe-*
 
-# Full install: build app + all Python packages into ~/venv, bundle to ~/Applications
+# Full install: app + Python toolkit + an idempotent ~/.local/bin/scrybe link.
 install: install-app
 
 # Install the desktop app plus its runtime Python tools.
 install-app: app install-python-toolkit
     rm -rf ~/Applications/Scrybe.app
-    rm -f ~/venv/bin/scrybe-app
+    rm -f ~/venv/bin/scrybe ~/venv/bin/scrybe-app
     mkdir -p ~/venv/bin
     cp {{cargo_target_dir}}/release/bundle/macos/Scrybe.app/Contents/MacOS/scrybe-app ~/venv/bin/scrybe-app
     mkdir -p ~/Applications
     cp -R {{cargo_target_dir}}/release/bundle/macos/Scrybe.app ~/Applications/
+    ~/Applications/Scrybe.app/Contents/MacOS/scrybe shell-command install
 
 # Alias for people looking for the app-specific install recipe.
 app-install: install-app
@@ -64,8 +66,21 @@ editable:
 
 # Build the Tauri desktop app (requires npm install first)
 app:
-    cd scrybe-app && npm install && npm run tauri build
+    cd scrybe-app && npm install && npm run tauri -- build --config src-tauri/tauri.bundle.conf.json
 
 # Run the Tauri app in development mode
 dev:
+    cargo build -p scrybe-cli
     cd scrybe-app && npm install && npm run tauri dev
+
+# Re-run the complete idempotent installer. This repairs missing app files and
+# broken/older managed command links without overwriting unrelated commands.
+repair-install: install
+
+# Remove only development-install artifacts owned by this recipe. User
+# documents/configuration and package-manager installations remain untouched.
+uninstall:
+    cargo run --quiet -p scrybe-cli -- shell-command uninstall
+    rm -rf ~/Applications/Scrybe.app
+    rm -f ~/venv/bin/scrybe-app ~/venv/bin/scrybe ~/venv/bin/scrybe-mcp-server ~/venv/bin/scrybe-docx
+    ~/venv/bin/python -m pip uninstall -y scrybe.ai scrybe-cli scrybe-mcp-server scrybe-py scrybe-mermaid scrybe-plugin-docx

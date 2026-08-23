@@ -6,6 +6,8 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
+    "bundle:prepare": "node scripts/stage-cli.mjs",
+    "test:packaging": "node --test scripts/*.test.mjs",
     "preview": "vite preview",
     "tauri": "tauri"
   },

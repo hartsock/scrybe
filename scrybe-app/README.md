@@ -73,6 +73,7 @@ Key `invoke(...)` targets exposed to the frontend:
 | `mcp_server_start` / `mcp_server_status` / `mcp_connection_info` | In-app MCP sidecar (P4.7) |
 | `vcs_open` / `vcs_status` / `vcs_stage_all` / `vcs_commit` / `vcs_fetch` / `vcs_log` / `vcs_remotes` | Git operations via `scrybe-vcs` (P4.8) |
 | `terminal_start` / `terminal_write` / `terminal_run` | Embedded shell (P4.11) |
+| `install_shell_command` / `shell_command_status` / `uninstall_shell_command` | Local-only lifecycle for the managed CLI link |
 | `get_version` | Version string |
 
 ## Build and run
@@ -82,11 +83,11 @@ Key `invoke(...)` targets exposed to the frontend:
 cargo install tauri-cli --version "^2"
 cd scrybe-app && npm install
 
-# Development (hot-reload)
-cargo tauri dev
+# Development (hot-reload, including the adjacent CLI sidecar)
+cd .. && just dev
 
-# Production build (creates .app / .exe / .deb)
-cargo tauri build
+# Production build with the matching CLI embedded
+cd .. && just app
 
 # Run tests (Rust backend only)
 cargo test -p scrybe-app
@@ -95,6 +96,7 @@ cargo test -p scrybe-app
 On macOS the production build produces `<Cargo target directory>/release/bundle/macos/Scrybe.app`; use `cargo metadata --no-deps --format-version 1` to identify a custom target directory.
 Install to `~/Applications/Scrybe.app` for the CLI launcher to find it automatically.
 
-From the repository root, `just install-app` builds and installs the desktop app
-and the Python runtime tools it shells out to, including the Word (`.docx`)
-exporter.
+From the repository root, `just install-app` builds and installs the desktop
+app and Python runtime tools, then idempotently installs
+`~/.local/bin/scrybe`. The app's native Scrybe menu offers the same
+install/repair/remove lifecycle for drag-and-drop DMG installations.
