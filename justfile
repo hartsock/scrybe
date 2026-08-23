@@ -31,9 +31,9 @@ install-app: app install-python-toolkit
     rm -rf ~/Applications/Scrybe.app
     rm -f ~/venv/bin/scrybe-app
     mkdir -p ~/venv/bin
-    cp target/release/bundle/macos/Scrybe.app/Contents/MacOS/scrybe-app ~/venv/bin/scrybe-app
+    cp scrybe-app/target/release/bundle/macos/Scrybe.app/Contents/MacOS/scrybe-app ~/venv/bin/scrybe-app
     mkdir -p ~/Applications
-    cp -R target/release/bundle/macos/Scrybe.app ~/Applications/
+    cp -R scrybe-app/target/release/bundle/macos/Scrybe.app ~/Applications/
 
 # Alias for people looking for the app-specific install recipe.
 app-install: install-app

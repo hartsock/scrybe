@@ -60,6 +60,10 @@ fn local_install_wires_docx_exporter() {
         "app install should include the Python runtime tools"
     );
     assert!(
+        justfile.contains("scrybe-app/target/release/bundle/macos/Scrybe.app"),
+        "app install should use Tauri's project-local macOS bundle output"
+    );
+    assert!(
         justfile.contains(
             "cd scrybe-mermaid && VIRTUAL_ENV=\"$HOME/venv\" ~/venv/bin/maturin develop --release"
         ),
