@@ -180,7 +180,9 @@ explicit persist (the agent-side twin of Cmd+S / 💾).
 Every human control in scrybe-app has an MCP equivalent and vice versa
 (`state`/`set_theme`/`view_mode`/`set_vim`/`export`/`export_figures` mirror
 the path bar, theme dropdown, View button, Vim toggle, the Export button,
-and the "Export Diagrams…" menu item).
+and the "Export Diagrams…" menu item; `mermaid_to_png` mirrors right-clicking
+a rendered Mermaid diagram, with GUI and headless renderers sharing the embedded
+source/UUID/SHA-256 provenance contract).
 
 See `AGENTS.md` for full agent interaction guide.
 

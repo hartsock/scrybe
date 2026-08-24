@@ -904,6 +904,25 @@ fn export_figures(content: String, path: String) -> Result<Vec<String>, String> 
     Ok(results.into_iter().map(|r| r.path).collect())
 }
 
+/// Save the PNG rasterized from the live Mermaid.js preview.
+///
+/// The frontend owns rendering so the pixels match what the user sees. This
+/// command does not render again: it embeds the original Mermaid source into
+/// the supplied PNG bytes, then writes (or replaces) the selected destination.
+///
+/// The image arrives as base64, not `Vec<u8>` — see
+/// [`scrybe_tools::write_embedded_png_base64`] for why.
+#[tauri::command]
+fn save_mermaid_png(output: String, source: String, png_base64: String) -> Result<usize, String> {
+    let result = scrybe_tools::write_embedded_png_base64(
+        &png_base64,
+        &source,
+        std::path::Path::new(&output),
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(result.bytes)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -927,6 +946,7 @@ pub fn run() {
             list_directory,
             export_docx,
             export_figures,
+            save_mermaid_png,
             watch_file,
             unwatch_file,
             note_autosave,

@@ -4120,6 +4120,7 @@ name = "scrybe-tools"
 version = "0.6.3"
 dependencies = [
  "anyhow",
+ "base64 0.22.1",
  "scrybe-core",
  "scrybe-mermaid",
  "scrybe-mermaid-render",
