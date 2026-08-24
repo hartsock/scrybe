@@ -106,7 +106,7 @@ previewEl.addEventListener(SAVE_MERMAID_PNG_EVENT, async (event: Event) => {
   try {
     // Capture before opening the dialog so the PNG is the view that was
     // actually under the pointer when the user right-clicked.
-    const pngBytes = await rasterizeMermaidSvg(detail.svg, previewEl);
+    const pngBase64 = await rasterizeMermaidSvg(detail.svg, previewEl);
     const documentPath = detail.document.path;
     const filename = documentPath ? await basename(documentPath) : "document.md";
     const directory = documentPath ? await dirname(documentPath) : await homeDir();
@@ -125,7 +125,7 @@ previewEl.addEventListener(SAVE_MERMAID_PNG_EVENT, async (event: Event) => {
     await invoke("save_mermaid_png", {
       output: dest,
       source: detail.source,
-      pngBytes,
+      pngBase64,
     });
     showToast(`Exported ${dest.split(/[\\/]/).pop()}`, "info");
   } catch (error) {

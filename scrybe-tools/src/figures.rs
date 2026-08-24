@@ -28,7 +28,9 @@ use crate::{Ctx, DataSchema, EngineFault, Facet, ToolError, ToolOutcome, ToolSpe
 
 /// Version of the `export_figures` tool's `data` payload.
 const DATA_VERSION: u32 = 1;
-const MAX_CAPTURED_PNG_BYTES: usize = 8 * 1024 * 1024;
+/// Byte ceiling for a PNG captured from the live preview. Public so the
+/// desktop command can refuse an oversized payload before decoding it.
+pub const MAX_CAPTURED_PNG_BYTES: usize = 8 * 1024 * 1024;
 const MAX_MERMAID_SOURCE_BYTES: usize = 1024 * 1024;
 const MAX_EMBEDDED_PNG_BYTES: usize = 16 * 1024 * 1024;
 
@@ -100,6 +102,33 @@ pub fn write_embedded_png(
         sha256: prepared.sha256,
         bytes: prepared.bytes.len(),
     })
+}
+
+/// Decode a base64 PNG captured from the live preview, then embed and write it.
+///
+/// The image crosses the desktop IPC as base64 rather than `Vec<u8>`: Tauri
+/// only uses the octet-stream fast path for a *top-level* typed array, so a
+/// `Uint8Array` nested in an argument object is serialized as
+/// `Array.from(bytes)` — a JSON array of decimal numbers costing ~4.5 bytes per
+/// PNG byte, built on the webview's main thread and parsed here by
+/// `serde_json`. Base64 costs 1.33x and the webview produces it natively.
+pub fn write_embedded_png_base64(
+    png_base64: &str,
+    source: &str,
+    output_path: &Path,
+) -> anyhow::Result<FigureResult> {
+    // Refuse on the encoded length before allocating a decode buffer: base64
+    // expands by 4/3, so anything longer cannot fit under the byte cap anyway.
+    let max_encoded = MAX_CAPTURED_PNG_BYTES / 3 * 4 + 4;
+    ensure!(
+        png_base64.len() <= max_encoded,
+        "captured PNG is too large ({} base64 characters; limit is {} characters)",
+        png_base64.len(),
+        max_encoded
+    );
+    let png_bytes = base64::Engine::decode(&base64::engine::general_purpose::STANDARD, png_base64)
+        .context("decode captured PNG")?;
+    write_embedded_png(&png_bytes, source, output_path)
 }
 
 /// Write complete bytes to a same-directory temporary file, flush them, then
@@ -566,6 +595,50 @@ mod tests {
             payload.verification,
             scrybe_mermaid::VerificationStatus::Verified { .. }
         ));
+    }
+
+    #[test]
+    fn base64_captured_png_round_trips_through_the_desktop_seam() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let output = dir.path().join("from-preview.png");
+        let source = "graph TD; Live-->Preview";
+        let png = render_png(source).expect("render fixture");
+        let encoded = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &png);
+
+        let result =
+            write_embedded_png_base64(&encoded, source, &output).expect("write captured png");
+        let written = std::fs::read(&output).expect("read output");
+        assert_eq!(result.bytes, written.len());
+
+        let payload = scrybe_mermaid::extract(&written).expect("extract embedded source");
+        assert_eq!(payload.source, source);
+        assert!(payload.is_verified());
+    }
+
+    #[test]
+    fn malformed_base64_does_not_clobber_destination() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let output = dir.path().join("precious.png");
+        std::fs::write(&output, b"keep me").expect("seed destination");
+
+        let error = write_embedded_png_base64("not!valid!base64", "graph TD; A-->B", &output)
+            .expect_err("malformed base64 must fail");
+        assert!(error.to_string().contains("decode captured PNG"));
+        assert_eq!(std::fs::read(&output).unwrap(), b"keep me");
+    }
+
+    #[test]
+    fn oversized_base64_is_refused_before_decoding() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let output = dir.path().join("precious.png");
+        std::fs::write(&output, b"keep me").expect("seed destination");
+        // One character past what could ever decode to a legal payload.
+        let oversized = "A".repeat(MAX_CAPTURED_PNG_BYTES / 3 * 4 + 5);
+
+        let error = write_embedded_png_base64(&oversized, "graph TD; A-->B", &output)
+            .expect_err("oversized base64 must fail");
+        assert!(error.to_string().contains("base64 characters"));
+        assert_eq!(std::fs::read(&output).unwrap(), b"keep me");
     }
 
     #[test]

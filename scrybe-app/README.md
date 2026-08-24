@@ -88,6 +88,21 @@ recover and verify it later. This is the WYSIWYG human counterpart to the
 headless `mermaid_to_png` tool; their renderers differ, but their provenance
 contract is the same.
 
+Two details worth knowing, because this export and "Export Diagrams…" name
+files similarly but are not the same operation:
+
+- **The `_<title>` suffix is what keeps the file yours.** "Export Diagrams…"
+  owns the exact pattern `<document>_fig_<NN>.png` and *prunes* stale members
+  of that set on every run, so a re-export after the diagram count changes
+  cannot leave orphans behind. A right-click save carries a title suffix and is
+  therefore not part of that set. If you rename one down to plain
+  `<document>_fig_<NN>.png`, the next "Export Diagrams…" will delete it.
+- **`<NN>` counts diagrams as the preview shows them.** "Export Diagrams…"
+  numbers from the Markdown source. The two agree for an ordinary document, but
+  a plugin that adds or removes diagrams during rendering shifts the preview's
+  numbering — so treat the suggested `<NN>` as a convenience, not as a
+  cross-reference to the exported figure set.
+
 ## Build and run
 
 ```sh

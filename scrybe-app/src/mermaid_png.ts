@@ -79,6 +79,49 @@ export function mermaidTitleFromSource(source: string): string {
   return "";
 }
 
+/**
+ * Selectors for Mermaid's rendered diagram title, in priority order.
+ *
+ * Mermaid 11 has no universal diagram-title class, so this is a per-family
+ * list. Generic `*TitleText` matching is deliberately restricted to direct SVG
+ * children so a class-node label such as `classTitleText` cannot become the
+ * filename; the family-specific classes below are unambiguous enough to match
+ * at any depth, which they must, since several families nest the title inside
+ * a transform group.
+ */
+export const MERMAID_TITLE_SELECTORS: readonly string[] = [
+  ":scope > text[class$='TitleText']",
+  ":scope > text.titleText",
+  "text.pieTitleText",
+  ":scope > text.venn-title",
+  ":scope > text.treemapTitle",
+  ":scope > text.packetTitle",
+  "text.radarTitle",
+  "g.chart-title > text",
+  "g.main > g.title > text",
+  "g.wardley-map > text.wardley-title",
+  "text.cynefinTitle",
+  "g.ishikawa-head-group > text.ishikawa-head-label",
+];
+
+/**
+ * First non-empty title among [`MERMAID_TITLE_SELECTORS`], **in list order**.
+ *
+ * Deliberately not a single comma-joined `querySelector`: that returns the
+ * first match in *document* order, so a loosely-scoped later selector deep in
+ * the SVG would outrank a tightly-scoped earlier one. Priority belongs to the
+ * list, not to the layout.
+ */
+export function mermaidTitleFromSelectors(
+  lookup: (selector: string) => string | null | undefined,
+): string {
+  for (const selector of MERMAID_TITLE_SELECTORS) {
+    const title = lookup(selector)?.trim();
+    if (title) return title;
+  }
+  return "";
+}
+
 /** Normalize same-document computed SVG URLs back to portable fragment URLs. */
 export function normalizeSvgUrlReferences(
   value: string,
@@ -113,7 +156,15 @@ export function normalizeSvgUrlReferences(
   );
 }
 
-/** Calculate the Retina canvas dimensions while enforcing browser-safe caps. */
+/**
+ * Calculate the canvas dimensions while enforcing browser-safe caps.
+ *
+ * Display density is a nicety; the diagram is the deliverable. A large
+ * flowchart on a Retina display can exceed the canvas budget at 2x while
+ * fitting comfortably at 1x, so the density is stepped down toward 1 rather
+ * than refusing the export — a Retina user must never hit a dead end that a
+ * non-Retina user sails through. Only a diagram that overflows at 1:1 fails.
+ */
 export function rasterPixelSize(
   cssWidth: number,
   cssHeight: number,
@@ -124,15 +175,28 @@ export function rasterPixelSize(
     throw new Error("the rendered diagram has no visible size");
   }
 
-  const scale = Number.isFinite(devicePixelRatio)
+  const requested = Number.isFinite(devicePixelRatio)
     ? Math.max(1, devicePixelRatio)
     : 1;
-  const width = Math.max(1, Math.round(cssWidth * scale));
-  const height = Math.max(1, Math.round(cssHeight * scale));
-  if (width > MAX_CANVAS_SIDE || height > MAX_CANVAS_SIDE ||
-      width * height > MAX_CANVAS_PIXELS) {
-    throw new Error(`the rendered diagram is too large to export (${width} x ${height} pixels)`);
+  // The largest density that satisfies both the per-side and total-area caps.
+  const affordable = Math.min(
+    MAX_CANVAS_SIDE / cssWidth,
+    MAX_CANVAS_SIDE / cssHeight,
+    Math.sqrt(MAX_CANVAS_PIXELS / (cssWidth * cssHeight)),
+  );
+  if (affordable < 1) {
+    throw new Error(
+      "the rendered diagram is too large to export " +
+      `(${Math.round(cssWidth)} x ${Math.round(cssHeight)} CSS pixels)`,
+    );
   }
+
+  const scale = Math.min(requested, affordable);
+  // Truncate rather than round: `floor(css * scale) <= css * scale`, which
+  // makes both caps hard guarantees instead of boundary cases that rounding
+  // can nudge over. The cost is at most one device pixel per side.
+  const width = Math.max(1, Math.floor(cssWidth * scale));
+  const height = Math.max(1, Math.floor(cssHeight * scale));
   return { width, height, scale };
 }
 
@@ -142,11 +206,19 @@ export function rasterPixelSize(
  * Computed styles and the active preview background are flattened before the
  * SVG is drawn to a canvas at the display's pixel density. Rust receives these
  * already-rendered PNG bytes only to add provenance metadata and write them.
+ *
+ * Returns standard base64, not a `Uint8Array`. Tauri's IPC only takes the
+ * octet-stream fast path for a *top-level* typed array; a typed array nested
+ * in an argument object goes through `JSON.stringify` as `Array.from(bytes)`,
+ * which costs roughly 4.5 bytes of JSON per PNG byte and builds that string on
+ * the webview's main thread. Base64 costs 1.33x, and `FileReader` produces it
+ * natively while we are already reading the blob, so it is strictly less work
+ * than the array path it replaces.
  */
 export async function rasterizeMermaidSvg(
   svg: SVGSVGElement,
   previewRoot: HTMLElement,
-): Promise<Uint8Array> {
+): Promise<string> {
   // Everything through serialization is intentionally synchronous. The
   // right-click handler therefore snapshots the node before a tab switch or
   // subsequent preview render can change what was under the pointer.
@@ -211,7 +283,7 @@ export async function rasterizeMermaidSvg(
         `the rendered PNG is too large to transfer safely (${formatBytes(png.size)})`,
       );
     }
-    return new Uint8Array(await blobToArrayBuffer(png));
+    return dataUrlToBase64(await blobToDataUrl(png));
   } catch (error) {
     if (error instanceof DOMException && error.name === "SecurityError") {
       throw new Error("the diagram contains an external resource that cannot be exported safely");
@@ -386,15 +458,14 @@ function blobToDataUrl(blob: Blob): Promise<string> {
   });
 }
 
-function blobToArrayBuffer(blob: Blob): Promise<ArrayBuffer> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => reader.result instanceof ArrayBuffer
-      ? resolve(reader.result)
-      : reject(new Error("the browser could not read the rendered PNG"));
-    reader.onerror = () => reject(reader.error ?? new Error("could not read the rendered PNG"));
-    reader.readAsArrayBuffer(blob);
-  });
+/** Strip the `data:<type>;base64,` prefix `FileReader` puts on a data URL. */
+export function dataUrlToBase64(dataUrl: string): string {
+  const comma = dataUrl.indexOf(",");
+  // A non-base64 data URL would be percent-encoded text, not PNG bytes.
+  if (comma < 0 || !/;base64$/i.test(dataUrl.slice(0, comma))) {
+    throw new Error("the browser did not return base64 PNG data");
+  }
+  return dataUrl.slice(comma + 1);
 }
 
 function formatBytes(bytes: number): string {

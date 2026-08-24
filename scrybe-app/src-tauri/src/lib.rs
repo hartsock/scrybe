@@ -838,11 +838,17 @@ fn export_figures(content: String, path: String) -> Result<Vec<String>, String> 
 /// The frontend owns rendering so the pixels match what the user sees. This
 /// command does not render again: it embeds the original Mermaid source into
 /// the supplied PNG bytes, then writes (or replaces) the selected destination.
+///
+/// The image arrives as base64, not `Vec<u8>` — see
+/// [`scrybe_tools::write_embedded_png_base64`] for why.
 #[tauri::command]
-fn save_mermaid_png(output: String, source: String, png_bytes: Vec<u8>) -> Result<usize, String> {
-    let result =
-        scrybe_tools::write_embedded_png(&png_bytes, &source, std::path::Path::new(&output))
-            .map_err(|e| e.to_string())?;
+fn save_mermaid_png(output: String, source: String, png_base64: String) -> Result<usize, String> {
+    let result = scrybe_tools::write_embedded_png_base64(
+        &png_base64,
+        &source,
+        std::path::Path::new(&output),
+    )
+    .map_err(|e| e.to_string())?;
     Ok(result.bytes)
 }
 

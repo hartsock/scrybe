@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { invoke } from "@tauri-apps/api/core";
 import {
+  mermaidTitleFromSelectors,
   mermaidTitleFromSource,
   type MermaidPngExportDetail,
   type MermaidPreviewDocument,
@@ -32,14 +33,14 @@ export class PreviewPane {
     this.container.innerHTML = `<img src="${src}" style="max-width:100%;height:auto;display:block;">`;
   }
 
-  async render(source: string, document: MermaidPreviewDocument): Promise<void> {
+  async render(source: string, previewDocument: MermaidPreviewDocument): Promise<void> {
     const generation = ++this.renderGeneration;
     const html: string = await invoke("render_markdown", {
       source,
       theme: this._theme,
     });
     if (generation !== this.renderGeneration) return;
-    this.renderedDocument = document;
+    this.renderedDocument = previewDocument;
     this.container.innerHTML = html;
     await this.postProcess(generation);
   }
@@ -63,6 +64,10 @@ export class PreviewPane {
     if (!svg || !svg.contains(target) || !this.renderedDocument) return;
 
     event.preventDefault();
+    // Preview order, not source order: plugins run before rendering, so this
+    // index is not guaranteed to match the `<doc>_fig_<NN>.png` that
+    // `export_figures` assigns from the Markdown AST. It names a file for a
+    // human; it is not a cross-reference into the exported figure set.
     const figures = Array.from(this.container.querySelectorAll<HTMLElement>(".mermaid"));
     const figureIndex = figures.indexOf(wrapper);
     if (figureIndex < 0) return;
@@ -85,23 +90,9 @@ export class PreviewPane {
   }
 
   private mermaidTitle(wrapper: HTMLElement, svg: SVGSVGElement): string {
-    // Mermaid 11 has no universal diagram-title class. Restrict generic
-    // `*TitleText` matching to direct SVG children so class-node labels such
-    // as `classTitleText` cannot become the filename by accident.
-    const visibleTitle = svg.querySelector<SVGTextElement>([
-      ":scope > text[class$='TitleText']",
-      ":scope > text.titleText",
-      "text.pieTitleText",
-      ":scope > text.venn-title",
-      ":scope > text.treemapTitle",
-      ":scope > text.packetTitle",
-      "text.radarTitle",
-      "g.chart-title > text",
-      "g.main > g.title > text",
-      "g.wardley-map > text.wardley-title",
-      "text.cynefinTitle",
-      "g.ishikawa-head-group > text.ishikawa-head-label",
-    ].join(", "))?.textContent?.trim();
+    const visibleTitle = mermaidTitleFromSelectors(
+      selector => svg.querySelector<SVGTextElement>(selector)?.textContent,
+    );
     if (visibleTitle) return visibleTitle;
 
     const sourceTitle = mermaidTitleFromSource(wrapper.dataset.scrybeSource ?? "");
