@@ -48,7 +48,14 @@ addressed by canonical `path`.
 > and vice versa. The `state`/`set_theme`/`view_mode`/`set_vim`/`export`/
 > `export_figures` tools mirror the path bar, theme dropdown, View button,
 > Vim toggle, the Export button, and the "Export Diagrams…" menu item
-> respectively.
+> respectively. `mermaid_to_png` mirrors right-clicking a rendered Mermaid
+> diagram to open the PNG save dialog; the GUI snapshots Mermaid.js
+> pixels while the headless tool renders independently, and both embed the
+> same source/UUID/SHA-256 provenance.
+>
+> Host installation lifecycle controls are the deliberate exception: installing
+> or removing a shell command mutates the local machine rather than a document,
+> so it is available through the native app and local CLI but never through MCP.
 
 > `embed`, `extract`, `export`, `mermaid_to_png`, `export_figures`, `render`,
 > and `lint` are **in-process** — they work headless, no running app needed.

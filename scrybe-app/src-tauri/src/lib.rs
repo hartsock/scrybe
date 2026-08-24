@@ -39,6 +39,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 use std::time::Instant;
 use tauri::{Emitter as _, Manager as _};
+use tauri_plugin_shell::ShellExt as _;
 
 // ─── File watcher state ───────────────────────────────────────────────────────
 
@@ -128,6 +129,76 @@ fn quit_app(app: tauri::AppHandle) {
 #[tauri::command]
 fn print_document(window: tauri::WebviewWindow) -> Result<(), String> {
     window.print().map_err(|e| e.to_string())
+}
+
+// ─── macOS shell-command lifecycle ──────────────────────────────────────────
+
+/// Result emitted by the bundled CLI's idempotent shell-link manager.
+///
+/// The backend intentionally delegates filesystem ownership decisions to the
+/// exact same CLI code used by just install. This prevents the app and
+/// developer installer from drifting into two subtly different repair rules.
+#[derive(Debug, Clone, serde::Deserialize, serde::Serialize, PartialEq, Eq)]
+struct ShellCommandReport {
+    outcome: String,
+    command_path: String,
+    target_path: Option<String>,
+    path_winner: Option<String>,
+    other_installations: Vec<String>,
+    app_bundles: Vec<String>,
+    warnings: Vec<String>,
+    message: String,
+}
+
+async fn run_shell_command_lifecycle(
+    app: &tauri::AppHandle,
+    action: &str,
+) -> Result<ShellCommandReport, String> {
+    let output = app
+        .shell()
+        .sidecar("scrybe")
+        .map_err(|error| format!("bundled scrybe command is unavailable: {error}"))?
+        .args(["shell-command", action, "--json"])
+        .output()
+        .await
+        .map_err(|error| format!("could not run the bundled scrybe command: {error}"))?;
+    decode_shell_command_report(output.status.success(), &output.stdout, &output.stderr)
+}
+
+fn decode_shell_command_report(
+    success: bool,
+    stdout: &[u8],
+    stderr: &[u8],
+) -> Result<ShellCommandReport, String> {
+    if !success {
+        let detail = String::from_utf8_lossy(stderr).trim().to_string();
+        return Err(if detail.is_empty() {
+            "the bundled scrybe command failed without an error message".to_string()
+        } else {
+            detail
+        });
+    }
+    serde_json::from_slice(stdout)
+        .map_err(|error| format!("bundled scrybe command returned an invalid report: {error}"))
+}
+
+/// Install the command or repair a broken/older managed link. Repeated calls
+/// are a no-op. Conflicting regular files and unrelated symlinks fail closed.
+#[tauri::command]
+async fn install_shell_command(app: tauri::AppHandle) -> Result<ShellCommandReport, String> {
+    run_shell_command_lifecycle(&app, "install").await
+}
+
+/// Inspect the command link without changing the filesystem.
+#[tauri::command]
+async fn shell_command_status(app: tauri::AppHandle) -> Result<ShellCommandReport, String> {
+    run_shell_command_lifecycle(&app, "status").await
+}
+
+/// Remove only a link recognized as Scrybe-managed.
+#[tauri::command]
+async fn uninstall_shell_command(app: tauri::AppHandle) -> Result<ShellCommandReport, String> {
+    run_shell_command_lifecycle(&app, "uninstall").await
 }
 
 /// List the entries of a directory, returning name, path, and isDir for each.
@@ -833,6 +904,25 @@ fn export_figures(content: String, path: String) -> Result<Vec<String>, String> 
     Ok(results.into_iter().map(|r| r.path).collect())
 }
 
+/// Save the PNG rasterized from the live Mermaid.js preview.
+///
+/// The frontend owns rendering so the pixels match what the user sees. This
+/// command does not render again: it embeds the original Mermaid source into
+/// the supplied PNG bytes, then writes (or replaces) the selected destination.
+///
+/// The image arrives as base64, not `Vec<u8>` — see
+/// [`scrybe_tools::write_embedded_png_base64`] for why.
+#[tauri::command]
+fn save_mermaid_png(output: String, source: String, png_base64: String) -> Result<usize, String> {
+    let result = scrybe_tools::write_embedded_png_base64(
+        &png_base64,
+        &source,
+        std::path::Path::new(&output),
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(result.bytes)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -856,6 +946,7 @@ pub fn run() {
             list_directory,
             export_docx,
             export_figures,
+            save_mermaid_png,
             watch_file,
             unwatch_file,
             note_autosave,
@@ -889,6 +980,9 @@ pub fn run() {
             cli_rpc::cli_rpc_reply,
             menu::menu_sync,
             print_document,
+            install_shell_command,
+            shell_command_status,
+            uninstall_shell_command,
         ])
         .menu(menu::build)
         .on_menu_event(|app, event| menu::handle_event(app, &event))
@@ -1106,5 +1200,30 @@ mod tests {
             existing_file(path.clone()),
             Some(path.to_string_lossy().into_owned())
         );
+    }
+
+    #[test]
+    fn shell_command_report_decodes_from_bundled_cli_json() {
+        let stdout = br#"{
+          "outcome":"repaired",
+          "command_path":"/Users/test/.local/bin/scrybe",
+          "target_path":"/Applications/Scrybe.app/Contents/MacOS/scrybe",
+          "path_winner":null,
+          "other_installations":[],
+          "app_bundles":["/Applications/Scrybe.app"],
+          "warnings":[],
+          "message":"Repaired the scrybe command"
+        }"#;
+        let report = decode_shell_command_report(true, stdout, b"").unwrap();
+        assert_eq!(report.outcome, "repaired");
+        assert_eq!(report.warnings, Vec::<String>::new());
+    }
+
+    #[test]
+    fn shell_command_failure_preserves_cli_explanation() {
+        let error =
+            decode_shell_command_report(false, b"", b"refusing to overwrite existing non-symlink")
+                .unwrap_err();
+        assert_eq!(error, "refusing to overwrite existing non-symlink");
     }
 }

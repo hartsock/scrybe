@@ -3,6 +3,8 @@
 
 //! scrybe — headless Markdown render/lint/mermaid/panel CLI + RPC client.
 
+mod shell_command;
+
 use clap::{Parser, Subcommand};
 use scrybe_core::{ContentAddressable, Document};
 use scrybe_render::{render_html, Theme};
@@ -52,6 +54,7 @@ SUBCOMMANDS
     extract    Top-level shortcut for `mermaid extract`.
 
   Meta:
+    shell-command  Install, inspect, repair, or remove the user-level command link.
     version    Print version and active feature flags.
 
 CONNECTION MODEL
@@ -322,6 +325,57 @@ enum Command {
 
     /// Print version and active feature flags.
     Version,
+
+    /// Manage the user-level `scrybe` command installed by the desktop app.
+    ///
+    /// The default link is `~/.local/bin/scrybe`. Installation is idempotent: a
+    /// correct link is left alone, a broken or known older Scrybe link is repaired
+    /// atomically, and unrelated entries are never overwritten.
+    #[command(name = "shell-command")]
+    ShellLink {
+        #[command(subcommand)]
+        cmd: ShellCommandCmd,
+    },
+}
+
+#[derive(Subcommand)]
+enum ShellCommandCmd {
+    /// Install the command, or report that it is already installed correctly.
+    Install {
+        /// Override the destination directory (default: ~/.local/bin).
+        #[arg(long, value_name = "DIR")]
+        bin_dir: Option<std::path::PathBuf>,
+        /// Emit a machine-readable lifecycle report.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Inspect the command link without changing it.
+    Status {
+        /// Override the destination directory (default: ~/.local/bin).
+        #[arg(long, value_name = "DIR")]
+        bin_dir: Option<std::path::PathBuf>,
+        /// Emit a machine-readable lifecycle report.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Repair a broken or older managed Scrybe link.
+    Repair {
+        /// Override the destination directory (default: ~/.local/bin).
+        #[arg(long, value_name = "DIR")]
+        bin_dir: Option<std::path::PathBuf>,
+        /// Emit a machine-readable lifecycle report.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Remove only a link managed by Scrybe; unrelated entries are preserved.
+    Uninstall {
+        /// Override the destination directory (default: ~/.local/bin).
+        #[arg(long, value_name = "DIR")]
+        bin_dir: Option<std::path::PathBuf>,
+        /// Emit a machine-readable lifecycle report.
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -391,8 +445,24 @@ enum MermaidCmd {
 
 /// Known subcommand names. Anything else in argv[1] is treated as a path to open.
 const SUBCOMMANDS: &[&str] = &[
-    "render", "view", "lint", "mermaid", "tabs", "open", "save", "close", "quit", "read", "find",
-    "section", "edit", "embed", "extract", "version", "help",
+    "render",
+    "view",
+    "lint",
+    "mermaid",
+    "tabs",
+    "open",
+    "save",
+    "close",
+    "quit",
+    "read",
+    "find",
+    "section",
+    "edit",
+    "embed",
+    "extract",
+    "shell-command",
+    "version",
+    "help",
 ];
 
 fn main() -> anyhow::Result<()> {
@@ -763,6 +833,32 @@ fn main() -> anyhow::Result<()> {
             run_mermaid_extract(&png, unverified)?;
         }
 
+        Command::ShellLink { cmd } => {
+            let (operation, bin_dir, json) = match cmd {
+                ShellCommandCmd::Install { bin_dir, json } => {
+                    (shell_command::Operation::Install, bin_dir, json)
+                }
+                ShellCommandCmd::Status { bin_dir, json } => {
+                    (shell_command::Operation::Status, bin_dir, json)
+                }
+                ShellCommandCmd::Repair { bin_dir, json } => {
+                    (shell_command::Operation::Repair, bin_dir, json)
+                }
+                ShellCommandCmd::Uninstall { bin_dir, json } => {
+                    (shell_command::Operation::Uninstall, bin_dir, json)
+                }
+            };
+            let report = shell_command::run(operation, bin_dir)?;
+            if json {
+                println!("{}", serde_json::to_string(&report)?);
+            } else {
+                println!("{}", report.message);
+                for warning in &report.warnings {
+                    eprintln!("warning: {warning}");
+                }
+            }
+        }
+
         Command::Version => {
             println!("scrybe {}", version_string());
             println!("Features: {}", active_features());
@@ -1097,6 +1193,18 @@ mod tests {
     #[test]
     fn inject_open_leaves_view_alone() {
         let args = vec!["scrybe".to_string(), "view".to_string(), "x.md".to_string()];
+        assert_eq!(inject_open_if_path(args.clone()), args);
+    }
+
+    /// The installer lifecycle is a real subcommand, not a path shortcut.
+    #[test]
+    fn inject_open_leaves_shell_command_alone() {
+        let args = vec![
+            "scrybe".to_string(),
+            "shell-command".to_string(),
+            "status".to_string(),
+            "--json".to_string(),
+        ];
         assert_eq!(inject_open_if_path(args.clone()), args);
     }
 }

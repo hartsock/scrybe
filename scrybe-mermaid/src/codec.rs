@@ -136,6 +136,19 @@ pub fn embed_with_uuid(png_bytes: &[u8], source: &str, uuid: &str) -> Result<Vec
     let payload = json!({ "source": source, "sha256": sha256, "uuid": uuid }).to_string();
 
     let chunks = parse_chunks(png_bytes)?;
+    let iend_count = chunks
+        .iter()
+        .filter(|(chunk_type, _)| chunk_type == b"IEND")
+        .count();
+    let has_valid_final_iend = matches!(
+        chunks.last(),
+        Some((chunk_type, data)) if chunk_type == b"IEND" && data.is_empty()
+    );
+    if iend_count != 1 || !has_valid_final_iend {
+        return Err(MermaidError::Png(
+            "PNG must contain exactly one empty, final IEND chunk".into(),
+        ));
+    }
 
     let mut out = PNG_SIG.to_vec();
     for (chunk_type, data) in &chunks {
@@ -316,6 +329,15 @@ mod tests {
         let embedded = embed(&png, source).expect("embed should succeed");
         let extracted = extract(&embedded).expect("extract should succeed");
         assert_eq!(extracted.source, source);
+    }
+
+    #[test]
+    fn embed_rejects_png_without_final_iend() {
+        let mut png = minimal_png();
+        png.truncate(png.len() - 12);
+
+        let error = embed(&png, "graph TD; A-->B").expect_err("missing IEND must fail");
+        assert!(matches!(error, MermaidError::Png(message) if message.contains("IEND")));
     }
 
     #[test]

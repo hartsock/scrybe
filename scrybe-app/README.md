@@ -31,6 +31,7 @@ scrybe-app/
 │   ├── main.ts            App bootstrap, window/tab lifecycle, MCP tab signal polling
 │   ├── editor.ts          CodeMirror 6 editor setup and state management
 │   ├── preview.ts         Live HTML preview pane
+│   ├── mermaid_png.ts     WYSIWYG Mermaid SVG → source-bearing PNG export
 │   ├── tabs.ts            Tab bar: open, close, switch, dirty indicator
 │   ├── sidebar.ts         File tree / folder browser
 │   ├── mcp_panel.ts       Agent MCP connection panel
@@ -67,13 +68,41 @@ Key `invoke(...)` targets exposed to the frontend:
 | Command | Description |
 |---------|-------------|
 | `render_markdown` | Markdown → HTML via `scrybe-render` |
+| `save_mermaid_png` | Embed source into a preview-rasterized PNG and save/replace it |
 | `read_file` / `list_directory` | Filesystem access |
 | `get_builtin_agents` / `set_agent_enabled` | Agent panel state |
 | `list_plugins` / `run_plugin` | Python plugin execution |
 | `mcp_server_start` / `mcp_server_status` / `mcp_connection_info` | In-app MCP sidecar (P4.7) |
 | `vcs_open` / `vcs_status` / `vcs_stage_all` / `vcs_commit` / `vcs_fetch` / `vcs_log` / `vcs_remotes` | Git operations via `scrybe-vcs` (P4.8) |
 | `terminal_start` / `terminal_write` / `terminal_run` | Embedded shell (P4.11) |
+| `install_shell_command` / `shell_command_status` / `uninstall_shell_command` | Local-only lifecycle for the managed CLI link |
 | `get_version` | Version string |
+
+## Save a rendered Mermaid diagram
+
+Right-click a Mermaid diagram in the Markdown preview to save exactly the
+displayed JavaScript-rendered image as a PNG. The native save dialog suggests
+`<document>_fig_<NN>_<title>.png`, lets you choose any folder, and can replace
+the destination after the native overwrite confirmation. Scrybe embeds the original
+Mermaid source, UUID, and SHA-256 in the PNG metadata so `scrybe extract` can
+recover and verify it later. This is the WYSIWYG human counterpart to the
+headless `mermaid_to_png` tool; their renderers differ, but their provenance
+contract is the same.
+
+Two details worth knowing, because this export and "Export Diagrams…" name
+files similarly but are not the same operation:
+
+- **The `_<title>` suffix is what keeps the file yours.** "Export Diagrams…"
+  owns the exact pattern `<document>_fig_<NN>.png` and *prunes* stale members
+  of that set on every run, so a re-export after the diagram count changes
+  cannot leave orphans behind. A right-click save carries a title suffix and is
+  therefore not part of that set. If you rename one down to plain
+  `<document>_fig_<NN>.png`, the next "Export Diagrams…" will delete it.
+- **`<NN>` counts diagrams as the preview shows them.** "Export Diagrams…"
+  numbers from the Markdown source. The two agree for an ordinary document, but
+  a plugin that adds or removes diagrams during rendering shifts the preview's
+  numbering — so treat the suggested `<NN>` as a convenience, not as a
+  cross-reference to the exported figure set.
 
 ## Build and run
 
@@ -82,19 +111,20 @@ Key `invoke(...)` targets exposed to the frontend:
 cargo install tauri-cli --version "^2"
 cd scrybe-app && npm install
 
-# Development (hot-reload)
-cargo tauri dev
+# Development (hot-reload, including the adjacent CLI sidecar)
+cd .. && just dev
 
-# Production build (creates .app / .exe / .deb)
-cargo tauri build
+# Production build with the matching CLI embedded
+cd .. && just app
 
 # Run tests (Rust backend only)
 cargo test -p scrybe-app
 ```
 
-On macOS the production build produces `scrybe-app/target/release/bundle/macos/Scrybe.app`.
+On macOS the production build produces `<Cargo target directory>/release/bundle/macos/Scrybe.app`; use `cargo metadata --no-deps --format-version 1` to identify a custom target directory.
 Install to `~/Applications/Scrybe.app` for the CLI launcher to find it automatically.
 
-From the repository root, `just install-app` builds and installs the desktop app
-and the Python runtime tools it shells out to, including the Word (`.docx`)
-exporter.
+From the repository root, `just install-app` builds and installs the desktop
+app and Python runtime tools, then idempotently installs
+`~/.local/bin/scrybe`. The app's native Scrybe menu offers the same
+install/repair/remove lifecycle for drag-and-drop DMG installations.
