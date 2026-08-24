@@ -11,7 +11,7 @@ import { invoke, convertFileSrc } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { basename, dirname, homeDir, join } from "@tauri-apps/api/path";
 import { open as openExternal } from "@tauri-apps/plugin-shell";
-import { save as saveDialog } from "@tauri-apps/plugin-dialog";
+import { ask, message, save as saveDialog } from "@tauri-apps/plugin-dialog";
 import { showToast } from "./toast";
 import { AppState } from "./state";
 import { renderTabBar } from "./tabs";
@@ -807,10 +807,54 @@ invoke<string | null>("get_initial_file").then(file => {
   if (file) openFileByPath(file);
 }).catch(err => console.error("get_initial_file failed:", err));
 
-// Native menu bar (#184). Each item id routes to the same single-entry-point
+interface ShellCommandReport {
+  outcome: string;
+  command_path: string;
+  warnings: string[];
+  message: string;
+}
+
+async function installOrRepairShellCommand(): Promise<void> {
+  try {
+    const report = await invoke<ShellCommandReport>("install_shell_command");
+    const detail = [report.message, ...report.warnings].join("\n\n");
+    await message(detail, {
+      title: "Scrybe command",
+      kind: report.warnings.length ? "warning" : "info",
+    });
+  } catch (error) {
+    await message(String(error), {
+      title: "Could not install the Scrybe command",
+      kind: "error",
+    });
+  }
+}
+
+async function removeShellCommand(): Promise<void> {
+  const approved = await ask(
+    "Remove the user-level 'scrybe' command link? The Scrybe app and your documents will not be removed.",
+    { title: "Remove Scrybe command", kind: "warning" },
+  );
+  if (!approved) return;
+  try {
+    const report = await invoke<ShellCommandReport>("uninstall_shell_command");
+    const detail = [report.message, ...report.warnings].join("\n\n");
+    await message(detail, {
+      title: "Scrybe command",
+      kind: report.warnings.length ? "warning" : "info",
+    });
+  } catch (error) {
+    await message(String(error), {
+      title: "Could not remove the Scrybe command",
+      kind: "error",
+    });
+  }
+}
+
+// Native menu bar (#184). Editor item ids route to the same single-entry-point
 // function its toolbar/keyboard twin uses, so the human ↔ MCP parity rule
-// holds with no new tools. Predefined items (Edit menu, quit, …) are handled
-// by the OS and never arrive here.
+// holds with no new tools. PATH installation is intentionally host-local and
+// never exposed to MCP. Predefined items are handled by the OS.
 listen<string>("scrybe://menu", event => {
   switch (event.payload) {
     case "new_tab":     newTab(); break;
@@ -836,6 +880,12 @@ listen<string>("scrybe://menu", event => {
     case "theme_solarized": applyTheme("solarized"); break;
     case "toggle_vim":  setVimEnabled(!vimEnabled); break;
     case "toggle_wrap": setWrapEnabled(!wrapEnabled); break;
+    case "install_shell_command":
+      void installOrRepairShellCommand();
+      break;
+    case "uninstall_shell_command":
+      void removeShellCommand();
+      break;
     case "close_window":
       void import("@tauri-apps/api/window").then(w => w.getCurrentWindow().close());
       break;

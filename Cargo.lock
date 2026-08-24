@@ -3983,6 +3983,7 @@ dependencies = [
  "scrybe-tools",
  "serde",
  "serde_json",
+ "tempfile",
  "tracing",
  "tracing-subscriber",
 ]

@@ -9,6 +9,18 @@ All notable changes to Scrybe are documented here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/); versions are the workspace
 lock-step version (`[workspace.package] version`).
 
+## [Unreleased]
+
+### Added
+- **Idempotent shell-command lifecycle**: `just install` and the macOS app now
+  install or repair a managed `~/.local/bin/scrybe` link. Repeated installs
+  are no-ops; broken and recognized stale links repair atomically; unrelated
+  files and healthy links fail closed. Status reports flag competing commands
+  and duplicate app bundles, and uninstall removes only Scrybe-owned artifacts.
+- **CLI embedded in desktop bundles**: direct DMG users can install, repair, or
+  remove the command from the native Scrybe menu; Homebrew links the same
+  version-matched binary through its cask.
+
 ## [0.6.3] — 2026-07-21
 
 ### Added

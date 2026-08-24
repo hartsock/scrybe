@@ -146,14 +146,17 @@ fn atomic_replace(output_path: &Path, bytes: &[u8]) -> anyhow::Result<()> {
             return Err(error).with_context(|| format!("inspect {}", output_path.display()));
         }
     };
-    let mut builder = tempfile::Builder::new();
     #[cfg(unix)]
-    {
+    let builder = {
         use std::os::unix::fs::PermissionsExt;
         // Match a normal newly-created image (0666 filtered by umask), not
         // tempfile's private 0600 default.
+        let mut builder = tempfile::Builder::new();
         builder.permissions(std::fs::Permissions::from_mode(0o666));
-    }
+        builder
+    };
+    #[cfg(not(unix))]
+    let builder = tempfile::Builder::new();
     let mut temporary = builder
         .tempfile_in(directory)
         .with_context(|| format!("create temporary file in {}", directory.display()))?;

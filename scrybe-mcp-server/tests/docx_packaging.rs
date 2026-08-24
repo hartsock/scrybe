@@ -60,6 +60,10 @@ fn local_install_wires_docx_exporter() {
         "app install should include the Python runtime tools"
     );
     assert!(
+        justfile.contains("{{cargo_target_dir}}/release/bundle/macos/Scrybe.app"),
+        "app install should use Cargo's configured target directory"
+    );
+    assert!(
         justfile.contains(
             "cd scrybe-mermaid && VIRTUAL_ENV=\"$HOME/venv\" ~/venv/bin/maturin develop --release"
         ),

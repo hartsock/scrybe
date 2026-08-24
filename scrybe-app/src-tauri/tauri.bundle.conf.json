@@ -1,0 +1,8 @@
+{
+  "build": {
+    "beforeBuildCommand": "npm run build && npm run bundle:prepare"
+  },
+  "bundle": {
+    "externalBin": ["scrybe"]
+  }
+}

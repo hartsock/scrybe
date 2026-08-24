@@ -7,6 +7,8 @@
     "dev": "vite",
     "test": "node --test test/mermaid_png.test.mjs",
     "build": "npm test && tsc && vite build",
+    "bundle:prepare": "node scripts/stage-cli.mjs",
+    "test:packaging": "node --test scripts/*.test.mjs",
     "preview": "vite preview",
     "tauri": "tauri"
   },

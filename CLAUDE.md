@@ -50,7 +50,7 @@ just build
 # Release build
 just release
 
-# Build + install Tauri desktop app to ~/Applications and ~/venv/bin
+# Build + install app/toolkit and a managed ~/.local/bin/scrybe link
 just install
 
 # Tauri dev server (live reload)
