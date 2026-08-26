@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "test": "node --test test/mermaid_png.test.mjs",
+    "test": "node --test test/*.test.mjs",
     "build": "npm test && tsc && vite build",
     "bundle:prepare": "node scripts/stage-cli.mjs",
     "test:packaging": "node --test scripts/*.test.mjs",

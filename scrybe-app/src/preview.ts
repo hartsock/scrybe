@@ -6,6 +6,7 @@ import {
   type MermaidPngExportDetail,
   type MermaidPreviewDocument,
 } from "./mermaid_png";
+import { installPreviewLinkGuard } from "./link_navigation";
 
 export const SAVE_MERMAID_PNG_EVENT = "scrybe:save-mermaid-png";
 
@@ -17,6 +18,13 @@ export class PreviewPane {
 
   constructor(container: HTMLElement) {
     this.container = container;
+    // Capture every current and future preview link. Mermaid creates SVG links
+    // asynchronously, after the initial Markdown DOM has been installed.
+    installPreviewLinkGuard(this.container, href => {
+      this.container.dispatchEvent(
+        new CustomEvent("scrybe:open-link", { bubbles: true, detail: { href } }),
+      );
+    });
     this.container.addEventListener("contextmenu", event => this.saveMermaidFromContextMenu(event));
   }
 
@@ -48,7 +56,6 @@ export class PreviewPane {
   private async postProcess(generation: number): Promise<void> {
     this.renderMath();
     this.addCodeCopyButtons();
-    this.interceptLinks();
     await this.renderMermaid(generation);
   }
 
@@ -121,19 +128,6 @@ export class PreviewPane {
         }
       });
     return precedingHeading || "Diagram";
-  }
-
-  private interceptLinks(): void {
-    this.container.querySelectorAll<HTMLAnchorElement>("a[href]").forEach(a => {
-      const href = a.getAttribute("href") ?? "";
-      if (!href || href.startsWith("#")) return;
-      a.addEventListener("click", e => {
-        e.preventDefault();
-        this.container.dispatchEvent(
-          new CustomEvent("scrybe:open-link", { bubbles: true, detail: { href } })
-        );
-      });
-    });
   }
 
   private renderMath(): void {
