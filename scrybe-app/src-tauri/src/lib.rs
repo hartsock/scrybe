@@ -904,6 +904,30 @@ fn export_figures(content: String, path: String) -> Result<Vec<String>, String> 
     Ok(results.into_iter().map(|r| r.path).collect())
 }
 
+const DEBUG_FRONTEND_ORIGIN: &str = "http://localhost:5173";
+
+/// Allow only Scrybe's own frontend to occupy the application WebView.
+///
+/// Preview links are routed to the system browser in TypeScript. This native
+/// guard is the non-bypassable fallback for generated markup, redirects, and
+/// any future frontend regression: a remote page must never replace the editor.
+fn is_trusted_app_navigation(url: &tauri::Url) -> bool {
+    match url.scheme() {
+        "tauri" => url.host_str() == Some("localhost"),
+        "http" if url.host_str() == Some("tauri.localhost") && url.port().is_none() => true,
+        "http" if cfg!(debug_assertions) => {
+            url.origin().ascii_serialization() == DEBUG_FRONTEND_ORIGIN
+        }
+        _ => false,
+    }
+}
+
+fn navigation_guard<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
+    tauri::plugin::Builder::new("scrybe-navigation-guard")
+        .on_navigation(|_webview, url| is_trusted_app_navigation(url))
+        .build()
+}
+
 /// Save the PNG rasterized from the live Mermaid.js preview.
 ///
 /// The frontend owns rendering so the pixels match what the user sees. This
@@ -926,6 +950,7 @@ fn save_mermaid_png(output: String, source: String, png_base64: String) -> Resul
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .plugin(navigation_guard())
         .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
             // A second instance was launched. Forward its first path arg to the
             // running frontend so it can open the file in an existing tab.
@@ -1077,6 +1102,64 @@ mod tests {
     //! sufficient. All tests use `tempfile::tempdir` to avoid touching
     //! real user files.
     use super::*;
+
+    #[test]
+    fn navigation_guard_allows_only_scrybe_frontend_origins() {
+        for trusted in [
+            "tauri://localhost/",
+            "tauri://localhost/#section",
+            "http://tauri.localhost/",
+        ] {
+            let url = tauri::Url::parse(trusted).unwrap();
+            assert!(is_trusted_app_navigation(&url), "should allow {trusted}");
+        }
+
+        for remote in [
+            "https://login.microsoftonline.com/",
+            "https://tauri.localhost.example.com/",
+            "https://tauri.localhost/",
+            "http://tauri.localhost:8080/",
+            "tauri://remote-host/",
+            "file:///tmp/replacement.html",
+            "data:text/html,replacement",
+            "javascript:document.body.textContent='replacement'",
+            "about:blank",
+        ] {
+            let url = tauri::Url::parse(remote).unwrap();
+            assert!(!is_trusted_app_navigation(&url), "should reject {remote}");
+        }
+    }
+
+    #[test]
+    fn navigation_guard_limits_the_debug_vite_origin() {
+        for remote in [
+            "http://localhost:5174/",
+            "https://localhost:5173/",
+            "http://127.0.0.1:5173/",
+            "http://127.0.0.1:5174/",
+        ] {
+            let url = tauri::Url::parse(remote).unwrap();
+            assert!(!is_trusted_app_navigation(&url), "should reject {remote}");
+        }
+
+        let vite = tauri::Url::parse("http://localhost:5173/").unwrap();
+        assert_eq!(is_trusted_app_navigation(&vite), cfg!(debug_assertions));
+    }
+
+    #[test]
+    fn navigation_guard_debug_vite_origin_matches_tauri_configuration() {
+        let config: serde_json::Value =
+            serde_json::from_str(include_str!("../tauri.conf.json")).unwrap();
+        let configured = config["build"]["devUrl"].as_str().unwrap();
+        assert_eq!(configured, DEBUG_FRONTEND_ORIGIN);
+
+        let url = tauri::Url::parse(configured).unwrap();
+        assert_eq!(
+            is_trusted_app_navigation(&url),
+            cfg!(debug_assertions),
+            "the configured Vite origin must be the debug exception"
+        );
+    }
 
     fn temp_file(name: &str, content: &str) -> (tempfile::TempDir, String) {
         let dir = tempfile::tempdir().expect("tempdir");
