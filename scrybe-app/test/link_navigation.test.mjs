@@ -63,21 +63,58 @@ test("capture guard routes links created after installation", () => {
   globalThis.Node = originalNode;
 });
 
+test("capture guard consumes empty preview links without opening them", () => {
+  const originalNode = globalThis.Node;
+  globalThis.Node = class FakeNode {};
+  try {
+    let listener;
+    const container = {
+      addEventListener: (_type, handler) => { listener = handler; },
+      removeEventListener: () => {},
+      contains: () => true,
+    };
+    const opened = [];
+    installPreviewLinkGuard(container, href => opened.push(href));
+
+    // Whitespace-only hrefs resolve like empty URLs in a browser, so consume
+    // them under the same contract instead of allowing a WebView reload.
+    for (const href of ["", " \t "]) {
+      const emptyLink = link(href);
+      Object.setPrototypeOf(emptyLink, globalThis.Node.prototype);
+      const event = {
+        target: target(emptyLink),
+        prevented: false,
+        stopped: false,
+        preventDefault() { this.prevented = true; },
+        stopPropagation() { this.stopped = true; },
+      };
+
+      listener(event);
+
+      assert.equal(event.prevented, true, `should prevent href ${JSON.stringify(href)}`);
+      assert.equal(event.stopped, true, `should stop href ${JSON.stringify(href)}`);
+    }
+    assert.deepEqual(opened, []);
+  } finally {
+    globalThis.Node = originalNode;
+  }
+});
+
 test("routes ordinary relative preview links", () => {
   const markdownLink = link("../runbook.md");
   assert.equal(
-    hrefForPreviewClick(target(markdownLink), () => true),
+    hrefForPreviewClick(target(markdownLink), () => true).href,
     "../runbook.md",
   );
 });
 
 test("leaves same-document fragments to the preview", () => {
   const fragment = link("#recovery");
-  assert.equal(hrefForPreviewClick(target(fragment), () => true), null);
+  assert.deepEqual(hrefForPreviewClick(target(fragment), () => true), { kind: "ignore" });
 });
 
 test("ignores links outside the preview and non-element targets", () => {
   const externalLink = link("https://example.com");
-  assert.equal(hrefForPreviewClick(target(externalLink), () => false), null);
-  assert.equal(hrefForPreviewClick(null, () => true), null);
+  assert.deepEqual(hrefForPreviewClick(target(externalLink), () => false), { kind: "ignore" });
+  assert.deepEqual(hrefForPreviewClick(null, () => true), { kind: "ignore" });
 });
