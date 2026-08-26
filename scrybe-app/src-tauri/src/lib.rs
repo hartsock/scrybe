@@ -904,6 +904,8 @@ fn export_figures(content: String, path: String) -> Result<Vec<String>, String> 
     Ok(results.into_iter().map(|r| r.path).collect())
 }
 
+const DEBUG_FRONTEND_ORIGIN: &str = "http://localhost:5173";
+
 /// Allow only Scrybe's own frontend to occupy the application WebView.
 ///
 /// Preview links are routed to the system browser in TypeScript. This native
@@ -914,8 +916,7 @@ fn is_trusted_app_navigation(url: &tauri::Url) -> bool {
         "tauri" => url.host_str() == Some("localhost"),
         "http" if url.host_str() == Some("tauri.localhost") && url.port().is_none() => true,
         "http" if cfg!(debug_assertions) => {
-            matches!(url.host_str(), Some("localhost" | "127.0.0.1"))
-                && url.port_or_known_default() == Some(5173)
+            url.origin().ascii_serialization() == DEBUG_FRONTEND_ORIGIN
         }
         _ => false,
     }
@@ -1134,6 +1135,7 @@ mod tests {
         for remote in [
             "http://localhost:5174/",
             "https://localhost:5173/",
+            "http://127.0.0.1:5173/",
             "http://127.0.0.1:5174/",
         ] {
             let url = tauri::Url::parse(remote).unwrap();
@@ -1142,6 +1144,21 @@ mod tests {
 
         let vite = tauri::Url::parse("http://localhost:5173/").unwrap();
         assert_eq!(is_trusted_app_navigation(&vite), cfg!(debug_assertions));
+    }
+
+    #[test]
+    fn navigation_guard_debug_vite_origin_matches_tauri_configuration() {
+        let config: serde_json::Value =
+            serde_json::from_str(include_str!("../tauri.conf.json")).unwrap();
+        let configured = config["build"]["devUrl"].as_str().unwrap();
+        assert_eq!(configured, DEBUG_FRONTEND_ORIGIN);
+
+        let url = tauri::Url::parse(configured).unwrap();
+        assert_eq!(
+            is_trusted_app_navigation(&url),
+            cfg!(debug_assertions),
+            "the configured Vite origin must be the debug exception"
+        );
     }
 
     fn temp_file(name: &str, content: &str) -> (tempfile::TempDir, String) {
