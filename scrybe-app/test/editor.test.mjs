@@ -27,7 +27,7 @@ const resolved = transpiled.outputText.replace(
   (_match, quote, specifier) => `from ${quote}${import.meta.resolve(specifier)}${quote}`,
 );
 const moduleUrl = `data:text/javascript;base64,${Buffer.from(resolved).toString("base64")}`;
-const { Programmatic, swapDocumentSpec, isProgrammaticUpdate } = await import(moduleUrl);
+const { Programmatic, swapDocumentSpec, replaceDocumentSpec, isProgrammaticUpdate } = await import(moduleUrl);
 
 test("user edits are not programmatic", () => {
   const state = EditorState.create({ doc: "old tab" });
@@ -68,4 +68,47 @@ test("control: an unmarked full replacement is undone to the old tab", () => {
   assert.equal(undoDepth(state), 1);
   assert.equal(undo({ state, dispatch: transaction => { state = transaction.state; } }), true);
   assert.equal(state.doc.toString(), "old tab");
+});
+
+
+test("agent replacement preserves the user's earlier undo history", () => {
+  let state = EditorState.create({ doc: "original", extensions: [history()] });
+  state = state.update({ changes: { from: 8, insert: "!" } }).state;
+  state = state.update(replaceDocumentSpec(state.doc.length, "agent text")).state;
+  assert.equal(state.doc.toString(), "agent text");
+  assert.equal(undoDepth(state), 2);
+  const dispatch = transaction => {
+    assert.equal(isProgrammaticUpdate({ transactions: [transaction] }), false);
+    state = transaction.state;
+  };
+  assert.equal(undo({ state, dispatch }), true);
+  assert.equal(state.doc.toString(), "original!");
+  assert.equal(undo({ state, dispatch }), true);
+  assert.equal(state.doc.toString(), "original");
+});
+
+test("agent replacement is programmatic but remains in history", () => {
+  const state = EditorState.create({ doc: "original" });
+  const transaction = state.update(replaceDocumentSpec(state.doc.length, "agent text"));
+  assert.equal(transaction.annotation(Programmatic), true);
+  assert.equal(isProgrammaticUpdate({ transactions: [transaction] }), true);
+  assert.notEqual(transaction.annotation(Transaction.addToHistory), false);
+});
+
+test("agent replacement isolates history even at the same timestamp", () => {
+  let state = EditorState.create({ doc: "original", extensions: [history()] });
+  state = state.update({
+    changes: { from: 8, insert: "!" },
+    annotations: Transaction.time.of(1000),
+  }).state;
+  state = state.update(
+    replaceDocumentSpec(state.doc.length, "agent text"),
+    { annotations: Transaction.time.of(1000) },
+  ).state;
+  assert.equal(undoDepth(state), 2);
+  const dispatch = transaction => { state = transaction.state; };
+  assert.equal(undo({ state, dispatch }), true);
+  assert.equal(state.doc.toString(), "original!");
+  assert.equal(undo({ state, dispatch }), true);
+  assert.equal(state.doc.toString(), "original");
 });
