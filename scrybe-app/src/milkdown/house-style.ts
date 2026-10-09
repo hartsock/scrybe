@@ -13,10 +13,10 @@ export function houseStyle(ctx: Ctx): void {
   ctx.update(remarkGFMPlugin.options.key, options => ({ ...options, tablePipeAlign: false }));
   ctx.update(remarkStringifyOptionsCtx, options => ({
     ...options,
-    bullet: "-",
-    rule: "-",
-    emphasis: "*",
-    strong: "*",
+    bullet: "-" as const,
+    rule: "-" as const,
+    emphasis: "*" as const,
+    strong: "*" as const,
     handlers: {
       ...options.handlers,
       break: () => "  \n",
