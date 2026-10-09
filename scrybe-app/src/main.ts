@@ -15,7 +15,7 @@ import { ask, message, save as saveDialog } from "@tauri-apps/plugin-dialog";
 import { showToast } from "./toast";
 import { AppState } from "./state";
 import { renderTabBar } from "./tabs";
-import { createEditor, swapDocument, setEditorTheme, setVim, setWrap, setEditorLanguage, classifyFile } from "./editor";
+import { createEditor, swapDocument, replaceDocument, setEditorTheme, setVim, setWrap, setEditorLanguage, classifyFile } from "./editor";
 import { PreviewPane, SAVE_MERMAID_PNG_EVENT } from "./preview";
 import type { MermaidPngExportDetail, MermaidPreviewDocument } from "./mermaid_png";
 import { documentStem, mermaidPngFilename, rasterizeMermaidSvg } from "./mermaid_png";
@@ -1262,7 +1262,7 @@ listen<{ id: number; data: { path: string; start_line: number; end_line: number;
 
     state.updateContent(tab.id, merged);
     if (state.activeTabId === tab.id) {
-      swapDocument(view, merged);
+      replaceDocument(view, merged);
       renderPreview(merged);
     }
     redrawTabs();
