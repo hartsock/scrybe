@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 use crate::ast::Ast;
 use crate::content::{ContentAddressable, ContentDigest};
 use crate::error::ScrybeError;
+use crate::frontmatter;
 
 /// A Scrybe document — Markdown source with associated metadata.
 ///
@@ -38,10 +39,10 @@ impl Document {
 
     /// Creates a document from a file path and its source.
     ///
-    /// The title is populated automatically from the first H1 heading.
+    /// The title is populated from the first H1 heading after front matter.
     pub fn from_file(path: PathBuf, source: impl Into<String>) -> Self {
         let source = source.into();
-        let title = Ast::parse(&source).title();
+        let title = Ast::parse(frontmatter::split(&source).1).title();
         Self {
             source,
             path: Some(path),
@@ -68,9 +69,9 @@ impl Document {
         Ast::parse(&self.source)
     }
 
-    /// Returns the title extracted from the first H1 in the source, if any.
+    /// Returns the title extracted from the first H1 after front matter, if any.
     pub fn title_from_ast(&self) -> Option<String> {
-        self.ast().title()
+        Ast::parse(frontmatter::split(&self.source).1).title()
     }
 
     // -----------------------------------------------------------------------
