@@ -3,6 +3,7 @@ import { Crepe } from "@milkdown/crepe";
 import { replaceAll } from "@milkdown/kit/utils";
 import { splitFrontMatter } from "../../src/frontmatter";
 import { crepeSettings, houseStyle } from "../../src/milkdown/house-style";
+import { diffLines } from "./linediff";
 import sample from "./sample.md?raw";
 import probe from "./probe.md?raw";
 import "@milkdown/crepe/theme/common/style.css";
@@ -32,23 +33,18 @@ function makeEditor(root: HTMLElement, body: string): Crepe {
 function showOutput(body: string): void {
   const output = raw + body;
   element("output").textContent = output;
-  const before = source.split("\n");
-  const after = output.split("\n");
+  const changes = diffLines(source.split("\n"), output.split("\n")).filter(hunk => hunk.kind !== "same");
   const differences = element("differences");
   differences.replaceChildren();
-  let count = 0;
-  for (let i = 0; i < Math.max(before.length, after.length); i++) {
-    if (before[i] === after[i]) continue;
-    count++;
+  for (const hunk of changes) {
     const item = document.createElement("li");
-    item.value = i + 1;
     const text = document.createElement("pre");
-    text.textContent = `Source: ${JSON.stringify(before[i]) ?? "∅"}\nOutput: ${JSON.stringify(after[i]) ?? "∅"}`;
+    text.textContent = `${hunk.kind}\nSource line ${hunk.beforeLine ?? "∅"}: ${JSON.stringify(hunk.before) ?? "∅"}\nOutput line ${hunk.afterLine ?? "∅"}: ${JSON.stringify(hunk.after) ?? "∅"}`;
     item.append(text);
     differences.append(item);
   }
   const badge = element("badge");
-  badge.textContent = output === source ? "Byte-identical to source" : `Reformat pending: ${count} lines differ`;
+  badge.textContent = output === source ? "Byte-identical to source" : `Reformat pending: ${changes.length} changes`;
   badge.dataset.identical = String(output === source);
 }
 
@@ -112,8 +108,14 @@ roundtrip.addEventListener("click", async () => {
       if (next !== previous && firstChanged === undefined) firstChanged = cycle;
       previous = next;
     }
-    const slashes = (text: string) => (text.match(/\\/g) ?? []).length;
-    cycles.textContent = `${firstChanged === undefined ? "Stable after first pass" : `First change at cycle ${firstChanged}`} (10 cycles). Backslashes: ${slashes(initial)} → ${slashes(previous)}.`;
+    const autolinkLines = (text: string) => text.split("\n").filter(line => line.includes("<http"));
+    const firstLines = autolinkLines(initial);
+    const lastLines = autolinkLines(previous);
+    const slashes = (lines: string[]) => (lines.join("\n").match(/\\/g) ?? []).length;
+    const autolinks = firstLines.length || lastLines.length
+      ? `Autolink backslashes: ${slashes(firstLines)} → ${slashes(lastLines)}.`
+      : "No autolink in this document.";
+    cycles.textContent = `${firstChanged === undefined ? "Stable after first pass" : `First change at cycle ${firstChanged}`} (10 cycles). ${autolinks}`;
   } catch (error) { report(error); cycles.textContent = "Round-trip check failed."; }
   finally { await hidden.destroy(); busy(false); }
 });
