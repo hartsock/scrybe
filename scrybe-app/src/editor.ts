@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { Annotation, EditorState, Compartment, Transaction, type Extension, type TransactionSpec } from "@codemirror/state";
 import { EditorView, type ViewUpdate } from "@codemirror/view";
+import { isolateHistory } from "@codemirror/commands";
 import { basicSetup } from "codemirror";
 import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
 import { languages } from "@codemirror/language-data";
@@ -190,6 +191,20 @@ export function swapDocumentSpec(docLength: number, content: string): Transactio
   };
 }
 
+/// Show a different document without adding an undo step.
 export function swapDocument(view: EditorView, content: string): void {
   view.dispatch(swapDocumentSpec(view.state.doc.length, content));
+}
+
+/// Keep an agent's full-buffer edit separate from adjacent user edits.
+export function replaceDocumentSpec(docLength: number, content: string): TransactionSpec {
+  return {
+    changes: { from: 0, to: docLength, insert: content },
+    annotations: [Programmatic.of(true), isolateHistory.of("full")],
+  };
+}
+
+/// Apply an agent change to the same document as one undoable step.
+export function replaceDocument(view: EditorView, content: string): void {
+  view.dispatch(replaceDocumentSpec(view.state.doc.length, content));
 }
