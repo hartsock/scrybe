@@ -58,19 +58,24 @@ Liquid/Jekyll semantics survive.
 
 Set `SCRYBE_GOLDEN_DIR` to a directory of UTF-8 `*.md` files. Immediate regular
 files are checked in sorted order; symlinks and subdirectories are not followed.
-Keep the corpus outside the repository, or in the already-gitignored
-`scrybe-app/node_modules/private-golden/` directory. Other paths inside the
-checkout are rejected. The environment variable is read only; no corpus is
-bundled, copied into the checkout, or automatically pinned.
+Keep the corpus outside the repository. Every path that resolves inside the
+checkout is rejected, including `node_modules` and symlinks into the checkout.
+The environment variable is read only; no corpus is bundled, copied into the
+checkout, or automatically pinned.
 
 The suite checks raw front matter and ten-cycle stability and reports byte
-identity with file names only. Private failures withhold document text and
-source paths. Outputs go exclusively to a newly created temporary directory
+identity with file names only. Every file gets a pass/fail summary row, including
+files after a failure. Rows report byte identity (`null` if not measured) and the
+number of completed stable cycles (zero if none). After checking all files, one
+failure lists only the failing file names. Private failures withhold document
+text and source paths. Outputs go exclusively to a new temporary directory
 (mode 0700), with files mode 0600. Private outputs use a separate filename prefix.
 They remain available there for local diff review; remove them when finished.
-An unset variable produces an explicit skip; an empty or unreadable directory
-fails. Private content must never be pasted into commits, test names, this
-README, or handoff reports. No private corpus was used to produce these pins.
+An unset variable produces an explicit skip. Refused paths report
+`SCRYBE_GOLDEN_DIR must be outside the repository`; empty directories report
+`private corpus has no Markdown files`. Other directory failures withhold details.
+Private content must never be pasted into commits, test names, this README, or
+handoff reports. No private corpus was used to produce these pins.
 
 ## Evidence levels and Phase 2 gate
 
