@@ -18,6 +18,19 @@ use crate::mermaid::inject_mermaid_wrappers;
 use crate::theme::Theme;
 use crate::RenderOutput;
 
+// Front matter is split before parsing. Metadata flags would also consume
+// Markdown delimiters that belong to the body; all other 0.12 flags stay enabled.
+const MARKDOWN_OPTIONS: Options = Options::ENABLE_TABLES
+    .union(Options::ENABLE_FOOTNOTES)
+    .union(Options::ENABLE_STRIKETHROUGH)
+    .union(Options::ENABLE_TASKLISTS)
+    .union(Options::ENABLE_SMART_PUNCTUATION)
+    .union(Options::ENABLE_HEADING_ATTRIBUTES)
+    .union(Options::ENABLE_OLD_FOOTNOTES)
+    .union(Options::ENABLE_MATH)
+    .union(Options::ENABLE_GFM)
+    .union(Options::ENABLE_DEFINITION_LIST);
+
 static SYNTAX_SET: OnceLock<SyntaxSet> = OnceLock::new();
 static THEME_SET: OnceLock<ThemeSet> = OnceLock::new();
 
@@ -35,8 +48,9 @@ fn theme_set() -> &'static ThemeSet {
 /// - `html`: the full fragment with `<style>` prepended.
 /// - `body_html`: just the body content without CSS.
 pub fn render_html(doc: &Document, theme: Theme) -> RenderOutput {
-    // 1. Extract math placeholders before pulldown-cmark sees the source.
-    let (processed_source, math_placeholders) = extract_math(&doc.source);
+    // 1. Strip front matter before math extraction or Markdown parsing.
+    let (_, body) = scrybe_core::frontmatter::split(&doc.source);
+    let (processed_source, math_placeholders) = extract_math(body);
 
     // 2. Parse + render with syntax highlighting.
     let body_html = render_with_highlighting(&processed_source);
@@ -55,8 +69,7 @@ pub fn render_html(doc: &Document, theme: Theme) -> RenderOutput {
 
 /// Runs pulldown-cmark with custom syntax-highlighted code blocks.
 fn render_with_highlighting(source: &str) -> String {
-    let opts = Options::all();
-    let parser = Parser::new_ext(source, opts);
+    let parser = Parser::new_ext(source, MARKDOWN_OPTIONS);
 
     let mut output = String::new();
     let mut in_code_block = false;
@@ -182,6 +195,33 @@ mod tests {
 
     fn doc(src: &str) -> Document {
         Document::new(src)
+    }
+
+    #[test]
+    fn test_explicit_options_exclude_only_metadata() {
+        let metadata = Options::ENABLE_YAML_STYLE_METADATA_BLOCKS
+            .union(Options::ENABLE_PLUSES_DELIMITED_METADATA_BLOCKS);
+        // New upstream flags must prompt an explicit rendering-policy decision.
+        assert_eq!(MARKDOWN_OPTIONS, Options::all().difference(metadata));
+    }
+
+    #[test]
+    fn test_frontmatter_not_rendered() {
+        let out = render_html(
+            &doc("---\ntitle: Hidden $metadata$\n---\n# Visible\n"),
+            Theme::Default,
+        );
+        assert_eq!(out.body_html, "<h1>Visible</h1>\n");
+    }
+
+    #[test]
+    fn test_mid_document_rules_after_frontmatter() {
+        let out = render_html(
+            &doc("---\ntitle: Hidden\n---\nFirst.\n\n---\n\nSecond.\n\n---\n\nThird.\n"),
+            Theme::Default,
+        );
+        assert_eq!(out.body_html.matches("<hr").count(), 2);
+        assert!(!out.body_html.contains("Hidden"), "{}", out.body_html);
     }
 
     // --- existing tests ---
