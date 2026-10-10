@@ -26,6 +26,7 @@ import { Sidebar } from "./sidebar";
 import { PluginManager } from "./plugins";
 import { McpPanel } from "./mcp_panel";
 import { VcsPanel } from "./vcs_panel";
+import { findHeadings } from "./sections";
 
 // Keep recent console output in an in-memory ring so the socket `logs`
 // method can surface errors to agents without DevTools open. Replaces the
@@ -1192,22 +1193,10 @@ listen<{ id: number; data: { path: string; heading: string } }>(
     }
 
     const lines = tab.content.split("\n");
-    const headingRe = /^(#{1,6})\s+(.*)$/;
+    const headings = findHeadings(tab.content);
     const needle = data.heading.toLowerCase();
-
-    let startIdx = -1;
-    let level = 0;
-    let actualHeading = "";
-    for (let i = 0; i < lines.length; i++) {
-      const m = headingRe.exec(lines[i]);
-      if (m && m[2].toLowerCase().includes(needle)) {
-        startIdx = i;
-        level = m[1].length;
-        actualHeading = m[2];
-        break;
-      }
-    }
-    if (startIdx === -1) {
+    const match = headings.find(heading => heading.text.toLowerCase().includes(needle));
+    if (!match) {
       await reply(id, {
         error: {
           code: ERR_SECTION_NOT_FOUND,
@@ -1216,14 +1205,11 @@ listen<{ id: number; data: { path: string; heading: string } }>(
       });
       return;
     }
-    let endIdx = lines.length;
-    for (let i = startIdx + 1; i < lines.length; i++) {
-      const m = headingRe.exec(lines[i]);
-      if (m && m[1].length <= level) {
-        endIdx = i;
-        break;
-      }
-    }
+    const startIdx = match.line - 1;
+    const level = match.level;
+    const actualHeading = match.text;
+    const next = headings.find(heading => heading.line > match.line && heading.level <= level);
+    const endIdx = next ? next.line - 1 : lines.length;
     const sectionContent = lines.slice(startIdx, endIdx).join("\n");
     await reply(id, {
       result: { heading: actualHeading, level, content: sectionContent },
