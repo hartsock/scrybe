@@ -1,1 +1,2 @@
 tests/fixtures/frontmatter/** -text
+scrybe-app/test/golden/** -text
