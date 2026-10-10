@@ -15,7 +15,7 @@ const dom = new JSDOM("<!doctype html><html><body></body></html>", {
   pretendToBeVisual: true, url: "https://example.invalid/",
 });
 for (const name of ["window", "document", "navigator", "Node", "HTMLElement",
-  "Element", "MutationObserver", "DOMParser", "CustomEvent", "Event", "getComputedStyle",
+  "Element", "SVGElement", "MutationObserver", "DOMParser", "CustomEvent", "Event", "getComputedStyle",
   "requestAnimationFrame", "cancelAnimationFrame", "addEventListener", "removeEventListener", "dispatchEvent"]) {
   Object.defineProperty(globalThis, name, { configurable: true, value:
     typeof dom.window[name] === "function" && /^(getComputedStyle|requestAnimationFrame|cancelAnimationFrame|addEventListener|removeEventListener|dispatchEvent)$/.test(name)
@@ -34,25 +34,31 @@ async function loadTS(relative) {
     (_, quote, specifier) => `from ${quote}${import.meta.resolve(specifier)}${quote}`);
   return import(`data:text/javascript;base64,${Buffer.from(code).toString("base64")}`);
 }
+const { Crepe } = await import("@milkdown/crepe");
 const { CrepeBuilder } = await import("@milkdown/crepe/builder");
 const { schemaCtx, serializerCtx, parserCtx } = await import("@milkdown/kit/core");
 const { toMarkdown } = await import("mdast-util-to-markdown");
 const { fromMarkdown } = await import("mdast-util-from-markdown");
 const { splitFrontMatter } = await loadTS("../src/frontmatter.ts");
-const { houseStyle } = await loadTS("../src/milkdown/house-style.ts");
+const { houseStyle, crepeSettings } = await loadTS("../src/milkdown/house-style.ts");
 const goldenRoot = new URL("./golden/", import.meta.url);
 const outputRoot = await mkdtemp(path.join(tmpdir(), "scrybe-golden-"));
 const summary = [];
 
-async function withCrepe(body, action) {
-  const crepe = new CrepeBuilder({ root: null, defaultValue: body });
+async function withCrepe(body, action, full = false) {
+  const crepe = full
+    ? new Crepe({ root: null, defaultValue: body, ...crepeSettings })
+    : new CrepeBuilder({ root: null, defaultValue: body });
   crepe.editor.config(houseStyle);
+  let created = false;
   try {
     await crepe.create();
+    created = true;
     assert.ok(document.body.querySelector(".ProseMirror"), "real editor mounted on document.body");
     return await action(crepe);
   } finally {
-    await crepe.destroy();
+    // Milkdown destroy waits forever if create rejected while OnCreate.
+    if (created) await crepe.destroy();
     document.body.replaceChildren();
   }
 }
@@ -217,6 +223,40 @@ test("corpus results include every failure and success without content", async t
   assert.ok(!result.output.includes(marker), "corpus content withheld");
   assert.ok(!result.output.includes(root), "source path withheld");
 });
+
+// Compare mdast content without source positions, independently of Milkdown's
+// parser: comparing only two lossy editor documents would miss deleted images.
+function semanticMarkdown(source) {
+  return JSON.parse(JSON.stringify(fromMarkdown(source), (key, value) =>
+    key === "position" ? undefined : value));
+}
+const imageCases = [
+  ["untitled image-only", "![alt text](a.png)\n"],
+  ["titled image-only", '![descriptive alt](a.png "Image title")\n'],
+  ["linked untitled image", "[![a](/x.png)](/y)\n"],
+  ["linked titled image", '[![linked alt](/x.png "Image title")](/y)\n'],
+  ["untitled mid-paragraph", "Before ![inline alt](a.png) after.\n"],
+  ["titled mid-paragraph", 'Before ![inline alt](a.png "Image title") after.\n'],
+  ["empty alt", "![](a.png)\n"],
+];
+for (const full of [false, true]) {
+  for (const [name, source] of imageCases) {
+    test(`images ${full ? "full Crepe" : "CrepeBuilder"}: ${name}`, async t => {
+      const original = semanticMarkdown(source);
+      const first = await withCrepe(source, crepe => crepe.getMarkdown(), full);
+      t.diagnostic(`${name}: ${JSON.stringify(first)}`);
+      assert.deepEqual(semanticMarkdown(first), original, "save changed image semantics");
+      assert.equal(first, source, "save changed image Markdown");
+      let previous = first;
+      for (let i = 1; i <= 10; i++) {
+        const next = await withCrepe(previous, crepe => crepe.getMarkdown(), full);
+        assert.deepEqual(semanticMarkdown(next), original, `image changed at cycle ${i}`);
+        assert.equal(next, first, `image serialization changed at cycle ${i}`);
+        previous = next;
+      }
+    });
+  }
+}
 
 const attentionCases = [
   { name: "strong period after word", before: "uncertainty", marked: ".", after: "", mark: "strong",
