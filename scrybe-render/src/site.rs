@@ -36,8 +36,16 @@ pub(super) fn render(source: &str, options: Options) -> String {
                 _ => {}
             }
         }
+        // Ruby lowercases without contextual final sigma, retaining expansions
+        // such as capital dotted I -> i + combining dot.
         let mut id = non_word
-            .replace_all(&text.to_lowercase(), "")
+            .replace_all(
+                &text
+                    .chars()
+                    .flat_map(char::to_lowercase)
+                    .collect::<String>(),
+                "",
+            )
             .replace([' ', '\t'], "-");
         let count = counts.entry(id.clone()).or_default();
         if *count > 0 {
@@ -49,6 +57,9 @@ pub(super) fn render(source: &str, options: Options) -> String {
         }
     }
 
+    // The colon namespace cannot collide with generated heading IDs, which
+    // discard colons. Repeated references get production-style numeric suffixes.
+    let mut footnotes = HashMap::<String, (usize, usize)>::new();
     let mut language = None;
     let mut code = String::new();
     let mut in_code = false;
@@ -70,6 +81,20 @@ pub(super) fn render(source: &str, options: Options) -> String {
             in_code = false;
             Some(Event::Html(code_block(&code, language.as_deref()).into()))
         }
+        Event::FootnoteReference(label) => {
+            let next = footnotes.len() + 1;
+            let (number, references) = footnotes.entry(label.to_string()).or_insert((next, 0));
+            let suffix = if *references == 0 { String::new() } else { format!(":{references}") };
+            *references += 1;
+            let label = html_escape(&label);
+            Some(Event::InlineHtml(format!("<sup id=\"fnref:{label}{suffix}\" role=\"doc-noteref\"><a href=\"#fn:{label}\" class=\"footnote\" rel=\"footnote\">{number}</a></sup>").into()))
+        }
+        Event::Start(Tag::FootnoteDefinition(label)) => {
+            let next = footnotes.len() + 1;
+            let (number, _) = footnotes.entry(label.to_string()).or_insert((next, 0));
+            Some(Event::Html(format!("<div class=\"footnote-definition\" id=\"fn:{}\"><sup class=\"footnote-definition-label\">{number}</sup>", html_escape(&label)).into()))
+        }
+        Event::End(TagEnd::FootnoteDefinition) => Some(Event::Html("</div>\n".into())),
         other => Some(other),
     });
     let mut html = String::new();
