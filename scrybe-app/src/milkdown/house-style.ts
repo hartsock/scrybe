@@ -1,10 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
-import { Crepe, type CrepeConfig } from "@milkdown/crepe";
 import type { Ctx } from "@milkdown/kit/ctx";
 import { remarkStringifyOptionsCtx } from "@milkdown/kit/core";
 import { remarkGFMPlugin } from "@milkdown/kit/preset/gfm";
 import { imageSchema, paragraphSchema, codeBlockSchema, linkSchema } from "@milkdown/kit/preset/commonmark";
-import { languages } from "@codemirror/language-data";
 import { gfmTableToMarkdown } from "mdast-util-gfm-table";
 import { defaultHandlers } from "mdast-util-to-markdown";
 import { decodeNamedCharacterReference } from "decode-named-character-reference";
@@ -158,18 +156,3 @@ export function houseStyle(ctx: Ctx): void {
     },
   }));
 }
-
-const commonLanguages = new Set([
-  "JavaScript", "TypeScript", "Python", "Rust", "HTML", "CSS", "JSON", "Markdown", "SQL", "Shell",
-]);
-export const crepeSettings: Pick<CrepeConfig, "features" | "featureConfigs"> = {
-  features: {
-    [Crepe.Feature.Latex]: false,
-    // ImageBlock serializes its resize ratio as alt text. Use ordinary image
-    // nodes to preserve authored alt/title, without its upload/resize UI.
-    [Crepe.Feature.ImageBlock]: false,
-  },
-  featureConfigs: {
-    [Crepe.Feature.CodeMirror]: { languages: languages.filter(language => commonLanguages.has(language.name)) },
-  },
-};
