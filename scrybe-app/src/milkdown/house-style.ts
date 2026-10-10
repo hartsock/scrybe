@@ -3,6 +3,7 @@ import { Crepe, type CrepeConfig } from "@milkdown/crepe";
 import type { Ctx } from "@milkdown/kit/ctx";
 import { remarkStringifyOptionsCtx } from "@milkdown/kit/core";
 import { remarkGFMPlugin } from "@milkdown/kit/preset/gfm";
+import { imageSchema } from "@milkdown/kit/preset/commonmark";
 import { languages } from "@codemirror/language-data";
 import { gfmTableToMarkdown } from "mdast-util-gfm-table";
 import { defaultHandlers } from "mdast-util-to-markdown";
@@ -11,6 +12,22 @@ const table = gfmTableToMarkdown({ tablePipeAlign: false }).handlers!.table!;
 
 /** Merge with Milkdown's handlers: replacing them breaks inline escaping. */
 export function houseStyle(ctx: Ctx): void {
+  ctx.update(imageSchema.key, previous => schemaCtx => {
+    const schema = previous(schemaCtx);
+    return {
+      ...schema,
+      parseMarkdown: {
+        ...schema.parseMarkdown,
+        // mdast uses null for absent metadata; Milkdown requires strings and
+        // silently drops the image when its attribute validation rejects null.
+        runner: (state, node, type) => schema.parseMarkdown.runner(state, {
+          ...node,
+          alt: node.alt ?? "",
+          title: node.title ?? "",
+        }, type),
+      },
+    };
+  });
   ctx.update(remarkGFMPlugin.options.key, options => ({ ...options, tablePipeAlign: false }));
   ctx.update(remarkStringifyOptionsCtx, options => ({
     ...options,
@@ -40,7 +57,12 @@ const commonLanguages = new Set([
   "JavaScript", "TypeScript", "Python", "Rust", "HTML", "CSS", "JSON", "Markdown", "SQL", "Shell",
 ]);
 export const crepeSettings: Pick<CrepeConfig, "features" | "featureConfigs"> = {
-  features: { [Crepe.Feature.Latex]: false },
+  features: {
+    [Crepe.Feature.Latex]: false,
+    // ImageBlock serializes its resize ratio as alt text. Use ordinary image
+    // nodes to preserve authored alt/title, without its upload/resize UI.
+    [Crepe.Feature.ImageBlock]: false,
+  },
   featureConfigs: {
     [Crepe.Feature.CodeMirror]: { languages: languages.filter(language => commonLanguages.has(language.name)) },
   },
