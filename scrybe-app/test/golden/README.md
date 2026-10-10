@@ -88,16 +88,52 @@ handoff reports. No private corpus was used to produce these pins.
 3. **Real Jekyll HTML:** out of scope on this machine and **not evaluated**.
    Markdown HTML alone would not test Liquid/Jekyll processing.
 
-The executable `test.todo` builds the otherwise inexpressible document state
-`text("uncertainty") + strong(".")`. Milkdown emits `uncertainty**.**`, then
-`uncertainty\*\*.\*\*` after reparsing. The TODO fails the intended idempotence
-assertion and records those observed outputs; Node excludes TODO failures from
-its exit status. A separate passing upstream check pins
-`uncertaint&#x79;**.**` and verifies that it reparses as strong and is stable.
-The fix target is Milkdown's `text`/`strong`/`emphasis` handlers, not an override
-of the upstream serializer version. No production fix is included here.
+The bold-punctuation defect now has passing edit-path tests using upstream
+attention handlers. Image and supported save cases also run in both CrepeBuilder
+and full Crepe with `crepeSettings` under JSDOM. Full Crepe's CodeMirror visibility
+observer is a lifecycle stub, not a visual-layout test.
 
-**Phase 2 NO-GO on this evidence alone:** the edit-path defect remains open,
-private-corpus semantic diff review is not established, and real Jekyll HTML
-has not been compared. A green harness confirms the recorded observations;
-it does not turn the known TODO or missing evidence into a GO.
+## Link and attention ordering: owner decision pending
+
+The candidate retains link priority 0. It fixes `[*a* b](u)` and `[**a** b](u)`:
+one anchor survives instead of splitting the linked text into separate anchors.
+It changes the mirror class, where emphasis begins with a link:
+
+| Input | First save | Later save |
+|---|---|---|
+| `*[a](u) text*` | `[*a*](u) *text*` | same |
+| `*[a](u) [b](v)*` | `[*a*](u) *[b](v)*` | `[*a*](u) [*b*](v)` on save 2 |
+| `*[a](u)*` | `[*a*](u)` | same |
+| `**[a](u)**` | `[**a**](u)` | same |
+| `***[a](u)***` | `[***a***](u)` | same |
+
+These outputs flip HTML nesting; spaces between separately marked spans lose
+emphasis. Default styling can hide this, but the HTML is different. The two-link
+case is not stable from its first save. Ten visible TODO probes execute the
+intended preservation assertions in both editor configurations. TODO status is
+not approval or a passing preservation check.
+
+Longest-run-outer can distinguish unequal ranges, but not identical ranges.
+Passing collision tests prove `*[a](u)*` and `[*a*](u)` parse into exactly the same
+ProseMirror JSON; strong and combined-mark variants do too. Their HTML differs.
+Original nesting is lost before serialization. A serializer slice replacement
+or look-ahead runner cannot reconstruct that missing information. Preserving
+both forms requires storing source nesting in a changed document representation.
+The current choice avoids duplicated anchors but needs the owner's sign-off on
+the canonical form. No longest-run heuristic or source-preserving serializer is
+shipped here.
+
+`*text [a](u)*` and `**see [a](u) and [b](v)**` preserve exact output, HTML,
+parsed structure, and ten cycles. Four older same-type nested emphasis/strong
+TODOs remain unresolved in the current schema.
+
+Already-saved container placeholders have a migration effect: `- <br />` now
+becomes `-`; an empty paragraph between list-item paragraphs can disappear and
+converge on the second save. Top-level placeholders retain prior behavior.
+An originally blank code block that is filled and later emptied retains its
+blank-line flag, so it saves with one blank line again.
+
+**Phase 2 NO-GO on this evidence alone:** the canonical-form decision and nested
+mark limitations remain open, private-corpus semantic review is not established,
+and real Jekyll HTML has not been compared. A green process exit excludes TODO
+failures; it does not establish preservation for those inputs.
