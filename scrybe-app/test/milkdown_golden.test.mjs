@@ -274,6 +274,52 @@ for (const full of [false, true]) {
   }
 }
 
+const linkOrderingCases = [
+  "[*a* b](u)\n",
+  "[**a** b](u)\n",
+  "*[a](u) text*\n",
+  "*[a](u) [b](v)*\n",
+  "*[a](u)*\n",
+  "**[a](u)**\n",
+  "***[a](u)***\n",
+  "*text [a](u)*\n",
+  "**see [a](u) and [b](v)**\n"
+];
+for (const full of [false, true]) {
+  for (const source of linkOrderingCases) {
+    test(`link ordering ${full ? "full Crepe" : "CrepeBuilder"}: ${source.trim()}`, async t => {
+      const first = await withCrepe(source, crepe => crepe.getMarkdown(), full);
+      const second = await withCrepe(first, crepe => crepe.getMarkdown(), full);
+      t.diagnostic(`${JSON.stringify(source)} -> ${JSON.stringify(first)} -> ${JSON.stringify(second)}`);
+      assert.equal(first, source, "first save must preserve mark nesting");
+      assert.equal(renderedMarkdown(first), renderedMarkdown(source));
+      assert.deepEqual(semanticMarkdown(first), semanticMarkdown(source));
+      assert.equal(second, first, "must be stable from the first save");
+      let previous = second;
+      for (let i = 2; i <= 10; i++) {
+        const next = await withCrepe(previous, crepe => crepe.getMarkdown(), full);
+        assert.equal(next, first, `mark nesting changed at cycle ${i}`);
+        assert.equal(renderedMarkdown(next), renderedMarkdown(source));
+        assert.deepEqual(semanticMarkdown(next), semanticMarkdown(source));
+        previous = next;
+      }
+    });
+  }
+  test(`equal-span nesting loses source order: ${full ? "full Crepe" : "CrepeBuilder"}`, async () => {
+    for (const marker of ["*", "**", "***"]) {
+      const outer = `${marker}[a](u)${marker}\n`;
+      const inner = `[${marker}a${marker}](u)\n`;
+      const parsed = [];
+      for (const source of [outer, inner]) {
+        parsed.push(await withCrepe(source, crepe => crepe.editor.action(ctx =>
+          ctx.get(parserCtx)(source).toJSON()), full));
+      }
+      assert.deepEqual(parsed[0], parsed[1], "same marks and run lengths; source order is absent");
+      assert.notEqual(renderedMarkdown(outer), renderedMarkdown(inner), "required HTML differs");
+    }
+  });
+}
+
 const imageCases = [
   ["untitled image-only", "![alt text](a.png)\n"],
   ["titled image-only", '![descriptive alt](a.png "Image title")\n'],
