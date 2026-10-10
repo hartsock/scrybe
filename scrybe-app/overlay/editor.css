@@ -1,0 +1,12 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+@import '@milkdown/crepe/theme/common/prosemirror.css';
+@import '@milkdown/crepe/theme/common/reset.css';
+@import '@milkdown/crepe/theme/common/block-edit.css';
+@import '@milkdown/crepe/theme/common/cursor.css';
+@import '@milkdown/crepe/theme/common/link-tooltip.css';
+@import '@milkdown/crepe/theme/common/list-item.css';
+@import '@milkdown/crepe/theme/common/placeholder.css';
+@import '@milkdown/crepe/theme/common/toolbar.css';
+@import '@milkdown/crepe/theme/common/table.css';
+.milkdown{--crepe-color-background:var(--bg);--crepe-color-on-background:var(--ink);--crepe-color-surface:var(--surface);--crepe-color-surface-low:var(--code-bg);--crepe-color-on-surface:var(--ink);--crepe-color-on-surface-variant:var(--muted);--crepe-color-outline:var(--rule);--crepe-color-primary:var(--accent);--crepe-color-secondary:var(--action-bg);--crepe-color-on-secondary:var(--action-ink);--crepe-color-inverse:var(--ink);--crepe-color-on-inverse:var(--bg);--crepe-color-inline-code:var(--accent);--crepe-color-error:#d66;--crepe-color-hover:var(--code-bg);--crepe-color-selected:var(--surface);--crepe-color-inline-area:var(--code-bg);--crepe-font-default:var(--serif);--crepe-font-title:var(--serif);--crepe-font-code:var(--mono);--crepe-shadow-1:0 2px 8px #0003;--crepe-shadow-2:0 4px 16px #0004}
+.milkdown .ProseMirror{padding:12px 24px;outline:none;min-height:100px}.milkdown .ProseMirror p{margin-block:.8em}.milkdown button:focus-visible{outline:3px solid var(--accent)}
