@@ -1,0 +1,32 @@
+[
+  {
+    "url": "http://www.w3.org/1998/Math/MathML",
+    "package": "dompurify",
+    "reason": "Standard MathML namespace identifier used by DOMPurify and @vue/runtime-dom for namespace comparison and element creation; never fetched."
+  },
+  {
+    "url": "http://www.w3.org/1999/xhtml",
+    "package": "dompurify",
+    "reason": "Standard XHTML namespace identifier used for namespace comparison and parser markup; never fetched."
+  },
+  {
+    "url": "http://www.w3.org/1999/xlink",
+    "package": "@vue/runtime-dom",
+    "reason": "Standard XLink namespace identifier passed to namespace-aware DOM attribute methods; never fetched."
+  },
+  {
+    "url": "http://www.w3.org/2000/svg",
+    "package": "@vue/runtime-dom",
+    "reason": "Standard SVG namespace identifier used for DOM element creation, DOMPurify namespace checks and @milkdown/crepe icon markup; never fetched."
+  },
+  {
+    "url": "https://prosemirror.net/docs/guide/#generatable",
+    "package": "prosemirror-model",
+    "reason": "Documentation pointer only in the non-generatable-node content-expression error message; never fetched."
+  },
+  {
+    "url": "https://vuejs.org/error-reference/#runtime-${n}",
+    "package": "@vue/runtime-core",
+    "reason": "Exact emitted template spelling of Vue's production errorInfo message string, passed to error handlers with the runtime error code; never fetched. The placeholder is literal here, not an allowlist wildcard. A changed emitted spelling requires review."
+  }
+]
