@@ -139,6 +139,7 @@ function beginPoll(saved: Saved, path: string) {
     }, poll.signal);
 }
 function prepare(file: FileResult, fieldKey?: string) {
+    setValue=undefined; getValue=()=>''; baseline=''; saveButton.disabled=true;
     current = file;
     key = fieldKey;
     controller = new SaveController(file.path, file.sha, fetch.bind(window), origin, BUILD_ID);
@@ -215,16 +216,18 @@ function offerStash() {
     const box = el('aside');
     el('p', `Recovered unsaved text (${saved.baseSha === current.sha ? 'same base' : 'older base'}).`, box);
     showDiff(baseline, saved.value, box);
-    button('Restore recovered text', async () => { if (saved.key !== key) {
+    const restore=button('Restore recovered text', async () => { if (saved.key !== key) {
         report('This recovery belongs to ' + (saved.key ?? 'the body') + '. Open that editor to restore it.');
         return;
     } await setValue?.(saved.value); if (controller)
         controller.sha = saved.baseSha; if (note)
         note.value = saved.note ?? ''; changed(); box.remove(); }, box);
+    restore.disabled=!setValue;
+    button('Show recovered source',()=>{el('pre',saved.value,box);},box);
     button('Discard recovery', () => { stashClear(storage, current!.path); box.remove(); }, box);
 }
 function noteInput(file: FileResult) { if (key || file.note === 'unsupported')
-    return; const label = el('label', file.pendingNote ? `Revision note (pending: ${file.pendingNote.note})` : `Revision note (${file.note})`); note = el('input', '', label); note.maxLength = 200; note.oninput = changed; }
+    return; const label = el('label', file.pendingNote ? `Revision note (pending: ${file.pendingNote.note})` : `Revision note (${file.note})`); note = el('input', '', label); note.oninput = changed; }
 async function load(path: string) { const r = await fetch(apiURL(origin, 'file', { path }), { credentials: 'same-origin', cache: 'no-store' }); if (!r.ok) {
     throw Error(`Cannot open file (${r.status}).`);
 } return await r.json() as FileResult; }
@@ -267,6 +270,7 @@ async function openField(file: FileResult, fieldKey: string) {
 async function openBody(file: FileResult) {
     content.replaceChildren();
     prepare(file);
+    baseline=file.editable; getValue=()=>file.editable;
     el('h2', file.path);
     if (!file.body.editable || !splitParity(file)) {
         el('pre', file.editable);
@@ -275,6 +279,7 @@ async function openBody(file: FileResult) {
         if (!splitParity(file))
             el('p', 'Front matter boundaries disagree.');
         report('Read only');
+        offerStash();
         return;
     }
     let root: HTMLElement = el('div');
@@ -307,6 +312,7 @@ async function openBody(file: FileResult) {
             report(`Read only: a save would reformat ${gate.count} lines, first at line ${gate.first}.`);
             showDiff(file.editable, serialized);
             el('pre', file.editable);
+            offerStash();
             return;
         }
         mount.classList.remove('pending');
@@ -343,7 +349,8 @@ async function openBody(file: FileResult) {
         catch { /* Hidden layout may not have caret coordinates yet. */ }
     }
     catch {
-        stash();
+        if(dirty || !stashRead(storage,file.path))stash();
+        offerStash();
         report('Editor unavailable or updated. Reload to try the current editor.');
         reloadButton.hidden = false;
         el('pre', file.editable);
