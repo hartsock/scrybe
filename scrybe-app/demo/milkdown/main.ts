@@ -2,7 +2,8 @@
 import { Crepe } from "@milkdown/crepe";
 import { replaceAll } from "@milkdown/kit/utils";
 import { splitFrontMatter } from "../../src/frontmatter";
-import { crepeSettings, houseStyle } from "../../src/milkdown/house-style";
+import { houseStyle } from "../../src/milkdown/house-style";
+import { crepeSettings } from "../../src/milkdown/crepe-settings";
 import { diffLines } from "./linediff";
 import sample from "./sample.md?raw";
 import probe from "./probe.md?raw";
