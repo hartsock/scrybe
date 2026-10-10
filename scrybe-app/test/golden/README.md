@@ -90,7 +90,7 @@ handoff reports. No private corpus was used to produce these pins.
 
 The bold-punctuation defect now has passing edit-path tests using upstream
 attention handlers. Image and supported save cases also run in both CrepeBuilder
-and full Crepe with `crepeSettings` under JSDOM. Full Crepe's CodeMirror visibility
+and full Crepe with `crepeSettings` from `src/milkdown/crepe-settings.ts` under JSDOM. Full Crepe's CodeMirror visibility
 observer is a lifecycle stub, not a visual-layout test.
 
 ## Link and attention ordering: owner decision pending
