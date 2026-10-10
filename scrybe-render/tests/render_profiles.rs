@@ -41,8 +41,14 @@ fn site_math_delimiters_stay_literal() {
 
 #[test]
 fn site_heading_braces_stay_text() {
-    assert_eq!(site("## Title {#id}"), "<h2>Title {#id}</h2>\n");
-    assert_eq!(site("# The set {x, y}"), "<h1>The set {x, y}</h1>\n");
+    assert_eq!(
+        site("## Title {#id}"),
+        "<h2 id=\"title-id\">Title {#id}</h2>\n"
+    );
+    assert_eq!(
+        site("# The set {x, y}"),
+        "<h1 id=\"the-set-x-y\">The set {x, y}</h1>\n"
+    );
 }
 
 #[test]
@@ -110,17 +116,48 @@ fn explicit_app_matches_default_entry_point() {
 }
 
 #[test]
-fn profiles_share_frontmatter_highlighting_mermaid_and_attribute_escaping() {
+fn profiles_share_frontmatter_and_attribute_escaping() {
     let source = "---\ntitle: Hidden\n---\n![an *emphasized* diagram](image.png)\n\n```rust title=ignored\nfn main() {}\n```\n\n```bad\"<> meta=ignored\nplain\n```\n\n```mermaid title=ignored\ngraph TD; A-->B;\n```\n";
     let document = Document::new(source);
     let app = render_html(&document, Theme::Default);
     let site = render_html_with(&document, Theme::Default, RenderProfile::Site);
-    assert_eq!(app.html, site.html);
-    assert_eq!(app.body_html, site.body_html);
+    assert!(app.body_html.contains("<span style="));
+    assert!(app.body_html.contains("class=\"mermaid\""));
     assert!(!site.body_html.contains("Hidden"));
     assert!(site.body_html.contains("alt=\"an emphasized diagram\""));
-    assert!(site.body_html.contains("<span style="));
+    assert!(!site.body_html.contains("<span style="));
     assert!(site.body_html.contains("language-bad&quot;&lt;&gt;"));
-    assert!(site.body_html.contains("class=\"mermaid\""));
+    assert!(site.body_html.contains("class=\"language-mermaid\""));
     assert!(site.html.starts_with("<style>"));
+}
+
+#[test]
+fn site_matches_production_code_shapes_and_heading_ids() {
+    // Captured from the site's installed production converter (github-pages 223,
+    // Jekyll 3.9.0, kramdown 2.3.1, GFM 1.1.0, Rouge 3.26.0). Only blank lines
+    // between blocks differ; pre/code text is compared byte-for-byte.
+    let expected = include_str!("fixtures/site/production.html")
+        .replace(">\n\n<", ">\n<")
+        // Inline code classes are outside the block/heading compatibility contract.
+        .replace(
+            "<code class=\"language-plaintext highlighter-rouge\">",
+            "<code>",
+        );
+    assert_eq!(site(include_str!("fixtures/site/production.md")), expected);
+}
+
+#[test]
+fn site_recognized_languages_keep_wrappers_without_tokens() {
+    assert_eq!(
+        site("```ruby\nx < y && \"a\"\n```"),
+        "<div class=\"language-ruby highlighter-rouge\"><div class=\"highlight\"><pre class=\"highlight\"><code>x &lt; y &amp;&amp; \"a\"\n</code></pre></div></div>\n"
+    );
+}
+
+#[test]
+fn site_heading_id_omits_image_alt_text() {
+    assert_eq!(
+        site("# [link](url) ![alt](url)"),
+        "<h1 id=\"link-\"><a href=\"url\">link</a> <img src=\"url\" alt=\"alt\" /></h1>\n"
+    );
 }
