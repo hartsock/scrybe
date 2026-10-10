@@ -10,7 +10,8 @@
     "bundle:prepare": "node scripts/stage-cli.mjs",
     "test:packaging": "node --test scripts/*.test.mjs",
     "preview": "vite preview",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "build:overlay": "tsc -p overlay/tsconfig.json && node overlay/build.mjs"
   },
   "dependencies": {
     "@codemirror/autocomplete": "^6.18",
@@ -34,6 +35,7 @@
     "@milkdown/crepe": "7.22.2",
     "@milkdown/kit": "7.22.2",
     "@tauri-apps/cli": "^2",
+    "decode-named-character-reference": "1.3.0",
     "jsdom": "26.1.0",
     "mdast-util-gfm-table": "2.0.0",
     "mdast-util-to-markdown": "2.2.0",
