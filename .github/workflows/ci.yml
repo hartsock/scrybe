@@ -173,3 +173,31 @@ jobs:
           node-version: "22"
       # Dependency-free (node:test only) — no `npm ci`.
       - run: npm test
+
+  overlay-bundle:
+    name: Overlay bundle
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: scrybe-app
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: scrybe-app/package-lock.json
+      - run: npm ci --ignore-scripts
+      - run: npm test
+      - run: npm run build:overlay
+      - run: node scripts/overlay-check.mjs dist-overlay
+      - uses: actions/checkout@v4
+        with:
+          repository: hartsock/hartsock.github.io
+          ref: b5080ae0dece2e48e85cc88ee6853e6842d06ebc
+          path: site-corpus
+          persist-credentials: false
+      - name: Public corpus byte gate
+        env:
+          SITE_CORPUS: ${{ github.workspace }}/site-corpus
+        run: node --test test/overlay-gate-corpus.test.mjs
