@@ -19,7 +19,7 @@ use crate::frontmatter;
 /// Rendering happens in `scrybe-render` (P1.3).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Document {
-    /// The Markdown source text.
+    /// The full Markdown source text, including any front matter.
     pub source: String,
     /// Optional on-disk path. `None` for untitled / in-memory documents.
     pub path: Option<PathBuf>,
@@ -42,7 +42,7 @@ impl Document {
     /// The title is populated from the first H1 heading after front matter.
     pub fn from_file(path: PathBuf, source: impl Into<String>) -> Self {
         let source = source.into();
-        let title = Ast::parse(frontmatter::split(&source).1).title();
+        let title = Ast::parse_body(frontmatter::split(&source).1).title();
         Self {
             source,
             path: Some(path),
@@ -64,14 +64,14 @@ impl Document {
     // AST helpers
     // -----------------------------------------------------------------------
 
-    /// Parses the document source and returns its AST.
+    /// Parses the whole document once, returning an AST without front matter.
     pub fn ast(&self) -> Ast {
         Ast::parse(&self.source)
     }
 
     /// Returns the title extracted from the first H1 after front matter, if any.
     pub fn title_from_ast(&self) -> Option<String> {
-        Ast::parse(frontmatter::split(&self.source).1).title()
+        Ast::parse_body(frontmatter::split(&self.source).1).title()
     }
 
     // -----------------------------------------------------------------------

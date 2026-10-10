@@ -119,11 +119,25 @@ pub struct Ast {
 }
 
 impl Ast {
-    /// Parses Markdown *source* into an AST.
+    /// Parses a whole Markdown document, excluding leading Jekyll front matter.
+    ///
+    /// Front matter is removed exactly once using [`crate::frontmatter::split`].
+    /// For an already-extracted body, use [`Self::parse_body`] instead: splitting
+    /// twice could mistake a leading `---` rule pair for another metadata block
+    /// and discard real body content between the rules.
     pub fn parse(source: &str) -> Self {
+        Self::parse_body(crate::frontmatter::split(source).1)
+    }
+
+    /// Parses Markdown body text without attempting to split front matter.
+    ///
+    /// Use this when the caller already holds a body from
+    /// [`crate::frontmatter::split`], including one that begins with a `---` rule
+    /// pair. This entry point preserves those rules and the content between them.
+    pub fn parse_body(body: &str) -> Self {
         let opts =
             Options::ENABLE_STRIKETHROUGH | Options::ENABLE_TABLES | Options::ENABLE_FOOTNOTES;
-        let parser = Parser::new_ext(source, opts);
+        let parser = Parser::new_ext(body, opts);
 
         // Each stack entry is (frame, children-accumulated-so-far).
         let mut stack: Vec<(Frame, Vec<Node>)> = vec![(Frame::Root, Vec::new())];
