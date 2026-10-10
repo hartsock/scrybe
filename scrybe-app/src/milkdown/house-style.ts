@@ -38,6 +38,7 @@ export function houseStyle(ctx: Ctx): void {
         runner: (state, node, type) => {
           // mdast gives both zero and one blank code lines the value "".
           // Source line positions retain the distinction until the first save.
+          // Filling then emptying this node retains its original blank-line flag.
           const blankLine = node.value === "" && !!node.position &&
             node.position.end.line - node.position.start.line > 1;
           state.openNode(type, { language: node.lang ?? "", blankLine });
@@ -54,7 +55,9 @@ export function houseStyle(ctx: Ctx): void {
       },
     };
   });
-  // Links must wrap attention, including when the first linked text is marked.
+  // Canonical choice pending owner sign-off: links wrap newly opened attention.
+  // This avoids splitting [*a* b](u), but flips *[a](u)*; equal-span source
+  // nesting is absent from the mark set. See test/golden/README.md and TODO probes.
   ctx.update(linkSchema.key, previous => schemaCtx => ({ ...previous(schemaCtx), priority: 0 }));
   ctx.update(imageSchema.key, previous => schemaCtx => {
     const schema = previous(schemaCtx);
