@@ -7,8 +7,33 @@ import { imageSchema, paragraphSchema, codeBlockSchema, linkSchema } from "@milk
 import { languages } from "@codemirror/language-data";
 import { gfmTableToMarkdown } from "mdast-util-gfm-table";
 import { defaultHandlers } from "mdast-util-to-markdown";
+import { decodeNamedCharacterReference } from "decode-named-character-reference";
 
 const table = gfmTableToMarkdown({ tablePipeAlign: false }).handlers!.table!;
+
+// Raw CommonMark destinations allow balanced parentheses up to depth 32.
+function balancedDestination(url: string): boolean {
+  let depth = 0;
+  for (const character of url) {
+    if (character === "(" && ++depth > 32) return false;
+    if (character === ")" && --depth < 0) return false;
+  }
+  return depth === 0;
+}
+
+const link: typeof defaultHandlers.link = (node, parent, state, info) => {
+  const unsafe = state.unsafe;
+  if (balancedDestination(node.url)) {
+    state.unsafe = unsafe.filter(pattern => !(pattern.inConstruct === "destinationRaw" &&
+      (pattern.character === "(" || pattern.character === ")")));
+  }
+  try {
+    return defaultHandlers.link(node, parent, state, info);
+  } finally {
+    state.unsafe = unsafe;
+  }
+};
+link.peek = defaultHandlers.link.peek;
 
 /** Merge with Milkdown's handlers: replacing them breaks inline escaping. */
 export function houseStyle(ctx: Ctx): void {
@@ -84,6 +109,35 @@ export function houseStyle(ctx: Ctx): void {
     strong: "*" as const,
     handlers: {
       ...options.handlers,
+      text: (node, parent, state, info) => {
+        const unsafe = state.unsafe;
+        // Only actual, semicolon-terminated references need an ampersand escape.
+        const names = [...(node.value + info.after).matchAll(/&([A-Za-z][A-Za-z0-9]*);/g)]
+          .map(match => match[1]).filter(name => decodeNamedCharacterReference(name));
+        const reference = `(?:#[0-9]{1,7};|#[xX][A-Fa-f0-9]{1,6};${names.length ? "|" + names.join(";|") + ";" : ""})`;
+        state.unsafe = unsafe.map(pattern => {
+          if (pattern.character === "&" && pattern.inConstruct === "phrasing") {
+            return { ...pattern, after: reference, _compiled: undefined };
+          }
+          if (pattern.character === "." && pattern.before === "[Ww]") {
+            return { ...pattern, before: "[Ww][Ww][Ww]", after: "[\\w-]", _compiled: undefined };
+          }
+          if (pattern.character === "-" && pattern.atBreak) {
+            // Keep list/setext/thematic/table guards; --all is none of these.
+            const after = pattern.after === "(?:[ \t\r\n-])"
+              ? "(?:[ \\t\\r\\n]|-(?=[- \\t]*(?:\\r?\\n|$)))"
+              : pattern.after === "[:|-]" ? "(?:[:|]|-(?=[-:| \\t]*(?:\\r?\\n|$)))" : pattern.after;
+            return { ...pattern, after, _compiled: undefined };
+          }
+          return pattern;
+        });
+        try {
+          return (options.handlers?.text ?? defaultHandlers.text)(node, parent, state, info);
+        } finally {
+          state.unsafe = unsafe;
+        }
+      },
+      link,
       // Restore upstream attention metadata and delimiter checks so punctuation
       // beside a word re-parses as a mark. Keep Milkdown's text escaping intact.
       strong: defaultHandlers.strong,
