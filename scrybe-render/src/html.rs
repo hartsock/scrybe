@@ -13,7 +13,7 @@ use syntect::parsing::SyntaxSet;
 
 use scrybe_core::Document;
 
-use crate::math::{extract_math, inject_math};
+use crate::math::{html_escape, render_math};
 use crate::mermaid::inject_mermaid_wrappers;
 use crate::theme::Theme;
 use crate::RenderOutput;
@@ -48,20 +48,16 @@ fn theme_set() -> &'static ThemeSet {
 /// - `html`: the full fragment with `<style>` prepended.
 /// - `body_html`: just the body content without CSS.
 pub fn render_html(doc: &Document, theme: Theme) -> RenderOutput {
-    // 1. Strip front matter before math extraction or Markdown parsing.
+    // 1. Strip front matter before Markdown parsing.
     let (_, body) = scrybe_core::frontmatter::split(&doc.source);
-    let (processed_source, math_placeholders) = extract_math(body);
 
     // 2. Parse + render with syntax highlighting.
-    let body_html = render_with_highlighting(&processed_source);
+    let body_html = render_with_highlighting(body);
 
-    // 3. Re-inject math elements.
-    let body_html = inject_math(&body_html, &math_placeholders);
-
-    // 4. Post-process Mermaid blocks.
+    // 3. Post-process Mermaid blocks.
     let body_html = inject_mermaid_wrappers(&body_html);
 
-    // 5. Prepend theme CSS.
+    // 4. Prepend theme CSS.
     let html = format!("<style>{}</style>\n{}", theme.css(), body_html);
 
     RenderOutput { html, body_html }
@@ -75,65 +71,34 @@ fn render_with_highlighting(source: &str) -> String {
     let mut in_code_block = false;
     let mut current_lang: Option<String> = None;
     let mut code_buf = String::new();
-    // Events between Start(Image) and its matching End(Image) must reach
-    // push_html as ONE sequence: the HTML writer drains the iterator after
-    // Start(Image) to build the alt attribute. Fed one event at a time it
-    // emits alt="" and the real alt text leaks out as visible body text.
-    // Depth-tracked because alt text may itself contain images.
-    let mut image_buf: Vec<Event> = Vec::new();
-    let mut image_depth: usize = 0;
-
-    for event in parser {
-        match event {
-            Event::Start(Tag::Image { .. }) => {
-                image_depth += 1;
-                image_buf.push(event);
-            }
-            Event::End(TagEnd::Image) => {
-                image_buf.push(event);
-                image_depth -= 1;
-                if image_depth == 0 {
-                    let mut fragment = String::new();
-                    pulldown_cmark::html::push_html(&mut fragment, image_buf.drain(..));
-                    output.push_str(&fragment);
-                }
-            }
-            other if image_depth > 0 => {
-                image_buf.push(other);
-            }
-            Event::Start(Tag::CodeBlock(kind)) => {
-                in_code_block = true;
-                current_lang = match kind {
-                    CodeBlockKind::Fenced(lang) => {
-                        let s = lang.to_string();
-                        if s.is_empty() {
-                            None
-                        } else {
-                            Some(s)
-                        }
-                    }
-                    CodeBlockKind::Indented => None,
-                };
-                code_buf.clear();
-            }
-            Event::End(TagEnd::CodeBlock) => {
-                in_code_block = false;
-                let highlighted = highlight_code(&code_buf, current_lang.as_deref());
-                output.push_str(&highlighted);
-                current_lang = None;
-                code_buf.clear();
-            }
-            Event::Text(text) if in_code_block => {
-                code_buf.push_str(&text);
-            }
-            other => {
-                // For all non-code-block events, let pulldown-cmark render them.
-                let mut fragment = String::new();
-                pulldown_cmark::html::push_html(&mut fragment, std::iter::once(other));
-                output.push_str(&fragment);
-            }
+    // Keep one HTML writer alive across the entire document so tables, images,
+    // and other nested structures retain their rendering state.
+    let events = parser.filter_map(|event| match event {
+        Event::Start(Tag::CodeBlock(kind)) => {
+            in_code_block = true;
+            current_lang = match kind {
+                CodeBlockKind::Fenced(info) => info.split_whitespace().next().map(str::to_owned),
+                CodeBlockKind::Indented => None,
+            };
+            code_buf.clear();
+            None
         }
-    }
+        Event::End(TagEnd::CodeBlock) => {
+            in_code_block = false;
+            let highlighted = highlight_code(&code_buf, current_lang.as_deref());
+            current_lang = None;
+            code_buf.clear();
+            Some(Event::Html(highlighted.into()))
+        }
+        Event::Text(text) if in_code_block => {
+            code_buf.push_str(&text);
+            None
+        }
+        Event::InlineMath(source) => Some(Event::InlineHtml(render_math(&source, false).into())),
+        Event::DisplayMath(source) => Some(Event::Html(render_math(&source, true).into())),
+        other => Some(other),
+    });
+    pulldown_cmark::html::push_html(&mut output, events);
 
     output
 }
@@ -168,7 +133,7 @@ fn highlight_code(code: &str, lang: Option<&str>) -> String {
     let mut h = HighlightLines::new(syntax, syntect_theme);
 
     let lang_class = lang
-        .map(|l| format!(r#" class="language-{l}""#))
+        .map(|l| format!(r#" class="language-{}""#, html_escape(l)))
         .unwrap_or_default();
 
     let mut html = format!(r#"<pre class="code-block"><code{lang_class}>"#);
