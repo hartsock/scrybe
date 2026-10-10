@@ -35,7 +35,20 @@ fn shared_frontmatter_fixtures() {
             case.display()
         );
         let document = Document::from_file(case.join("input.md"), source.clone());
-        let title = Ast::parse(&expected_body).title();
+        let expected_ast = Ast::parse_body(&expected_body);
+        assert_eq!(
+            Ast::parse(&source),
+            expected_ast,
+            "{}: whole AST",
+            case.display()
+        );
+        assert_eq!(
+            document.ast(),
+            expected_ast,
+            "{}: document AST",
+            case.display()
+        );
+        let title = expected_ast.title();
         assert_eq!(document.title, title, "{}: stored title", case.display());
         assert_eq!(
             document.title_from_ast(),
