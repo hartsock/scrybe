@@ -255,7 +255,11 @@ const saveCases = [
 ];
 for (const full of [false, true]) {
   for (const [name, source] of saveCases) {
-    test(`saves ${full ? "full Crepe" : "CrepeBuilder"}: ${name}`, async t => {
+    test(`saves ${full ? "full Crepe" : "CrepeBuilder"}: ${name}`, {
+      // Stopped per lane brief: ProseMirror cannot represent nested same-type
+      // marks. Keep the render-equality failures visible pending a schema decision.
+      todo: name.startsWith("nested ") && "same-type mark nesting needs a different document model",
+    }, async t => {
       const first = await withCrepe(source, crepe => crepe.getMarkdown(), full);
       t.diagnostic(`${name}: ${JSON.stringify(first)}`);
       assert.equal(renderedMarkdown(first), renderedMarkdown(source), "save changed rendered HTML");
