@@ -29,7 +29,33 @@ function post(type: string, data: object = {}) { if (window.parent !== window &&
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, text = '', parent: HTMLElement = content) { const node = document.createElement(tag); node.textContent = text; parent.append(node); return node; }
 function button(label: string, fn: () => unknown, parent: HTMLElement = actions) { const node = el('button', label, parent); node.type = 'button'; node.onclick = () => void fn(); return node; }
 function link(label: string, url: URL, parent: HTMLElement = content) { const a = el('a', label, parent); a.href = url.href; a.target = '_blank'; a.rel = 'noopener noreferrer'; return a; }
-function report(text: string) { status.textContent = text; }
+let cancelDiscard: (() => void) | undefined;
+let latestStatus = '';
+function report(text: string) { latestStatus = text; if (!cancelDiscard) status.textContent = text; }
+function askDiscard(message: string, label: string): Promise<boolean> {
+    if (cancelDiscard) return Promise.resolve(false);
+    return new Promise(resolve => {
+        const previous = document.activeElement as HTMLElement | null;
+        const controls = [...actions.children] as HTMLElement[];
+        controls.forEach(node => node.inert = true);
+        content.inert = true;
+        const group = el('span', '', actions);
+        const finish = (accepted: boolean) => {
+            cancelDiscard = undefined;
+            group.remove();
+            controls.forEach(node => node.inert = false);
+            content.inert = false;
+            status.textContent = latestStatus;
+            previous?.focus();
+            resolve(accepted);
+        };
+        button(label, () => finish(true), group);
+        const cancel = button('Cancel', () => finish(false), group);
+        cancelDiscard = () => finish(false);
+        status.textContent = message;
+        cancel.focus();
+    });
+}
 function setDirty(value: boolean) { dirty = value; post('scrybe:dirty', { dirty }); }
 function stash() { if (current)
     stashWrite(storage, current.path, { baseSha: controller?.pending?.baseSha ?? controller?.sha ?? current.sha, value: getValue(), ...(key ? { key } : {}), ...(note?.value ? { note: note.value } : {}) }); }
@@ -67,9 +93,9 @@ function rememberPath(path: string) { savedPaths.add(path); try {
     sessionStorage.setItem('scrybe-saved-paths', JSON.stringify([...new Set([...rememberedPaths(), ...savedPaths])]));
 }
 catch { } }
-function publish() { const url = new URL(meta('publish-url'), origin); url.searchParams.set('paths', [...new Set([...pagePaths, ...rememberedPaths(), ...savedPaths, current?.path ?? ''].filter(Boolean))].join(',')); window.open(url.href, '_blank', 'noopener,noreferrer'); }
-function reload() { if (controller?.state.kind === 'stale') {
-    if (!confirm('Discard your text and reload the changed file?'))
+function publish() { if (!meta('publish-url')) return; const url = new URL(meta('publish-url'), origin); url.searchParams.set('paths', [...new Set([...pagePaths, ...rememberedPaths(), ...savedPaths, current?.path ?? ''].filter(Boolean))].join(',')); window.open(url.href, '_blank', 'noopener,noreferrer'); }
+async function reload() { if (controller?.state.kind === 'stale') {
+    if (!await askDiscard('Discard your text and reload the changed file?', 'Discard and reload'))
         return;
     if (current)
         stashClear(storage, current.path);
@@ -77,8 +103,8 @@ function reload() { if (controller?.state.kind === 'stale') {
 }
 else
     stash(); location.reload(); }
-function close() {
-    if (dirty && !confirm('Discard unsaved edits and close?'))
+async function close() {
+    if (dirty && !await askDiscard('Discard unsaved edits and close?', 'Discard and close'))
         return;
     if (dirty && current)
         stashClear(storage, current.path);
@@ -97,7 +123,7 @@ function close() {
 }
 button('Close', close);
 button('Sign in', signin);
-button('Publish…', publish);
+button('Publish…', publish).hidden = !meta('publish-url');
 const saveButton = button('Save', save);
 saveButton.disabled = true;
 const retry = button('Retry save', save);
@@ -178,6 +204,7 @@ function prepare(file: FileResult, fieldKey?: string) {
     }
 }
 async function save() {
+    if (cancelDiscard) return;
     if (outdated) {
         stash();
         report('Editor updated. Reload before saving.');
@@ -386,7 +413,7 @@ document.addEventListener('visibilitychange', () => { if (document.visibilitySta
     void session(); });
 document.addEventListener('keydown', e => { if (e.key === 'Escape') {
     e.preventDefault();
-    close();
+    if (cancelDiscard) cancelDiscard(); else void close();
 } if (e.key.toLowerCase() === 's' && (e.metaKey || e.ctrlKey)) {
     e.preventDefault();
     void save();
