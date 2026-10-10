@@ -242,6 +242,118 @@ function semanticMarkdown(source) {
 function renderedMarkdown(source) {
   return micromark(source, { extensions: [gfm()], htmlExtensions: [gfmHtml()], allowDangerousHtml: true });
 }
+const escapeCases = [
+  [
+    "bare ampersands",
+    "AT&T and R&D\n",
+    "AT&T and R&D\n"
+  ],
+  [
+    "literal entity",
+    "\\&copy;\n",
+    "\\&copy;\n"
+  ],
+  [
+    "ellipsis",
+    "Wait...\n",
+    "Wait...\n"
+  ],
+  [
+    "leading double dash",
+    "--all\n",
+    "--all\n"
+  ],
+  [
+    "inline dashes",
+    "a -- b and a --- b\n",
+    "a -- b and a --- b\n"
+  ],
+  [
+    "balanced destination",
+    "[x](https://e.x/a_(b))\n",
+    "[x](https://e.x/a_(b))\n"
+  ],
+  [
+    "literal emphasis",
+    "\\*not emphasis\\*\n",
+    "\\*not emphasis\\*\n"
+  ],
+  [
+    "literal heading",
+    "\\# heading\n",
+    "\\# heading\n"
+  ],
+  [
+    "literal bullet",
+    "\\- item\n",
+    "\\- item\n"
+  ],
+  [
+    "literal ordered list",
+    "1\\. item\n",
+    "1\\. item\n"
+  ],
+  [
+    "literal quote",
+    "\\> quote\n",
+    "\\> quote\n"
+  ],
+  [
+    "angle comparisons",
+    "a < b and c > d\n",
+    "a < b and c > d\n"
+  ],
+  [
+    "literal HTML",
+    "\\<span>text\\</span>\n",
+    "\\<span>text\\</span>\n"
+  ],
+  [
+    "ellipsis after w",
+    "Now...\n",
+    "Now...\n"
+  ],
+  [
+    "literal thematic break",
+    "\\---\n",
+    "\\---\n"
+  ],
+  [
+    "numeric reference",
+    "\\&#169;\n",
+    "\\&#169;\n"
+  ],
+  [
+    "unknown entity",
+    "&notAnEntity;\n",
+    "&notAnEntity;\n"
+  ],
+  [
+    "unbalanced destination",
+    "[x](https://e.x/a\\(b)\n",
+    "[x](https://e.x/a\\(b)\n"
+  ]
+];
+for (const full of [false, true]) {
+  for (const [name, source, expected] of escapeCases) {
+    test(`escapes ${full ? "full Crepe" : "CrepeBuilder"}: ${name}`, async t => {
+      const first = await withCrepe(source, crepe => crepe.getMarkdown(), full);
+      t.diagnostic(`${name}: ${JSON.stringify(first)}`);
+      assert.equal(first, expected);
+      assert.deepEqual(semanticMarkdown(first), semanticMarkdown(source));
+      assert.equal(renderedMarkdown(first), renderedMarkdown(source));
+      let previous = first;
+      for (let i = 1; i <= 10; i++) {
+        const next = await withCrepe(previous, crepe => crepe.getMarkdown(), full);
+        assert.equal(next, expected, `escape output changed at cycle ${i}`);
+        assert.deepEqual(semanticMarkdown(next), semanticMarkdown(source));
+        assert.equal(renderedMarkdown(next), renderedMarkdown(source));
+        previous = next;
+      }
+    });
+  }
+}
+
 const saveCases = [
   ["empty list item", "- first\n-\n- last\n"],
   ["empty blockquote", ">\n"],
