@@ -58,3 +58,9 @@ test('live polling distinguishes building from terminal states and binds the sav
   for(const state of ['live','superseded','failed']){const reports=[];await pollLive('https://editor.example','about.md',success,x=>reports.push(x.state),new AbortController().signal,async url=>{assert.equal(url.searchParams.get('sha'),success.sha);assert.equal(url.searchParams.get('commit'),success.commit);return response(200,{state});});assert.deepEqual(reports,[state]);}
   const abort=new AbortController(),reports=[];await pollLive('https://editor.example','about.md',success,x=>{reports.push(x.state);abort.abort();},abort.signal,async()=>response(200,{state:'building'}));assert.deepEqual(reports,['building']);
 });
+test('Web Locks prevent a second frame from sending the same-path save',async()=>{
+  const previous=Object.getOwnPropertyDescriptor(globalThis,'window');const names=[];
+  Object.defineProperty(globalThis,'window',{configurable:true,value:{navigator:{locks:{request:async(name,options,fn)=>{names.push(name);assert.equal(options.ifAvailable,true);await fn(null);}}}}});
+  try{const {controller,calls}=setup([]);await controller.save('draft');assert.equal(controller.state.kind,'busy');assert.equal(calls.length,0);assert.ok(names[0].endsWith('/about.md'));}
+  finally{if(previous)Object.defineProperty(globalThis,'window',previous);else delete globalThis.window;}
+});
