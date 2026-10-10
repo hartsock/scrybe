@@ -3,7 +3,7 @@ import { Crepe, type CrepeConfig } from "@milkdown/crepe";
 import type { Ctx } from "@milkdown/kit/ctx";
 import { remarkStringifyOptionsCtx } from "@milkdown/kit/core";
 import { remarkGFMPlugin } from "@milkdown/kit/preset/gfm";
-import { imageSchema } from "@milkdown/kit/preset/commonmark";
+import { imageSchema, paragraphSchema, codeBlockSchema, linkSchema } from "@milkdown/kit/preset/commonmark";
 import { languages } from "@codemirror/language-data";
 import { gfmTableToMarkdown } from "mdast-util-gfm-table";
 import { defaultHandlers } from "mdast-util-to-markdown";
@@ -12,6 +12,53 @@ const table = gfmTableToMarkdown({ tablePipeAlign: false }).handlers!.table!;
 
 /** Merge with Milkdown's handlers: replacing them breaks inline escaping. */
 export function houseStyle(ctx: Ctx): void {
+  ctx.update(paragraphSchema.key, previous => schemaCtx => {
+    const schema = previous(schemaCtx);
+    return {
+      ...schema,
+      toMarkdown: {
+        ...schema.toMarkdown,
+        runner: (state, node) => {
+          // Required empty paragraphs in containers are not authored HTML.
+          if (node.content.size === 0 && ["listItem", "blockquote"].includes(state.top()?.type ?? "")) {
+            state.openNode("paragraph").closeNode();
+          }
+          else schema.toMarkdown.runner(state, node);
+        },
+      },
+    };
+  });
+  ctx.update(codeBlockSchema.key, previous => schemaCtx => {
+    const schema = previous(schemaCtx);
+    return {
+      ...schema,
+      attrs: { ...schema.attrs, blankLine: { default: false, validate: "boolean" } },
+      parseMarkdown: {
+        ...schema.parseMarkdown,
+        runner: (state, node, type) => {
+          // mdast gives both zero and one blank code lines the value "".
+          // Source line positions retain the distinction until the first save.
+          // Filling then emptying this node retains its original blank-line flag.
+          const blankLine = node.value === "" && !!node.position &&
+            node.position.end.line - node.position.start.line > 1;
+          state.openNode(type, { language: node.lang ?? "", blankLine });
+          if (node.value) state.addText(node.value as string);
+          state.closeNode();
+        },
+      },
+      toMarkdown: {
+        ...schema.toMarkdown,
+        runner: (state, node) => state.addNode("code", undefined, node.textContent, {
+          lang: node.attrs.language,
+          data: { blankLine: node.attrs.blankLine },
+        }),
+      },
+    };
+  });
+  // Canonical choice pending owner sign-off: links wrap newly opened attention.
+  // This avoids splitting [*a* b](u), but flips *[a](u)*; equal-span source
+  // nesting is absent from the mark set. See test/golden/README.md and TODO probes.
+  ctx.update(linkSchema.key, previous => schemaCtx => ({ ...previous(schemaCtx), priority: 0 }));
   ctx.update(imageSchema.key, previous => schemaCtx => {
     const schema = previous(schemaCtx);
     return {
@@ -41,6 +88,11 @@ export function houseStyle(ctx: Ctx): void {
       // beside a word re-parses as a mark. Keep Milkdown's text escaping intact.
       strong: defaultHandlers.strong,
       emphasis: defaultHandlers.emphasis,
+      code: (node, parent, state, info) => {
+        const output = defaultHandlers.code(node, parent, state, info);
+        return !node.value && node.data?.blankLine
+          ? output.replace("\n", "\n\n") : output;
+      },
       break: () => "  \n",
       table: (node, parent, state, info) => {
         const lines = table(node, parent, state, info).split("\n");

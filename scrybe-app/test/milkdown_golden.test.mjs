@@ -9,6 +9,8 @@ import { promisify } from "node:util";
 import test, { after } from "node:test";
 import ts from "typescript";
 import { JSDOM } from "jsdom";
+import { micromark } from "micromark";
+import { gfm, gfmHtml } from "micromark-extension-gfm";
 
 // Install the DOM before importing Milkdown/ProseMirror (they inspect it at load).
 const dom = new JSDOM("<!doctype html><html><body></body></html>", {
@@ -21,6 +23,13 @@ for (const name of ["window", "document", "navigator", "Node", "HTMLElement",
     typeof dom.window[name] === "function" && /^(getComputedStyle|requestAnimationFrame|cancelAnimationFrame|addEventListener|removeEventListener|dispatchEvent)$/.test(name)
       ? dom.window[name].bind(dom.window) : dom.window[name] });
 }
+
+// JSDOM has no viewport; full Crepe's CodeMirror views only need lifecycle hooks.
+globalThis.IntersectionObserver = class {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+};
 
 // Use the actual TS modules without generated repository files or a bundler.
 async function loadTS(relative) {
@@ -230,6 +239,89 @@ function semanticMarkdown(source) {
   return JSON.parse(JSON.stringify(fromMarkdown(source), (key, value) =>
     key === "position" ? undefined : value));
 }
+function renderedMarkdown(source) {
+  return micromark(source, { extensions: [gfm()], htmlExtensions: [gfmHtml()], allowDangerousHtml: true });
+}
+const saveCases = [
+  ["empty list item", "- first\n-\n- last\n"],
+  ["empty blockquote", ">\n"],
+  ["empty fenced code", "```\n```\n"],
+  ["one blank code line", "```\n\n```\n"],
+  ["two blank code lines", "```text\n\n\n```\n"],
+  ["emphasis starts link", "[*a* b](u)\n"],
+  ["strong starts link", "[**a** b](u)\n"],
+  ["nested emphasis", "*outer _inner_ tail*\n"],
+  ["nested strong", "**outer __inner__ tail**\n"],
+];
+for (const full of [false, true]) {
+  for (const [name, source] of saveCases) {
+    test(`saves ${full ? "full Crepe" : "CrepeBuilder"}: ${name}`, {
+      // Stopped per lane brief: ProseMirror cannot represent nested same-type
+      // marks. Keep the render-equality failures visible pending a schema decision.
+      todo: name.startsWith("nested ") && "same-type mark nesting needs a different document model",
+    }, async t => {
+      const first = await withCrepe(source, crepe => crepe.getMarkdown(), full);
+      t.diagnostic(`${name}: ${JSON.stringify(first)}`);
+      assert.equal(renderedMarkdown(first), renderedMarkdown(source), "save changed rendered HTML");
+      assert.deepEqual(semanticMarkdown(first), semanticMarkdown(source), "save changed parsed document");
+      for (let i = 1; i <= 10; i++) {
+        const next = await withCrepe(first, crepe => crepe.getMarkdown(), full);
+        assert.equal(next, first, `save changed at cycle ${i}`);
+        assert.equal(renderedMarkdown(next), renderedMarkdown(source));
+        assert.deepEqual(semanticMarkdown(next), semanticMarkdown(source));
+      }
+    });
+  }
+}
+
+const linkOrderingCases = [
+  "[*a* b](u)\n",
+  "[**a** b](u)\n",
+  "*[a](u) text*\n",
+  "*[a](u) [b](v)*\n",
+  "*[a](u)*\n",
+  "**[a](u)**\n",
+  "***[a](u)***\n",
+  "*text [a](u)*\n",
+  "**see [a](u) and [b](v)**\n"
+];
+for (const full of [false, true]) {
+  for (const source of linkOrderingCases) {
+    test(`link ordering ${full ? "full Crepe" : "CrepeBuilder"}: ${source.trim()}`, {
+      todo: /^\*+\[/.test(source) && "link-first canonical form requires owner sign-off; source nesting is lost",
+    }, async t => {
+      const first = await withCrepe(source, crepe => crepe.getMarkdown(), full);
+      const second = await withCrepe(first, crepe => crepe.getMarkdown(), full);
+      t.diagnostic(`${JSON.stringify(source)} -> ${JSON.stringify(first)} -> ${JSON.stringify(second)}`);
+      assert.equal(first, source, "first save must preserve mark nesting");
+      assert.equal(renderedMarkdown(first), renderedMarkdown(source));
+      assert.deepEqual(semanticMarkdown(first), semanticMarkdown(source));
+      assert.equal(second, first, "must be stable from the first save");
+      let previous = second;
+      for (let i = 2; i <= 10; i++) {
+        const next = await withCrepe(previous, crepe => crepe.getMarkdown(), full);
+        assert.equal(next, first, `mark nesting changed at cycle ${i}`);
+        assert.equal(renderedMarkdown(next), renderedMarkdown(source));
+        assert.deepEqual(semanticMarkdown(next), semanticMarkdown(source));
+        previous = next;
+      }
+    });
+  }
+  test(`equal-span nesting loses source order: ${full ? "full Crepe" : "CrepeBuilder"}`, async () => {
+    for (const marker of ["*", "**", "***"]) {
+      const outer = `${marker}[a](u)${marker}\n`;
+      const inner = `[${marker}a${marker}](u)\n`;
+      const parsed = [];
+      for (const source of [outer, inner]) {
+        parsed.push(await withCrepe(source, crepe => crepe.editor.action(ctx =>
+          ctx.get(parserCtx)(source).toJSON()), full));
+      }
+      assert.deepEqual(parsed[0], parsed[1], "same marks and run lengths; source order is absent");
+      assert.notEqual(renderedMarkdown(outer), renderedMarkdown(inner), "required HTML differs");
+    }
+  });
+}
+
 const imageCases = [
   ["untitled image-only", "![alt text](a.png)\n"],
   ["titled image-only", '![descriptive alt](a.png "Image title")\n'],
