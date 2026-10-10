@@ -1,11 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Shawn Hartsock and contributors
 
-//! Math placeholder extraction and injection.
+//! KaTeX-ready markup and legacy math placeholder helpers.
 //!
-//! Before running pulldown-cmark, math expressions are replaced with stable
-//! placeholder tokens. After rendering, the placeholders are replaced with
-//! `<span>`/`<div>` elements for the frontend KaTeX renderer.
+//! Rendering uses pulldown-cmark math events so code is never treated as math.
+//! The deprecated source-scanning helpers remain available for compatibility.
 
 /// A math expression extracted from a Markdown source.
 #[derive(Debug, Clone)]
@@ -22,6 +21,7 @@ const PLACEHOLDER_PREFIX: &str = "MATH_PLACEHOLDER_";
 ///
 /// Returns `(processed_source, Vec<MathPlaceholder>)`.
 /// The processed source has math replaced with `MATH_PLACEHOLDER_{n}` tokens.
+#[deprecated(note = "Use render_html for parser-driven math that respects code spans and blocks")]
 pub fn extract_math(source: &str) -> (String, Vec<MathPlaceholder>) {
     let mut placeholders: Vec<MathPlaceholder> = Vec::new();
     let mut output = String::with_capacity(source.len());
@@ -87,29 +87,29 @@ fn find_closing(chars: &[char], start: usize, closing: &str) -> Option<usize> {
 }
 
 /// Re-injects math placeholders as `<span>`/`<div>` elements.
+#[deprecated(note = "Use render_html for parser-driven math markup without placeholders")]
 pub fn inject_math(html: &str, placeholders: &[MathPlaceholder]) -> String {
     let mut output = html.to_owned();
     for ph in placeholders {
         let token = format!("{PLACEHOLDER_PREFIX}{}", ph.index);
-        let escaped = html_escape(&ph.source);
-        let replacement = if ph.is_block {
-            format!(
-                r#"<div class="math-block" data-math="{escaped}">{source}</div>"#,
-                source = ph.source
-            )
-        } else {
-            format!(
-                r#"<span class="math-inline" data-math="{escaped}">{source}</span>"#,
-                source = ph.source
-            )
-        };
+        let replacement = render_math(&ph.source, ph.is_block);
         output = output.replace(&token, &replacement);
     }
     output
 }
 
+/// Keep the preview's class/data-math contract and legacy source content.
+pub(crate) fn render_math(source: &str, is_block: bool) -> String {
+    let escaped = html_escape(source);
+    if is_block {
+        format!(r#"<div class="math-block" data-math="{escaped}">{source}</div>"#)
+    } else {
+        format!(r#"<span class="math-inline" data-math="{escaped}">{source}</span>"#)
+    }
+}
+
 /// Minimal HTML attribute escaping for `data-math` values.
-fn html_escape(s: &str) -> String {
+pub(crate) fn html_escape(s: &str) -> String {
     s.replace('&', "&amp;")
         .replace('"', "&quot;")
         .replace('<', "&lt;")
@@ -117,6 +117,7 @@ fn html_escape(s: &str) -> String {
 }
 
 #[cfg(test)]
+#[allow(deprecated)] // Exercise the retained compatibility API.
 mod tests {
     use super::*;
 
