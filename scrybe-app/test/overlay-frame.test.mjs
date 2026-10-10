@@ -44,3 +44,17 @@ test('stash retains original CAS base and tolerates denied storage', () => {
   stashWrite(storage,'about.md',{baseSha:'old',value:'draft'}); assert.deepEqual(stashRead(storage,'about.md'),{baseSha:'old',value:'draft'});
   assert.doesNotThrow(()=>stashWrite({setItem(){throw Error();}},'about.md',{baseSha:'a',value:'b'}));
 });
+test('unknown outcome cannot retry a PUT until a successful re-read', async () => {
+  const {controller:c,calls}=setup([()=>response(503,{code:'outcome_unknown'}),()=>response(503,{}),()=>response(503,{}),()=>response(200,{sha:'other'}),()=>response(200,success)]);
+  await c.save('draft');await c.save('draft');assert.equal(calls.filter(c=>c.init?.method==='PUT').length,1);
+  await c.save('draft');assert.equal(c.state.kind,'saved');assert.equal(JSON.parse(calls.at(-1).init.body).baseSha,'a'.repeat(40));
+});
+test('persistent CSRF refusal retries only once; credential and stale states never retry', async () => {
+  const {controller:c,calls}=setup([()=>response(403,{}),()=>response(200,{csrf:'fresh'}),()=>response(403,{})]);await c.save('draft');assert.equal(calls.length,3);assert.equal(c.state.kind,'reload');
+  for(const code of ['editor_credential','stale','editor_outdated']){const x=setup([()=>response(503,{code})]);await x.controller.save('a');await x.controller.save('a');assert.equal(x.calls.length,1);}
+});
+test('live polling distinguishes building from terminal states and binds the saved blob',async()=>{
+  const {pollLive}=await import('../overlay/state.ts');
+  for(const state of ['live','superseded','failed']){const reports=[];await pollLive('https://editor.example','about.md',success,x=>reports.push(x.state),new AbortController().signal,async url=>{assert.equal(url.searchParams.get('sha'),success.sha);assert.equal(url.searchParams.get('commit'),success.commit);return response(200,{state});});assert.deepEqual(reports,[state]);}
+  const abort=new AbortController(),reports=[];await pollLive('https://editor.example','about.md',success,x=>{reports.push(x.state);abort.abort();},abort.signal,async()=>response(200,{state:'building'}));assert.deepEqual(reports,['building']);
+});
