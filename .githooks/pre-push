@@ -22,6 +22,10 @@ else
     echo "gitleaks not found; skipping local secret scan (CI still enforces it)"
 fi
 
+# Release-only crate publication runs on hosted Ubuntu with the tag-gated
+# crates-io environment (release.yml). Its toolchain/system setup mirrors CI;
+# registry credentials and cargo publish are deliberately never run locally.
+
 # ── ci.yml / release.yml parity ───────────────────────────────────────────────
 # NOTE: ci.yml also has a `test-rust-windows` job (full `cargo test --workspace`
 # on windows-latest, added for #135). It is intentionally NOT mirrored here —
