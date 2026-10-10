@@ -2,3 +2,4 @@ tests/fixtures/frontmatter/** -text
 scrybe-app/test/golden/** -text
 scrybe-cli/tests/fixtures/** -text
 scrybe-render/src/themes/*.css text eol=lf
+scrybe-render/tests/fixtures/site/** -text

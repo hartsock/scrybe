@@ -5,6 +5,9 @@
 
 use std::sync::OnceLock;
 
+#[path = "site.rs"]
+mod site;
+
 use pulldown_cmark::{CodeBlockKind, Event, Options, Parser, Tag, TagEnd};
 use syntect::easy::HighlightLines;
 use syntect::highlighting::ThemeSet;
@@ -40,8 +43,8 @@ const SITE_OPTIONS: Options = Options::ENABLE_TABLES
 
 /// Markdown dialect used by [`render_html_with`].
 ///
-/// Profiles select parser extensions only. Themes, syntax highlighting, Mermaid,
-/// front matter stripping and HTML escaping use the same rendering pipeline.
+/// App preserves desktop highlighting and Mermaid rendering. Site uses plain
+/// code blocks and automatic heading IDs compatible with the house site.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RenderProfile {
     /// Desktop compatibility: all existing non-metadata parser extensions.
@@ -83,15 +86,12 @@ pub fn render_html_with(doc: &Document, theme: Theme, profile: RenderProfile) ->
     // 1. Strip front matter before Markdown parsing.
     let (_, body) = scrybe_core::frontmatter::split(&doc.source);
 
-    // 2. Parse + render with syntax highlighting.
-    let options = match profile {
-        RenderProfile::App => MARKDOWN_OPTIONS,
-        RenderProfile::Site => SITE_OPTIONS,
+    let body_html = match profile {
+        RenderProfile::App => {
+            inject_mermaid_wrappers(&render_with_highlighting(body, MARKDOWN_OPTIONS))
+        }
+        RenderProfile::Site => site::render(body, SITE_OPTIONS),
     };
-    let body_html = render_with_highlighting(body, options);
-
-    // 3. Post-process Mermaid blocks.
-    let body_html = inject_mermaid_wrappers(&body_html);
 
     // 4. Prepend theme CSS.
     let html = format!("<style>{}</style>\n{}", theme.css(), body_html);

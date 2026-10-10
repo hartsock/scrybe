@@ -66,6 +66,7 @@ cargo test -p scrybe-cli
 Use `scrybe render --profile site --body-only` with Markdown on stdin to write a
 body-only HTML fragment on stdout for a site converter. The site profile enables
 smart punctuation and keeps math delimiters literal. `--body-only` omits the theme
-`<style>` block and conflicts with `--full-html`. Highlighting, Mermaid wrappers
-and escaping are the same as the app profile. Without the new flags, output is
+`<style>` block and conflicts with `--full-html`. Site uses unhighlighted,
+production-shaped code blocks, ordinary Mermaid fences, automatic heading IDs,
+and namespaced footnote IDs. HTML remains escaped. Without the new flags, output is
 unchanged: the app dialect with theme CSS prepended. Unknown profiles are rejected.
