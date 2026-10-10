@@ -72,9 +72,9 @@ fn site_undefined_footnote_stays_literal() {
 #[test]
 fn site_defined_footnote_renders() {
     let html = site("A note[^x].\n\n[^x]: Defined note.\n");
-    assert!(html.contains("class=\"footnote-reference\""), "{html}");
+    assert!(html.contains("id=\"fnref:x\""), "{html}");
     assert!(
-        html.contains("class=\"footnote-definition\" id=\"x\""),
+        html.contains("class=\"footnote-definition\" id=\"fn:x\""),
         "{html}"
     );
     assert!(html.contains("Defined note."), "{html}");
@@ -160,4 +160,17 @@ fn site_heading_id_omits_image_alt_text() {
         site("# [link](url) ![alt](url)"),
         "<h1 id=\"link-\"><a href=\"url\">link</a> <img src=\"url\" alt=\"alt\" /></h1>\n"
     );
+}
+
+#[test]
+fn site_footnote_namespace_preserves_heading_and_reference_targets() {
+    let html = site("# X\n\nA note[^x] and again[^x].\n\n[^x]: Footnote text.\n");
+    assert!(html.contains("<h1 id=\"x\">X</h1>"));
+    for id in ["x", "fn:x", "fnref:x", "fnref:x:1"] {
+        assert_eq!(html.matches(&format!("id=\"{id}\"")).count(), 1, "{html}");
+    }
+    assert_eq!(html.matches("href=\"#fn:x\"").count(), 2, "{html}");
+    assert!(!html.contains("href=\"#x\""), "{html}");
+    assert!(html.contains("class=\"footnote-definition\" id=\"fn:x\""));
+    assert!(html.contains("Footnote text."));
 }
