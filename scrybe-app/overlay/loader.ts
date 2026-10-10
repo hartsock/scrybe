@@ -30,7 +30,7 @@ export function frameURL(origin: string, options: FrameOptions): URL {
         if (options[key])
             p.set(key, options[key]!.slice(0, 200));
     p.set('block', String(Math.min(9999, Math.max(0, Math.trunc(Number.isFinite(options.block) ? options.block! : 0)))));
-    p.set('fp', (options.fp ?? '').replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029]/g, '').slice(0, 64));
+    p.set('fp', [...(options.fp ?? '').replace(/[\p{C}\p{Z}]/gu, c => c === ' ' ? c : '')].slice(0, 64).join(''));
     p.set('theme', ['dark', 'light'].includes(options.theme ?? '') ? options.theme! : '');
     p.set('ctx', (options.ctx ?? '').split('>').filter(level => /^[a-z][a-z0-9]*(?:\.[A-Za-z_][\w-]*){0,6}$/.test(level)).slice(-6).join('>').slice(0, 300).replace(/[.>]+$/, ''));
     if (options.paths)
@@ -44,10 +44,9 @@ export function guardNavigation(event: {
     detail: {
         issueRequest(force: boolean): void;
     };
-}, dirty: boolean, confirm: (s: string) => boolean): void { if (dirty) {
+}, dirty: boolean, ask: (proceed: () => void) => void): void { if (dirty) {
     event.preventDefault();
-    if (confirm('Discard unsaved edits and navigate?'))
-        event.detail.issueRequest(true);
+    ask(() => event.detail.issueRequest(true));
 } }
 interface Frame {
     host: HTMLElement;
@@ -189,7 +188,29 @@ export async function startLoader(input: Window, src: string, fetcher: typeof fe
         return; enabled = !enabled; pill.textContent = enabled ? 'Editing on' : 'Edit prose'; pill.setAttribute('aria-pressed', String(enabled)); scan(); }
     pill.onclick = toggle;
     panel.onclick = () => open(null);
+    let cancelNavigation: (() => void) | undefined;
+    function askNavigation(proceed: () => void) {
+        cancelNavigation?.();
+        const previous = doc.activeElement as HTMLElement | null;
+        const box = doc.createElement('span');
+        box.className = 'status';
+        const status = doc.createElement('span');
+        status.setAttribute('role', 'status');
+        status.textContent = 'Discard unsaved edits and navigate?';
+        box.append(status);
+        const discard = doc.createElement('button'), cancel = doc.createElement('button');
+        discard.textContent = 'Discard and navigate';
+        cancel.textContent = 'Cancel';
+        const dismiss = () => { box.remove(); cancelNavigation = undefined; previous?.focus(); };
+        cancelNavigation = dismiss;
+        cancel.onclick = dismiss;
+        discard.onclick = () => { dismiss(); proceed(); };
+        box.append(discard, cancel);
+        bar.append(box);
+        cancel.focus();
+    }
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') {
+        if (cancelNavigation) { cancelNavigation(); e.preventDefault(); return; }
         frames.at(-1)?.iframe.contentWindow?.postMessage({ v: 1, type: 'scrybe:close-request' }, origin);
     } if (e.key === 'e' && !e.metaKey && !e.ctrlKey && !e.altKey && !(e.target as HTMLElement)?.closest('input,textarea,[contenteditable]'))
         toggle(); };
@@ -232,12 +253,12 @@ export async function startLoader(input: Window, src: string, fetcher: typeof fe
         detail: {
             issueRequest(force: boolean): void;
         };
-    }, frames.some(f => f.dirty), s => win.confirm(s));
+    }, frames.some(f => f.dirty), askNavigation);
     const onUnload = (e: BeforeUnloadEvent) => { if (frames.some(f => f.dirty)) {
         e.preventDefault();
         e.returnValue = '';
     } };
-    const cleanupFrames = () => [...frames].forEach(remove);
+    const cleanupFrames = () => { cancelNavigation?.(); [...frames].forEach(remove); };
     const settled = () => { scan(); restoreAnchor(); };
     const themeObserver = new win.MutationObserver(() => frames.forEach(f => f.iframe.contentWindow?.postMessage({ v: 1, type: 'scrybe:theme', theme: theme() }, origin)));
     themeObserver.observe(doc.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
