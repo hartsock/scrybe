@@ -31,8 +31,13 @@
     "codemirror": "^6.0.2"
   },
   "devDependencies": {
+    "@milkdown/crepe": "7.22.2",
+    "@milkdown/kit": "7.22.2",
     "@tauri-apps/cli": "^2",
     "typescript": "^5.6",
     "vite": "^8.1"
+  },
+  "overrides": {
+    "mdast-util-to-markdown": "^2.1.3"
   }
 }
