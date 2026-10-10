@@ -36,6 +36,8 @@ test('URL exceptions are exact, audited entries and cannot become stale',async()
     assert.equal(run().status,0,'listed URL must pass');
     await writeFile(path.join(output,'overlay.js'),JSON.stringify(url+'?unlisted'));
     let result=run();assert.notEqual(result.status,0);assert.match(result.stderr,/unlisted.*URL/i);assert.match(result.stderr,/stale/i);
+    await writeFile(path.join(output,'overlay.js'),JSON.stringify(url+')'));
+    result=run();assert.notEqual(result.status,0);assert.match(result.stderr,/unlisted.*URL/i,'literal punctuation is part of an exact URL');
     await writeFile(path.join(output,'overlay.js'),'(()=>{})();');
     result=run();assert.notEqual(result.status,0);assert.match(result.stderr,/stale/i);
     await writeFile(allowlist,'[]');
