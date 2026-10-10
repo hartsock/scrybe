@@ -1,2 +1,3 @@
 tests/fixtures/frontmatter/** -text
 scrybe-app/test/golden/** -text
+scrybe-cli/tests/fixtures/** -text
