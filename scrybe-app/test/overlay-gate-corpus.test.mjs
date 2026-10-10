@@ -14,7 +14,7 @@ test('overlay exact-feature corpus gate', {skip:!process.env.SITE_CORPUS, timeou
   async function walk(dir){const entries=await readdir(dir,{withFileTypes:true});return (await Promise.all(entries.filter(e=>!e.name.startsWith('.')&&!['node_modules','vendor','_site'].includes(e.name)).map(e=>e.isDirectory()?walk(path.join(dir,e.name)):e.name.endsWith('.md')?[path.join(dir,e.name)]:[]))).flat();}
   let identical=0,total=0;const opened=new Set();
   try{for(const file of (await walk(process.env.SITE_CORPUS)).sort()){
-    const relative=path.relative(process.env.SITE_CORPUS,file);const source=await readFile(file,'utf8');const split=splitFrontMatter(source);if(split.frontMatter===null)continue;
+    const relative=path.relative(process.env.SITE_CORPUS,file);const source=await readFile(file,'utf8');const split=splitFrontMatter(source);
     let body=split.body;if(body.startsWith('{% raw %}\n\n')&&body.endsWith('\n{% endraw %}\n'))body=body.slice(11,-14);
     const root=document.createElement('div');document.body.append(root);const editor=await mountEditor(root,body);
     const same=editor.getMarkdown()===body;total++;if(same){identical++;opened.add(relative);}t.diagnostic(`${relative}: ${same?'identical':'refused'}`);await editor.destroy();root.remove();
