@@ -21,7 +21,7 @@ for(const file of files){
   const budget=name==='overlay.js'?15*1024:name===manifest['overlay/frame.ts']?.file?30*1024:name.endsWith('.js')?300*1024:Infinity;
   if(size>budget)failures.push(`${name}: ${size} exceeds ${budget} gzip bytes`);
   if(/\.(?:js|css)$/.test(name))console.log(`${name}: ${size} gzip bytes`);
-  const checks=[[/\beval\s*\(/,'eval'],[/\bnew\s+Function\b/,'new Function'],[/<script(?:\s|>)/i,'inline script'],[/data:(?:font\/|application\/(?:font|x-font|vnd\.ms-fontobject))/i,'data font'],[/https?:\/\//i,'absolute HTTP(S) URL'],[/["'`(]\/assets\//,'root-relative asset']];
+  const checks=[[/\beval\s*\(/,'eval'],[/\bnew\s+Function\b/,'new Function'],[/<script(?:\s|>)/i,'inline script'],[/@font-face[^}]*data:/is,'data font'],[/data:(?:font\/|application\/(?:font|x-font|vnd\.ms-fontobject))/i,'data font'],[/https?:\/\//i,'absolute HTTP(S) URL'],[/["'`(]\/assets\//,'root-relative asset']];
   for(const [pattern,label] of checks)if(pattern.test(text))failures.push(`${name}: ${label}`);
   for(const word of forbidden)if(text.includes(word))failures.push(`${name}: forbidden private string`);
 }
