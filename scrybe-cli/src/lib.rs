@@ -17,6 +17,45 @@ pub mod wrap;
 pub use scrybe_tools::lint::{lint_document, BrokenLink, LintReport};
 pub use wrap::wrap_full_html;
 
+/// Markdown dialect accepted by `scrybe render --profile`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, clap::ValueEnum)]
+pub enum CliRenderProfile {
+    /// Desktop compatibility dialect.
+    #[default]
+    App,
+    /// Site dialect: smart punctuation, with math left literal.
+    Site,
+}
+
+/// Map CLI flags to the renderer dialect and fragment selection.
+pub fn render_settings(
+    profile: CliRenderProfile,
+    body_only: bool,
+) -> (scrybe_render::RenderProfile, bool) {
+    let profile = match profile {
+        CliRenderProfile::App => scrybe_render::RenderProfile::App,
+        CliRenderProfile::Site => scrybe_render::RenderProfile::Site,
+    };
+    (profile, body_only)
+}
+
+/// Select the body, themed fragment, or full document without changing rendering.
+///
+/// The clap shell rejects body-only plus full-HTML before calling this function.
+pub fn select_render_output(
+    output: &scrybe_render::RenderOutput,
+    body_only: bool,
+    full_html_title: Option<&str>,
+) -> String {
+    if body_only {
+        output.body_html.clone()
+    } else if let Some(title) = full_html_title {
+        wrap_full_html(output, title)
+    } else {
+        output.html.clone()
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Version info
 // ---------------------------------------------------------------------------
@@ -43,6 +82,36 @@ mod tests {
     use crate::lint_document;
     use scrybe_core::Document;
     use scrybe_render::{render_html, Theme};
+
+    #[test]
+    fn render_flag_mapping() {
+        use crate::{render_settings, CliRenderProfile};
+        use scrybe_render::RenderProfile;
+        assert_eq!(CliRenderProfile::default(), CliRenderProfile::App);
+        for (flag, expected) in [
+            (CliRenderProfile::App, RenderProfile::App),
+            (CliRenderProfile::Site, RenderProfile::Site),
+        ] {
+            for body_only in [false, true] {
+                assert_eq!(render_settings(flag, body_only), (expected, body_only));
+            }
+        }
+    }
+
+    #[test]
+    fn render_output_selection() {
+        use crate::select_render_output;
+        let rendered = render_html(&Document::new("# Title"), Theme::Default);
+        assert_eq!(select_render_output(&rendered, false, None), rendered.html);
+        assert_eq!(
+            select_render_output(&rendered, true, None),
+            rendered.body_html
+        );
+        assert_eq!(
+            select_render_output(&rendered, false, Some("Title")),
+            wrap_full_html(&rendered, "Title")
+        );
+    }
 
     #[test]
     fn test_lint_word_count() {
