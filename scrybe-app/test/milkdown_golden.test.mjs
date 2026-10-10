@@ -35,7 +35,7 @@ async function loadTS(relative) {
   return import(`data:text/javascript;base64,${Buffer.from(code).toString("base64")}`);
 }
 const { CrepeBuilder } = await import("@milkdown/crepe/builder");
-const { schemaCtx, serializerCtx } = await import("@milkdown/kit/core");
+const { schemaCtx, serializerCtx, parserCtx } = await import("@milkdown/kit/core");
 const { toMarkdown } = await import("mdast-util-to-markdown");
 const { fromMarkdown } = await import("mdast-util-from-markdown");
 const { splitFrontMatter } = await loadTS("../src/frontmatter.ts");
@@ -218,19 +218,42 @@ test("corpus results include every failure and success without content", async t
   assert.ok(!result.output.includes(root), "source path withheld");
 });
 
-test.todo("Milkdown 7.22.2 edit-path: uncertainty**.** becomes uncertainty\\*\\*.\\*\\*", async () => {
-  const first = await withCrepe("", crepe => crepe.editor.action(ctx => {
-    const schema = ctx.get(schemaCtx);
-    const paragraph = schema.nodes.paragraph.create(null, [
-      schema.text("uncertainty"), schema.text(".", [schema.marks.strong.create()]),
-    ]);
-    return ctx.get(serializerCtx)(schema.nodes.doc.create(null, paragraph));
-  }));
-  assert.equal(first, "uncertainty**.**\n");
-  const second = await cycle(first);
-  assert.equal(second, "uncertainty\\*\\*.\\*\\*\n");
-  assert.equal(second, first, "known Milkdown strong/text handler defect; Phase 2 decision");
-});
+const attentionCases = [
+  { name: "strong period after word", before: "uncertainty", marked: ".", after: "", mark: "strong",
+    expected: "uncertaint&#x79;**.**\n" },
+  { name: "strong comma after word", before: "word", marked: ",", after: "", mark: "strong" },
+  { name: "strong closing paren after word", before: "word", marked: ")", after: "", mark: "strong" },
+  { name: "emphasis punctuation after word", before: "word", marked: ".", after: "", mark: "emphasis" },
+  { name: "emphasis inside word", before: "un", marked: "certain", after: "ty", mark: "emphasis" },
+  { name: "strong at line start", before: "", marked: "bold", after: " text", mark: "strong" },
+  { name: "strong at line end", before: "text ", marked: "bold", after: "", mark: "strong" },
+];
+for (const entry of attentionCases) {
+  test(`edit-path attention: ${entry.name}`, async t => {
+    const { first, original } = await withCrepe("", crepe => crepe.editor.action(ctx => {
+      const schema = ctx.get(schemaCtx);
+      const children = [
+        ...(entry.before ? [schema.text(entry.before)] : []),
+        schema.text(entry.marked, [schema.marks[entry.mark].create()]),
+        ...(entry.after ? [schema.text(entry.after)] : []),
+      ];
+      const doc = schema.nodes.doc.create(null, schema.nodes.paragraph.create(null, children));
+      return { first: ctx.get(serializerCtx)(doc), original: doc.toJSON() };
+    }));
+    t.diagnostic(`${entry.name}: ${JSON.stringify(first)}`);
+    if (entry.expected) assert.equal(first, entry.expected);
+    let previous = first;
+    for (let i = 1; i <= 10; i++) {
+      const next = await withCrepe(previous, crepe => crepe.editor.action(ctx => {
+        assert.deepEqual(ctx.get(parserCtx)(previous).toJSON(), original,
+          `document changed at cycle ${i}`);
+        return crepe.getMarkdown();
+      }));
+      assert.equal(next, first, `serialization changed at cycle ${i}`);
+      previous = next;
+    }
+  });
+}
 
 test("upstream mdast serializer preserves bold punctuation with a character reference", () => {
   const tree = { type: "root", children: [{ type: "paragraph", children: [

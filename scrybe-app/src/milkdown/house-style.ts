@@ -5,6 +5,7 @@ import { remarkStringifyOptionsCtx } from "@milkdown/kit/core";
 import { remarkGFMPlugin } from "@milkdown/kit/preset/gfm";
 import { languages } from "@codemirror/language-data";
 import { gfmTableToMarkdown } from "mdast-util-gfm-table";
+import { defaultHandlers } from "mdast-util-to-markdown";
 
 const table = gfmTableToMarkdown({ tablePipeAlign: false }).handlers!.table!;
 
@@ -19,6 +20,10 @@ export function houseStyle(ctx: Ctx): void {
     strong: "*" as const,
     handlers: {
       ...options.handlers,
+      // Restore upstream attention metadata and delimiter checks so punctuation
+      // beside a word re-parses as a mark. Keep Milkdown's text escaping intact.
+      strong: defaultHandlers.strong,
+      emphasis: defaultHandlers.emphasis,
       break: () => "  \n",
       table: (node, parent, state, info) => {
         const lines = table(node, parent, state, info).split("\n");
