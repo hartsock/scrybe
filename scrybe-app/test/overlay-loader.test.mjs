@@ -38,3 +38,14 @@ test('loader fetches only staging status, never edit origin', async () => {
   });
   assert.deepEqual(calls, [site + '/_staging.json']); stop(); dom.window.close();
 });
+test('frame lifecycle hides and restores target, ignores spoofing and refreshes in place',async()=>{
+  const dom=new JSDOM('<main id="page"><article data-md="about.md"><p>First</p><p>Second</p></article></main>',{url:site+'/a?q=1'});const w=dom.window;w.scrollBy=()=>{};
+  const calls=[];w.htmx={ajax:(...args)=>calls.push(args)};
+  const stop=await startLoader(w,edit+'/_edit/overlay.js',async()=>({ok:true,json:async()=>({source:'gitea',branch:'drafts'})}));
+  const bar=w.document.querySelector('scrybe-overlay').shadowRoot;bar.querySelector('button').click();w.document.querySelectorAll('p')[1].click();
+  const original=w.document.querySelector('article'),host=w.document.querySelector('scrybe-frame'),frame=host.shadowRoot.querySelector('iframe');Object.defineProperty(frame,'contentWindow',{value:{}});assert.ok(original.hidden);assert.equal(host.getAttribute('hx-history'),'false');assert.equal(new URL(frame.src).searchParams.get('fp'),'Second');
+  const msg=(origin,source,data)=>w.dispatchEvent(new w.MessageEvent('message',{origin,source,data:{v:1,...data}}));
+  msg(site,frame.contentWindow,{type:'scrybe:closed',refresh:true});assert.ok(original.hidden);
+  msg(edit,frame.contentWindow,{type:'scrybe:closed',refresh:true});assert.equal(original.hidden,false);assert.deepEqual(calls,[['GET','/a?q=1',{target:'#page',select:'#page',swap:'outerHTML'}]]);
+  stop();w.close();
+});
