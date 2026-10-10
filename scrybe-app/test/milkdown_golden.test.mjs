@@ -9,6 +9,8 @@ import { promisify } from "node:util";
 import test, { after } from "node:test";
 import ts from "typescript";
 import { JSDOM } from "jsdom";
+import { micromark } from "micromark";
+import { gfm, gfmHtml } from "micromark-extension-gfm";
 
 // Install the DOM before importing Milkdown/ProseMirror (they inspect it at load).
 const dom = new JSDOM("<!doctype html><html><body></body></html>", {
@@ -21,6 +23,13 @@ for (const name of ["window", "document", "navigator", "Node", "HTMLElement",
     typeof dom.window[name] === "function" && /^(getComputedStyle|requestAnimationFrame|cancelAnimationFrame|addEventListener|removeEventListener|dispatchEvent)$/.test(name)
       ? dom.window[name].bind(dom.window) : dom.window[name] });
 }
+
+// JSDOM has no viewport; full Crepe's CodeMirror views only need lifecycle hooks.
+globalThis.IntersectionObserver = class {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+};
 
 // Use the actual TS modules without generated repository files or a bundler.
 async function loadTS(relative) {
@@ -230,6 +239,37 @@ function semanticMarkdown(source) {
   return JSON.parse(JSON.stringify(fromMarkdown(source), (key, value) =>
     key === "position" ? undefined : value));
 }
+function renderedMarkdown(source) {
+  return micromark(source, { extensions: [gfm()], htmlExtensions: [gfmHtml()], allowDangerousHtml: true });
+}
+const saveCases = [
+  ["empty list item", "- first\n-\n- last\n"],
+  ["empty blockquote", ">\n"],
+  ["empty fenced code", "```\n```\n"],
+  ["one blank code line", "```\n\n```\n"],
+  ["two blank code lines", "```text\n\n\n```\n"],
+  ["emphasis starts link", "[*a* b](u)\n"],
+  ["strong starts link", "[**a** b](u)\n"],
+  ["nested emphasis", "*outer _inner_ tail*\n"],
+  ["nested strong", "**outer __inner__ tail**\n"],
+];
+for (const full of [false, true]) {
+  for (const [name, source] of saveCases) {
+    test(`saves ${full ? "full Crepe" : "CrepeBuilder"}: ${name}`, async t => {
+      const first = await withCrepe(source, crepe => crepe.getMarkdown(), full);
+      t.diagnostic(`${name}: ${JSON.stringify(first)}`);
+      assert.equal(renderedMarkdown(first), renderedMarkdown(source), "save changed rendered HTML");
+      assert.deepEqual(semanticMarkdown(first), semanticMarkdown(source), "save changed parsed document");
+      for (let i = 1; i <= 10; i++) {
+        const next = await withCrepe(first, crepe => crepe.getMarkdown(), full);
+        assert.equal(next, first, `save changed at cycle ${i}`);
+        assert.equal(renderedMarkdown(next), renderedMarkdown(source));
+        assert.deepEqual(semanticMarkdown(next), semanticMarkdown(source));
+      }
+    });
+  }
+}
+
 const imageCases = [
   ["untitled image-only", "![alt text](a.png)\n"],
   ["titled image-only", '![descriptive alt](a.png "Image title")\n'],
