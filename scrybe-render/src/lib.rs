@@ -14,7 +14,7 @@ pub mod math;
 pub mod mermaid;
 pub mod theme;
 
-pub use html::render_html;
+pub use html::{render_html, render_html_with, RenderProfile};
 #[allow(deprecated)] // Preserve the existing public re-export.
 pub use math::{extract_math, MathPlaceholder};
 pub use mermaid::inject_mermaid_wrappers;

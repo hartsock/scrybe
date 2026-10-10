@@ -31,6 +31,26 @@ const MARKDOWN_OPTIONS: Options = Options::ENABLE_TABLES
     .union(Options::ENABLE_GFM)
     .union(Options::ENABLE_DEFINITION_LIST);
 
+// Site is an allowlist, independent of App's broader compatibility dialect.
+const SITE_OPTIONS: Options = Options::ENABLE_TABLES
+    .union(Options::ENABLE_FOOTNOTES)
+    .union(Options::ENABLE_STRIKETHROUGH)
+    .union(Options::ENABLE_TASKLISTS)
+    .union(Options::ENABLE_SMART_PUNCTUATION);
+
+/// Markdown dialect used by [`render_html_with`].
+///
+/// Profiles select parser extensions only. Themes, syntax highlighting, Mermaid,
+/// front matter stripping and HTML escaping use the same rendering pipeline.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RenderProfile {
+    /// Desktop compatibility: all existing non-metadata parser extensions.
+    App,
+    /// House site dialect: tables, modern footnotes, strikethrough, task lists,
+    /// and smart punctuation. Math and other App-only syntax remain literal.
+    Site,
+}
+
 static SYNTAX_SET: OnceLock<SyntaxSet> = OnceLock::new();
 static THEME_SET: OnceLock<ThemeSet> = OnceLock::new();
 
@@ -42,17 +62,33 @@ fn theme_set() -> &'static ThemeSet {
     THEME_SET.get_or_init(ThemeSet::load_defaults)
 }
 
-/// Renders a [`Document`] to HTML using the given [`Theme`].
+/// Renders a [`Document`] using [`RenderProfile::App`] and the given [`Theme`].
+///
+/// This compatibility entry point keeps the desktop app dialect. To select the
+/// house site dialect explicitly, use [`render_html_with`].
 ///
 /// The returned [`RenderOutput`] contains:
 /// - `html`: the full fragment with `<style>` prepended.
 /// - `body_html`: just the body content without CSS.
 pub fn render_html(doc: &Document, theme: Theme) -> RenderOutput {
+    render_html_with(doc, theme, RenderProfile::App)
+}
+
+/// Renders a whole document with an explicit Markdown dialect and theme.
+///
+/// [`RenderProfile::Site`] keeps math delimiters, heading attributes, definition
+/// syntax and GFM blockquote alerts as ordinary Markdown text. Both profiles
+/// remove leading Jekyll front matter and return body HTML plus themed HTML.
+pub fn render_html_with(doc: &Document, theme: Theme, profile: RenderProfile) -> RenderOutput {
     // 1. Strip front matter before Markdown parsing.
     let (_, body) = scrybe_core::frontmatter::split(&doc.source);
 
     // 2. Parse + render with syntax highlighting.
-    let body_html = render_with_highlighting(body);
+    let options = match profile {
+        RenderProfile::App => MARKDOWN_OPTIONS,
+        RenderProfile::Site => SITE_OPTIONS,
+    };
+    let body_html = render_with_highlighting(body, options);
 
     // 3. Post-process Mermaid blocks.
     let body_html = inject_mermaid_wrappers(&body_html);
@@ -64,8 +100,8 @@ pub fn render_html(doc: &Document, theme: Theme) -> RenderOutput {
 }
 
 /// Runs pulldown-cmark with custom syntax-highlighted code blocks.
-fn render_with_highlighting(source: &str) -> String {
-    let parser = Parser::new_ext(source, MARKDOWN_OPTIONS);
+fn render_with_highlighting(source: &str, options: Options) -> String {
+    let parser = Parser::new_ext(source, options);
 
     let mut output = String::new();
     let mut in_code_block = false;
@@ -168,6 +204,22 @@ mod tests {
             .union(Options::ENABLE_PLUSES_DELIMITED_METADATA_BLOCKS);
         // New upstream flags must prompt an explicit rendering-policy decision.
         assert_eq!(MARKDOWN_OPTIONS, Options::all().difference(metadata));
+    }
+
+    #[test]
+    fn test_site_profile_classifies_every_parser_flag() {
+        // OLD_FOOTNOTES includes the modern FOOTNOTES bit; only its legacy
+        // extra bit is excluded. Keep this classification explicit on upgrades.
+        let excluded = Options::ENABLE_OLD_FOOTNOTES
+            .difference(Options::ENABLE_FOOTNOTES)
+            .union(Options::ENABLE_HEADING_ATTRIBUTES)
+            .union(Options::ENABLE_MATH)
+            .union(Options::ENABLE_DEFINITION_LIST)
+            .union(Options::ENABLE_GFM)
+            .union(Options::ENABLE_YAML_STYLE_METADATA_BLOCKS)
+            .union(Options::ENABLE_PLUSES_DELIMITED_METADATA_BLOCKS);
+        assert_eq!(SITE_OPTIONS.union(excluded), Options::all());
+        assert!(SITE_OPTIONS.intersection(excluded).is_empty());
     }
 
     #[test]
