@@ -46,6 +46,11 @@ just test
 
 if command -v npm >/dev/null 2>&1; then
     (cd scrybe-app && npm ci && npm run build && npm run test:packaging)
+    # Overlay bundle parity: ci.yml overlay-bundle. SITE_CORPUS, when set,
+    # supplies the public checkout pinned by ci.yml; the baseline manifest
+    # retains its historical compatibility floor. Without SITE_CORPUS the
+    # corpus test reports a skip (CI always supplies the pinned checkout).
+    (cd scrybe-app && npm run build:overlay && node scripts/overlay-check.mjs dist-overlay && node --test test/overlay-gate-corpus.test.mjs)
 else
     echo "npm not found; skipping TypeScript build"
 fi
