@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 export function contentPath(path: string): boolean { return path.length <= 200 && /^(?:[A-Za-z0-9_-]+\/)*[A-Za-z0-9_-]+\.md$/.test(path); }
 export function editorOrigin(src: string): string { return new URL(src).origin; }
-export function scanTargets(doc: Document): HTMLElement[] { return [...doc.querySelectorAll<HTMLElement>('#page [data-md]')].filter(el => !el.closest('[data-evidence]') && contentPath(el.dataset.md ?? '')); }
+export function scanTargets(doc: Document): HTMLElement[] { return [...doc.querySelectorAll<HTMLElement>('#page [data-md]')].filter(el => el.tagName !== 'TEMPLATE' && !el.closest('[data-evidence]') && contentPath(el.dataset.md ?? '')); }
 export function contextOf(el: HTMLElement): string {
     const parts: string[] = [];
     for (let current: HTMLElement | null = el; current && current.id !== 'page' && parts.length < 6; current = current.parentElement) {
