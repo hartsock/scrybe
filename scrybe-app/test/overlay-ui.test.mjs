@@ -40,3 +40,25 @@ for (const stale of [false,true]) test(`field UI sandbox discard controls (stale
 
   }finally{w.close();for(const [name,descriptor] of old){if(descriptor)Object.defineProperty(globalThis,name,descriptor);else delete globalThis[name];}}
 });
+
+for (const editable of [false,true]) for (const rejected of [false,true]) test(`nested field uses server authority (editable=${editable}, rejected=${rejected})`,async()=>{
+  const dom=new JSDOM('<!doctype html><meta name="scrybe-staging-origin" content="https://staging.example"><meta name="scrybe-path" content="about.md"><meta name="scrybe-key" content="card.title"><meta name="scrybe-mode" content="field"><body></body>',{url:'https://editor.example/_edit/frame',pretendToBeVisual:true});
+  const w=dom.window,calls=[],old=new Map(),parent={postMessage(){}};
+  Object.defineProperty(w,'parent',{value:parent});
+  const serverFile={...file,fields:[{...file.fields[0],key:'card.title',editable,reason:'Server policy says read only'}]};
+  const fetcher=async(url,init)=>{calls.push({url:String(url),init});const u=new URL(url),put=init?.method==='PUT';const data=u.pathname.endsWith('session')?{csrf:'token',buildId:'dev'}:u.pathname.endsWith('live')?{state:'live'}:put?(rejected?{code:'field_not_editable',error:'Server rejected this field'}:{sha:'saved',commit:'committed'}):serverFile;return new Response(JSON.stringify(data),{status:put&&rejected?422:200});};
+  for(const [name,value] of Object.entries({window:w,document:w.document,location:{origin:w.location.origin},parent,sessionStorage:w.sessionStorage,ResizeObserver:class{observe(){}},fetch:fetcher})){old.set(name,Object.getOwnPropertyDescriptor(globalThis,name));Object.defineProperty(globalThis,name,{configurable:true,writable:true,value});}
+  try{
+    let source=await readFile(new URL('../overlay/frame.ts',import.meta.url),'utf8');source=source.replace("import './frame.css';",'').replace("import.meta.env.VITE_BUILD_ID","'dev'");
+    source=ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.ESNext,target:ts.ScriptTarget.ES2022}}).outputText.replace(/from (['"])(\.\/[^'"]+)\1/g,(_,q,s)=>`from ${q}${new URL('../overlay/'+s,import.meta.url).href}${q}`);
+    await import('data:text/javascript;base64,'+Buffer.from(source).toString('base64')+'#authority-'+editable+'-'+rejected);
+    for(let i=0;i<30&&!w.document.querySelector('input');i++)await new Promise(r=>setTimeout(r,5));
+    const input=w.document.querySelector('input'),save=[...w.document.querySelectorAll('button')].find(b=>b.textContent==='Save');
+    assert.ok(input);assert.equal(input.readOnly,!editable);
+    input.value='New nested title';input.dispatchEvent(new w.Event('input'));assert.equal(save.disabled,!editable);
+    save.click();await new Promise(r=>setTimeout(r,15));
+    const puts=calls.filter(c=>c.init?.method==='PUT');assert.equal(puts.length,editable?1:0);
+    if(editable){assert.equal(JSON.parse(puts[0].init.body).key,'card.title');if(rejected){assert.match(w.document.querySelector('[role=status]').textContent,/Server rejected this field|field_not_editable/);assert.equal(input.value,'New nested title');}}
+    else assert.match(w.document.body.textContent,/Server policy says read only/);
+  }finally{w.close();for(const [name,descriptor] of old){if(descriptor)Object.defineProperty(globalThis,name,descriptor);else delete globalThis[name];}}
+});

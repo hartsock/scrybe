@@ -215,6 +215,11 @@ async function save() {
         return;
     const value = getValue();
     if (key) {
+        const field = current.fields.find(field => field.key === key);
+        if (!field?.editable) {
+            report(field?.reason ?? 'This field is read only.');
+            return;
+        }
         const errors = validateField(key, value);
         if (errors.length) {
             report(errors.join(' '));

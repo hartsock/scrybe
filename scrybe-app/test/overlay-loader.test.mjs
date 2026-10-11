@@ -58,3 +58,14 @@ test('frame lifecycle hides and restores target, ignores spoofing and refreshes 
   msg(edit,frame.contentWindow,{type:'scrybe:closed',refresh:true});assert.equal(original.hidden,false);assert.deepEqual(calls,[['GET','/a?q=1',{target:'#page',select:'#page',swap:'outerHTML'}]]);
   stop();w.close();
 });
+
+test('template addresses create no target or pencil', async () => {
+  const dom = new JSDOM('<main id="page"><template data-md="about.md" data-md-key="card.title"><span data-md="about.md">Hidden</span></template><p data-md="about.md" data-md-key="title">Visible</p></main>', {url: site});
+  const stop = await startLoader(dom.window, edit + '/_edit/overlay.js', async () => ({ok:true,json:async()=>({source:'gitea',branch:'drafts'})}));
+  try {
+    assert.deepEqual(scanTargets(dom.window.document).map(el=>el.tagName), ['P']);
+    const host = [...dom.window.document.querySelectorAll('*')].find(el=>el.shadowRoot);
+    assert.equal(host.shadowRoot.querySelectorAll('.pencil').length, 1);
+    assert.match(host.shadowRoot.querySelector('.pencil').getAttribute('aria-label'), /Edit title in about.md/);
+  } finally { stop(); dom.window.close(); }
+});

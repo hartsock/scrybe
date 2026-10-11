@@ -194,7 +194,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: hartsock/hartsock.github.io
-          ref: b5080ae0dece2e48e85cc88ee6853e6842d06ebc
+          ref: 25c812f6b3b98b3d0a1a76361c475d07352c069d
           path: site-corpus
           persist-credentials: false
       - name: Public corpus byte gate

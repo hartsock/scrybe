@@ -1,15 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
-export function editableKey(key: string): boolean {
-    return /^(title|description|dek|heading|eyebrow|tagline|blurb|summary|copy\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+)$/.test(key);
-}
 export function validateField(key: string, value: string): string[] {
     const errors: string[] = [];
-    if (!editableKey(key))
-        errors.push('This key is not editable.');
+    const segment = key.split('.').at(-1);
     const length = [...value].length;
-    const limit = key === 'title' ? 200 : /^(dek|heading|eyebrow|tagline|summary)$/.test(key) ? 300 : 1000;
-    if (length > limit || (key === 'title' && length === 0))
-        errors.push(`Use ${key === 'title' ? '1–' : 'at most '}${limit} characters.`);
+    const limit = segment === 'title' ? 200 : /^(dek|heading|eyebrow|tagline|summary)$/.test(segment ?? '') ? 300 : 1000;
+    if (length > limit || (segment === 'title' && length === 0))
+        errors.push(`Use ${segment === 'title' ? '1–' : 'at most '}${limit} characters.`);
     if (value !== value.trim())
         errors.push('Remove leading or trailing whitespace.');
     if (/[\u0000-\u001f\u007f-\u009f\u2028\u2029]/u.test(value))
