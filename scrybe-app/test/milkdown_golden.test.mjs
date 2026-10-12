@@ -258,7 +258,7 @@ const escapeCases = [
   [
     "literal entity",
     "\\&copy;\n",
-    "\\&copy;\n"
+    "&amp;copy;\n"
   ],
   [
     "ellipsis",
@@ -328,7 +328,7 @@ const escapeCases = [
   [
     "numeric reference",
     "\\&#169;\n",
-    "\\&#169;\n"
+    "&amp;#169;\n"
   ],
   [
     "unknown entity",

@@ -146,6 +146,7 @@ export function houseStyle(ctx: Ctx): void {
         });
         // Kramdown recognizes tables outside GFM table contexts and $$ math.
         state.unsafe = [...state.unsafe, { character: "|", inConstruct: "phrasing" },
+          { character: ":", atBreak: true, after: "[ \t]", inConstruct: "phrasing" },
           { character: "$", inConstruct: "phrasing", after: "\\$" },
           { character: "$", inConstruct: "phrasing", before: "\\$" }];
         try {
@@ -155,7 +156,11 @@ export function houseStyle(ctx: Ctx): void {
           // encode list keeps trailing spaces before marks as plain spaces.
           const escaped = state.safe(node.value, { ...info, encode: [] });
           // Kramdown consumes a lone caret at the end of a paragraph.
-          return escaped.replace(/\^(?=\s*$)/, "&#94;");
+          return escaped.replace(/\^(?=\s*$)/, "&#94;")
+            .replace(/\\&/g, "&amp;")
+            .replace(/\\@/g, "&#64;")
+            .replace(/\\\\(?=\n|$)/g, (match, offset: number) =>
+              offset+match.length<escaped.length || info.after.startsWith('\n') ? '&#92;' : match);
         } finally {
           state.unsafe = unsafe;
         }

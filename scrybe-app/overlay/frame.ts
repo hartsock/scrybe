@@ -22,6 +22,7 @@ const pagePaths = meta('paths').split(',').filter(Boolean).slice(0, 20);
 let outdated = false, resume = false, booting = false;
 let tracker: SourceTracker | undefined, sourceDisabled = false, approvedValue: string | undefined;
 let sentNote: string | undefined;
+let discarded = false;
 let stashTimer: ReturnType<typeof setTimeout> | undefined;
 let csrf = meta('csrf'), dirty = false, live = false, waiting = false, closed = false;
 let controller: SaveController | undefined, current: FileResult | undefined, key: string | undefined;
@@ -62,18 +63,21 @@ function askDiscard(message: string, label: string): Promise<boolean> {
 }
 function setDirty(value: boolean) { dirty = value; post('scrybe:dirty', { dirty }); }
 function stash() {
-    clearTimeout(stashTimer);
-    if (!current) return;
+    clearTimeout(stashTimer); stashTimer=undefined;
+    if (!current || !dirty || discarded) return;
+    try { if(storage.getItem('scrybe-edit:'+current.path)!==null && !stashRead(storage,current.path))return; } catch { return; }
     const recovered = tracker?.recovery() ?? {value:getValue(),verified:true};
     stashWrite(storage, current.path, {v:2,build:BUILD_ID,verified:recovered.verified,
         baseSha:controller?.pending?.baseSha ?? controller?.sha ?? current.sha,value:recovered.value,
         ...(key ? {key} : {}), ...(note?.value ? {note:note.value} : {})});
 }
+function clearRecovery(path: string) { if(stashRead(storage,path))stashClear(storage,path); }
 function changed() {
+    if(discarded)return;
     setDirty((tracker ? tracker.dirty(baseline) : getValue() !== baseline) || !!note?.value);
-    clearTimeout(stashTimer);
-    if (dirty) stashTimer=setTimeout(stash,400);
-    else if(current && !controller?.pending) stashClear(storage,current.path);
+    // A throttle bounds recovery loss even during continuous typing.
+    if (dirty && stashTimer===undefined) stashTimer=setTimeout(stash,400);
+    if (!dirty) {clearTimeout(stashTimer);stashTimer=undefined;}
 }
 function showDiff(before: string, after: string, parent = content) { const diff = byteGate(before, after); const details = el('details', '', parent); el('summary', `${diff.count} changed lines; first at line ${diff.first}`, details); el('pre', diff.hunks.filter(h => h.kind !== 'same').map(h => `${h.beforeLine ?? h.afterLine}: - ${h.before ?? ''}\n+ ${h.after ?? ''}`).join('\n'), details); }
 async function session() { try {
@@ -87,9 +91,10 @@ async function session() { try {
             outdated = true;
             stash();
             report('Editor updated. Reload before saving.');
+            reloadButton.hidden=false;
             if (controller)
                 controller.set({ kind: 'outdated' });
-        } else if (resume && !booting) void boot();
+        } else if (resume && !booting && !current) void boot();
     }
 }
 catch {
@@ -112,7 +117,8 @@ async function reload() { if (controller?.state.kind === 'stale') {
     if (!await askDiscard('Discard your text and reload the changed file?', 'Discard and reload'))
         return;
     if (current)
-        stashClear(storage, current.path);
+        clearRecovery(current.path);
+    discarded=true;clearTimeout(stashTimer);stashTimer=undefined;
     setDirty(false);
 }
 else
@@ -121,8 +127,8 @@ async function close() {
     if (dirty && !await askDiscard('Discard unsaved edits and close?', 'Discard and close'))
         return;
     if (dirty && current)
-        stashClear(storage, current.path);
-    clearTimeout(stashTimer);
+        clearRecovery(current.path);
+    discarded=true;clearTimeout(stashTimer);stashTimer=undefined;
     setDirty(false);
     if (waiting && !live) {
         closed = true;
@@ -180,7 +186,7 @@ function beginPoll(saved: Saved, path: string) {
     }, poll.signal);
 }
 function prepare(file: FileResult, fieldKey?: string) {
-    clearTimeout(stashTimer); sentNote=undefined; tracker=undefined; sourceDisabled=false; approvedValue=undefined;
+    clearTimeout(stashTimer); stashTimer=undefined; discarded=false; sentNote=undefined; tracker=undefined; sourceDisabled=false; approvedValue=undefined;
     setValue=undefined; getValue=()=>''; baseline=''; saveButton.disabled=true;
     current = file;
     key = fieldKey;
@@ -201,7 +207,7 @@ function prepare(file: FileResult, fieldKey?: string) {
             stash();
         if (state.kind === 'saved' && state.result) {
             approvedValue = undefined;
-            clearTimeout(stashTimer);
+            clearTimeout(stashTimer);stashTimer=undefined;
             baseline = controller!.value;
             file.sha = state.result.sha;
             if (tracker && !tracker.saved(baseline)) {
@@ -212,7 +218,7 @@ function prepare(file: FileResult, fieldKey?: string) {
             if (note && note.value===sentNote) note.value='';
             setDirty((tracker ? tracker.dirty(baseline) : getValue() !== baseline) || !!note?.value);
             if (!dirty)
-                stashClear(storage, file.path);
+                clearRecovery(file.path);
             else
                 stash();
 
@@ -299,12 +305,16 @@ function offerStash() {
     try { await setValue?.(saved.value); } catch {
         report('Recovered text cannot be edited safely here. Use Show recovered source.');return;
     }
-    if (controller) controller.sha = saved.baseSha;
+    if (controller) {
+        controller.sha = saved.baseSha;
+        // A prior failed request cannot lend its newer CAS base to recovery.
+        if(controller.pending?.baseSha!==saved.baseSha)controller.pending=undefined;
+    }
     if (note)
         note.value = saved.note ?? ''; changed(); box.remove(); }, box);
     restore.disabled=!setValue;
     button('Show recovered source',()=>{el('pre',saved.value,box);},box);
-    button('Discard recovery', () => { stashClear(storage, current!.path); box.remove(); }, box);
+    button('Discard recovery', () => { clearRecovery(current!.path); box.remove(); }, box);
 }
 function noteInput(file: FileResult) { if (key || file.note === 'unsupported')
     return; const label = el('label', file.pendingNote ? `Revision note (pending: ${file.pendingNote.note})` : `Revision note (${file.note})`); note = el('input', '', label); note.oninput = changed; }
@@ -404,13 +414,15 @@ async function openBody(file: FileResult) {
             observer.disconnect(); mount.inert=true;
             try {
                 candidateEditor=await mountEditor(candidateRoot,value);
-                const candidateTracker=trackSource(candidateEditor,value,tracker!.history);
+                // Validate the recovered editor without granting its bytes source ownership.
+                trackSource(candidateEditor,value);
+                const candidateTracker=trackSource(candidateEditor,baseline,tracker!.history,true);
                 await editor.destroy();
                 editor=candidateEditor; tracker=candidateTracker;
                 mount.replaceChildren(candidateRoot);candidateRoot.classList.remove('pending');
             } catch (error) {
                 await candidateEditor?.destroy();candidateRoot.remove();throw error;
-            } finally { mount.inert=false;observer.observe(mount,{subtree:true,childList:true,characterData:true}); }
+            } finally { mount.inert=false;observer.observe(mount.querySelector('.ProseMirror')!,{subtree:true,childList:true,characterData:true}); }
         };
         mount.addEventListener('keydown', e => { if (e.key === 'Enter' && (e.shiftKey || e.metaKey || e.ctrlKey)) {
             e.preventDefault();
@@ -429,7 +441,7 @@ async function openBody(file: FileResult) {
             document.execCommand('insertText', false, cleaned);
         } }, true);
         const observer = new MutationObserver(changed);
-        observer.observe(mount, { subtree: true, childList: true, characterData: true });
+        observer.observe(mount.querySelector('.ProseMirror')!, { subtree: true, childList: true, characterData: true });
         const oldDestroy = destroy;
         destroy = async () => { observer.disconnect(); await oldDestroy?.(); };
         noteInput(file);

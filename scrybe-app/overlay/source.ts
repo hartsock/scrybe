@@ -12,12 +12,13 @@ export interface Tools {
   tokens: WeakMap<PMNode, string>;
 }
 export interface Block { node: PMNode; lineStart: number; start: number; end: number; token: string }
-export interface Base { S: string; blocks: Block[]; sepBefore: string[]; lead: string; tail: string; invisible: string[] }
+export interface Base { S: string; blocks: Block[]; sepBefore: string[]; lead: string; tail: string; invisible: string[]; definitions: string[] }
 export type Mode = 'exact' | 'token' | 'line' | 'canonical' | 'insert' | 'delete';
 export interface Window { old: [number, number]; new: [number, number]; mode: Mode; line: number; s: string; c0: string; c1: string; text: string }
 export interface Spliced { value: string; windows: Window[]; ok: boolean; reformat: Window[]; problem?: string }
 
-const isEmptyParagraph = (n: PMNode) => n.type.name === 'paragraph' && norm(n).content.size === 0;
+const isEmptyParagraph = (n: PMNode) => n.type.name==='paragraph' && norm(n).content.size===0;
+const isEmptyContent = (n: PMNode) => ['paragraph','heading','list_item','bullet_list','ordered_list'].includes(n.type.name) && norm(n).content.size===0;
 /** Top-level nodes that carry source. Empty paragraphs (typing space, trailing plugin) are never written. */
 export function contentNodes(doc: PMNode): PMNode[] { const out: PMNode[] = []; doc.forEach(n => { if (!isEmptyParagraph(n)) out.push(n); }); return out; }
 
@@ -32,8 +33,20 @@ export function hygiene(text: string): string {
     const open = line.match(/^[ \t>]*(?:(?:[-*+]|\d+[.)])[ \t]+)?(`{3,}|~{3,})/);
     if (fence) { if (open && open[1][0] === fence[0] && open[1].length >= fence.length && line.replace(/^[ \t>]*(?:(?:[-*+]|\d+[.)])[ \t]+)?/, '').trim() === open[1]) fence = null; return line; }
     if (open) { fence = open[1]; return line; }
-    return line.replace(/[ \t]+$/, '').replace(/^([ \t]*(?:>[ \t]*)*)[ \t]*(#{1,6})(?= )/, (_all, quote: string, heading: string) => quote.includes('>') ? quote.replace(/[ \t]+$/, ' ') + heading : heading);
+    return line.replace(/[ \t]+$/, '');
   }).join('\n');
+}
+/** Strip indentation only on root headings, never list continuation lines. */
+function headingHygiene(tools: Tools, text: string): string {
+  const kids=(tools.remark.parse(text) as MdNode).children??[];
+  for(let i=kids.length-1;i>=0;i--){const n=kids[i];if(n.type!=='heading')continue;const start=n.position?.start.offset;if(start===undefined)continue;
+    const line=text.lastIndexOf('\n',start-1)+1;
+    if(/^[ \t]+$/.test(text.slice(line,start)))text=text.slice(0,line)+text.slice(start);
+  }
+  return text.replace(/^(>[ \t]*)[ \t]+(?=#{1,6} )/gm,'> ');
+}
+function multilineHeading(tools: Tools, text: string): boolean {
+  let found=false;walk(tools.remark.parse(text) as MdNode,n=>{if(n.type==='heading' && text.slice(n.position?.start.offset,n.position?.end.offset).split('\n').length>2)found=true;});return found;
 }
 /** The same hygiene, applied only to merged lines that are not verbatim source lines. */
 function hygieneChanged(text: string, source: string): string {
@@ -91,7 +104,7 @@ function strip(j: J): J {
   return j;
 }
 /** Comparison form. Deep-clones first: toJSON shares live attrs objects with the document. */
-export const comparable = (nodes: PMNode[]) => JSON.stringify(nodes.filter(n => !isEmptyParagraph(n)).map(n => strip(JSON.parse(JSON.stringify(norm(n).toJSON())))));
+export const comparable = (nodes: PMNode[]) => JSON.stringify(nodes.filter(n => !isEmptyContent(n)).map(n => strip(JSON.parse(JSON.stringify(norm(n).toJSON())))));
 export function sameMeaning(tools: Tools, text: string, nodes: PMNode[]): boolean {
   try { return comparable(contentNodes(tools.parse(text))) === comparable(nodes); } catch { return false; }
 }
@@ -101,7 +114,19 @@ export function createBase(tools: Tools, S: string, doc: PMNode): Base | { error
   if (S.includes('\r')) return { error: 'line-endings' };
   let tree: MdNode;
   try { tree = tools.remark.runSync(tools.remark.parse(S), S) as MdNode; } catch { return { error: 'parse' }; }
-  const kids = tree.children ?? [], nodes = contentNodes(doc);
+  const kids = tree.children ?? [];
+  // Match source blocks in order, skipping only editor-only empty placeholders.
+  // A global empty-node count is insufficient when a save removes one of two
+  // empty lists on opposite sides of a paragraph.
+  const candidates=contentNodes(doc),expected=contentNodes(tools.parse(S)),nodes: PMNode[]=[];
+  let cursor=0;
+  for(const wanted of expected){
+    while(cursor<candidates.length && isEmptyContent(candidates[cursor]) &&
+      (!isEmptyContent(wanted)||candidates[cursor].type!==wanted.type))cursor++;
+    if(cursor===candidates.length)return {error:'block-count'};
+    nodes.push(candidates[cursor++]);
+  }
+  if(candidates.slice(cursor).some(n=>!isEmptyContent(n)))return {error:'block-count'};
   if (kids.length !== nodes.length) return { error: 'block-count', detail: `${kids.length}/${nodes.length}` };
   const blocks: Block[] = [], sepBefore: string[] = [];
   let prevEnd = 0, lead = '';
@@ -120,7 +145,8 @@ export function createBase(tools: Tools, S: string, doc: PMNode): Base | { error
   }
   const tail = S.slice(prevEnd);
   if (/[^ \t\n]/.test(tail)) return { error: 'after-blocks' };
-  const base: Base = { S, blocks, sepBefore, lead: blocks.length ? lead : '', tail: blocks.length ? tail : S, invisible: invisible(tools, S) };
+  const definitions: string[]=[];walk(tools.remark.parse(S) as MdNode,n=>{if(n.type==='definition')definitions.push(S.slice(n.position?.start.offset,n.position?.end.offset));});
+  const base: Base = { S, definitions, blocks, sepBefore, lead: blocks.length ? lead : '', tail: blocks.length ? tail : S, invisible: invisible(tools, S) };
   if (!complete(tools, S, doc)) return { error: 'content-missing' };
   if (!sameMeaning(tools, S, nodes)) return { error: 'meaning' }; // the editor must show what S means
   if (splice(tools, base, doc).value !== S) return { error: 'no-op' }; // and an untouched doc must give S back
@@ -173,7 +199,7 @@ export function norm(node: PMNode): PMNode {
   let kids: PMNode[] = []; node.forEach(k => kids.push(k));
   if (node.isTextblock) {
     if (node.type.name === 'heading') kids = kids.map((k, i) =>
-      k.type.name === 'hardbreak' && k.attrs.isInline ? node.type.schema.text(' ', kids[i - 1]?.marks) : k);
+      k.type.name === 'hardbreak' ? node.type.schema.text(' ', kids[i - 1]?.marks) : k);
     while (kids[0]?.type.name === 'hardbreak') kids.shift();
     while (kids.at(-1)?.type.name === 'hardbreak') kids.pop();
     for (const edge of ['start', 'end']) {
@@ -186,7 +212,7 @@ export function norm(node: PMNode): PMNode {
         break;
       }
     }
-  } else kids = kids.map(norm);
+  } else kids = kids.map(norm).filter(k => !isEmptyContent(k));
   const result = kids.length === node.childCount && kids.every((k, i) => k === node.child(i))
     ? node : node.type.create(node.attrs, kids, node.marks);
   normalized.set(node, result); return result;
@@ -216,21 +242,26 @@ export function complete(tools: Tools, source: string, doc: PMNode): boolean {
 /** Retired blocks live as long as the editor's undo history. This registry is
  * session-local, never stored or shared between files. */
 export class SourceHistory {
-  private documents = new Map<string, string>();
+  private documents = new Map<string, {value:string; slices:string[]}>();
   private identity = new WeakMap<PMNode, string>();
-  private tokens = new Map<string, string>();
+  private tokens = new Map<string, string | null>();
   remember(base: Base) {
-    this.documents.set(JSON.stringify(base.blocks.map(b=>b.token)),base.S);
+    this.documents.set(JSON.stringify(base.blocks.map(b=>b.token)),{value:base.S,slices:base.blocks.map(b=>base.S.slice(b.lineStart,b.end))});
     for (const b of base.blocks) {
       const text = base.S.slice(b.lineStart, b.end);
-      this.identity.set(b.node, text); this.tokens.set(b.token, text);
+      this.identity.set(b.node, text);
+      if (!this.tokens.has(b.token)) this.tokens.set(b.token,text);
+      else if(this.tokens.get(b.token)!==text) this.tokens.set(b.token,null);
     }
   }
+  owns(node: PMNode): boolean { return this.identity.has(node); }
   document(tools: Tools, nodes: PMNode[]): string | undefined {
-    return this.documents.get(JSON.stringify(nodes.map(n=>serializeRun(tools,[n]))));
+    const saved=this.documents.get(JSON.stringify(nodes.map(n=>serializeRun(tools,[n]))));
+    if(!saved || nodes.some((n,i)=>this.identity.has(n) ? this.identity.get(n)!==saved.slices[i] : this.tokens.get(serializeRun(tools,[n]))===null))return undefined;
+    return saved.value;
   }
   find(tools: Tools, node: PMNode): string | undefined {
-    return this.identity.get(node) ?? this.tokens.get(serializeRun(tools, [node]));
+    return this.identity.get(node) ?? this.tokens.get(serializeRun(tools, [node])) ?? undefined;
   }
 }
 function widenKept(kept: [number, number][], oldLength: number, newLength: number, times: number) {
@@ -249,13 +280,16 @@ const changedCount = (a: string, b: string) => {
 
 export function splice(tools: Tools, base: Base, doc: PMNode,
   options: { widen?: number; dependencies?: boolean; history?: SourceHistory } = {}): Spliced {
-  const nodes = contentNodes(doc), { S, blocks } = base;
+  const { S, blocks } = base;
+  const nodes = contentNodes(doc).filter(n=>!isEmptyContent(n)||blocks.some(b=>b.node===n)||options.history?.owns(n));
   // Undo restores bytes from an actual prior file, so historical documents need
   // neither formatting consent nor the HTML structural guard for new rewrites.
+  // Server prechecks still apply; invalid historic whitespace falls back to splicing.
   const historical = options.history?.document(tools,nodes);
-  if (historical !== undefined && sameMeaning(tools,historical,nodes))
+  if (historical !== undefined && !precheck(base.S,historical) && sameMeaning(tools,historical,nodes))
     return {value:historical,windows:[],reformat:[],ok:true};
-  const units: { first: number | null; last: number | null; text: string }[] = [], windows: Window[] = [];
+  if(historical!==undefined && precheck(base.S,historical)) options={...options,history:undefined};
+  const units: { first: number | null; last: number | null; text: string; rewritten?: boolean }[] = [], windows: Window[] = [];
   let kept = align(tools, base, nodes);
   if (options.widen) kept = widenKept(kept, blocks.length, nodes.length, options.widen);
   // Definitions can live in a deleted container many blocks from their users.
@@ -290,12 +324,12 @@ export function splice(tools: Tools, base: Base, doc: PMNode,
       if (!options.dependencies) for (const engine of ['token', 'line'] as const) {
         const merged = rebase(s, c0, c1, engine);
         if (!merged) continue;
-        const candidate = hygieneChanged(merged.text, s);
+        const candidate = headingHygiene(tools,hygieneChanged(merged.text, s));
         // Table line insertion must not mix outer-pipe styles in kramdown.
         const tableStyleChanged = after.some(n => n.type.name === 'table') &&
           s.split('\n').some(l => l.includes('|') && !/^\s*\|/.test(l)) &&
           candidate.split('\n').some(l => /^\s*\|/.test(l));
-        if (!tableStyleChanged && sameMeaning(tools, candidate, after)) { text = candidate; mode = engine; break; }
+        if (!tableStyleChanged && !multilineHeading(tools,candidate) && sameMeaning(tools, candidate+(base.definitions.length?'\n\n'+base.definitions.join('\n'):''), after)) { text = candidate; mode = engine; break; }
       }
     }
     if (after.length) {
@@ -308,7 +342,7 @@ export function splice(tools: Tools, base: Base, doc: PMNode,
         }
         text = units.slice(-after.length).map(u=>u.text).join('\n\n');
         if (after.some((_,k) => !moved.has(c+k)) && s !== c0) mode = 'canonical';
-      } else units.push({first:a < b ? a : null,last:a < b ? b-1 : null,text});
+      } else units.push({first:a < b ? a : null,last:a < b ? b-1 : null,text,rewritten:after.length!==b-a || after.some((n,k)=>n.type!==blocks[a+k]?.node.type)});
     }
     const window: Window={old:[a,b],new:[c,d],line,s,c0,c1,text,mode};windows.push(window);
     // Moving and editing in one transaction can leave a new node without an
@@ -322,41 +356,80 @@ export function splice(tools: Tools, base: Base, doc: PMNode,
     pi=i;pj=j;
   }
   const sep = (p: typeof units[number], u: typeof units[number]) => {
-    if (p.last !== null && u.first !== null && p.last + 1 === u.first) return base.sepBefore[u.first];
+    if (p.last !== null && u.first !== null && p.last + 1 === u.first) return (p.rewritten || u.rewritten) && base.sepBefore[u.first].length<2 ? '\n\n' : base.sepBefore[u.first];
     const candidates = ['\n\n', p.last === null ? '' : base.sepBefore[p.last+1] ?? '', u.first === null ? '' : base.sepBefore[u.first] ?? ''];
     return candidates.reduce((a,b)=>b.length>a.length?b:a);
   };
   let value = base.lead;
   units.forEach((u,k)=>{if(k)value+=sep(units[k-1],u);value+=u.text;}); value+=base.tail;
-  const reformat = windows.filter(w => relocationConsent.has(w) || options.widen || options.dependencies ||
+  // A retained colon-led paragraph can acquire definition-list meaning when
+  // a separating heading is deleted. Escape only the newly adjacent pair.
+  const parsed=(tools.remark.parse(value) as MdNode).children??[];
+  let colonReformat=false;
+  for(let i=parsed.length-1;i>0;i--){const n=parsed[i],prev=parsed[i-1],start=n.position?.start.offset;
+    if(n.type==='paragraph' && prev.type==='paragraph' && start!==undefined && /^:[ \t]/.test(value.slice(start)) &&
+      !S.includes(value.slice(prev.position?.start.offset,n.position?.end.offset))){value=value.slice(0,start)+'\\'+value.slice(start);colonReformat=true;}
+  }
+  const ambiguous = nodes.some(n => { const matches=blocks.filter(b=>b.token===serializeRun(tools,[n])); return !matches.some(b=>b.node===n) && new Set(matches.map(b=>S.slice(b.lineStart,b.end))).size>1; });
+  const reformat = windows.filter(w => colonReformat || ambiguous || relocationConsent.has(w) || options.widen || options.dependencies ||
     changedCount(w.s,w.text) > changedCount(w.c0,w.c1) ||
-    (w.mode === 'canonical' && w.s !== w.c0));
+    (['canonical','line'].includes(w.mode) && w.s !== w.c0));
+  if(ambiguous && !reformat.length)reformat.push({old:[0,blocks.length],new:[0,nodes.length],mode:'canonical',line:1,s:S,c0:serializeRun(tools,blocks.map(b=>b.node)),c1:serializeRun(tools,nodes),text:value});
   return {value,windows,reformat,ok:sameMeaning(tools,value,nodes)};
 }
 
 export const ALLOW_REFORMAT_CONSENT = true;
 export interface Candidate extends Spliced { status: 'ok' | 'consent' | 'refuse'; reason: string }
+/** SequenceMatcher(None, before, after, autojunk=False): longest contiguous
+ * matches, earliest source then destination tie break, recursively partitioned. */
+export function addedLines(source: string, value: string): [number,string][] {
+  const lines=(s: string)=>s ? (s.endsWith('\n')?s.slice(0,-1):s).split('\n') : [];
+  const a=lines(source),b=lines(value),positions=new Map<string,number[]>();
+  b.forEach((line,j)=>{const at=positions.get(line)??[];at.push(j);positions.set(line,at);});
+  const equal=new Set<number>(),queue=[[0,a.length,0,b.length]];
+  while(queue.length){const [alo,ahi,blo,bhi]=queue.pop()!;let ai=alo,bj=blo,size=0,prev=new Map<number,number>();
+    for(let i=alo;i<ahi;i++){const next=new Map<number,number>();for(const j of positions.get(a[i])??[]){if(j<blo)continue;if(j>=bhi)break;const k=(prev.get(j-1)??0)+1;next.set(j,k);if(k>size){ai=i-k+1;bj=j-k+1;size=k;}}prev=next;}
+    if(!size)continue;
+    for(let j=bj;j<bj+size;j++)equal.add(j);
+    if(alo<ai&&blo<bj)queue.push([alo,ai,blo,bj]);
+    if(ai+size<ahi&&bj+size<bhi)queue.push([ai+size,ahi,bj+size,bhi]);
+  }
+  return b.flatMap((line,j)=>equal.has(j)?[]:[[j+1,line] as [number,string]]);
+}
 export function precheck(source: string, value: string): string | undefined {
   if (!value.trim()) return 'The body cannot be saved empty here.';
   if ((source.match(/\n*$/)?.[0] ?? '') !== (value.match(/\n*$/)?.[0] ?? '')) return 'Not saved: the trailing newline count would change.';
-  const have = new Map<string,number>(); source.split('\n').forEach(l=>have.set(l,(have.get(l)??0)+1));
-  for (const [i,line] of value.split('\n').entries()) {
-    const count=have.get(line)??0; if(count){have.set(line,count-1);continue;}
+  const code=new Set<number>();let fence: string|undefined;
+  value.split('\n').forEach((line,i)=>{const opening=line.match(/^ {0,3}(`{3,}|~{3,})(.*)$/);
+    if(fence){code.add(i+1);if(new RegExp('^ {0,3}'+fence[0]+'{'+fence.length+',}\\s*$').test(line))fence=undefined;}
+    else if(opening){fence=opening[1];code.add(i+1);}
+  });
+  for (const [number,line] of addedLines(source,value)) {
+    const i=number-1;
     if (/[ \t]$/.test(line)) return `Line ${i+1} ends with spaces, which drafts refuses. Remove them to save.`;
     if (/ \t/.test(line.match(/^[ \t]*/)?.[0] ?? '')) return `Line ${i+1} has a space before a tab in its indentation.`;
+    const prose=line.replace(/(`+).*?\1/g,'');
+    if (!code.has(number) && /^(?: {4}|\t)\S/.test(prose)) return `Line ${i+1} adds indented code; use fenced code.`;
+    if (!code.has(number) && /\\&/.test(prose)) return `Line ${i+1} adds an escaped ampersand that the renderer cannot display.`;
+    const html=line.replace(/(?<!\\)((?:\\\\)*)\\</g,'$1');
+    if (/<!--|<\/?[A-Za-z][A-Za-z0-9-]*(?:\s[^>]*|\s*\/?)>|<![A-Z]|<[A-Za-z][\w-]*[^>]*$|<!\[/.test(html)) return `Line ${i+1} adds HTML, including in code; drafts refuses this.`;
     if (/^([<=>|])\1{6}(?:\s|$)/.test(line)) return `Line ${i+1} contains a conflict marker.`;
   }
 }
-function adjacentLists(nodes: PMNode[]): boolean {
-  return nodes.some((n,i) => (i > 0 && /^(ordered|bullet)_list$/.test(n.type.name) && n.type === nodes[i-1].type) ||
-    (!n.isLeaf && adjacentLists(contentNodes(n))));
+function adjacentLists(tools: Tools, nodes: PMNode[]): string[] {
+  const pairs: string[]=[];
+  nodes.forEach((n,i)=>{
+    if(i && /^(ordered|bullet)_list$/.test(n.type.name) && n.type===nodes[i-1].type)
+      pairs.push(serializeRun(tools,[nodes[i-1]])+'\u0000'+serializeRun(tools,[n]));
+    if(!n.isLeaf)pairs.push(...adjacentLists(tools,contentNodes(n)));
+  });return pairs;
 }
 export function prepareSource(tools: Tools, base: Base, doc: PMNode, history?: SourceHistory): Candidate {
-  const nodes = contentNodes(doc);
+  const nodes = contentNodes(doc).filter(n=>!isEmptyContent(n)||base.blocks.some(b=>b.node===n)||history?.owns(n));
   const first = splice(tools,base,doc,{history});
   const refuse = (reason: string, result=first): Candidate => ({...result,status:'refuse',reason});
   // Preserve no-ops even for empty bodies or pre-existing dialect disagreements.
-  if (first.value === base.S && first.ok) return {...first,status:'ok',reason:''};
+  if (first.value === base.S && first.ok && !first.reformat.length) return {...first,status:'ok',reason:''};
   let hasHTML=false;
   walk(tools.remark.parse(base.S) as MdNode,n=>{if(n.type==='html')hasHTML=true;});
   const shape=(n: PMNode): string => n.isText ? '' : n.type.name+'('+contentNodes(n).map(shape).join(',')+')';
@@ -365,14 +438,15 @@ export function prepareSource(tools: Tools, base: Base, doc: PMNode, history?: S
   // Kramdown can treat custom HTML as a container spanning later Markdown.
   // CommonMark verification cannot prove a structural edit in that region.
   if(hasHTML && structural)return refuse('Not saved: structural edits around HTML cannot be verified for publication. Edit plain text or use the source editor.');
-  if (adjacentLists(nodes)) return refuse('These two lists will join when published. Join them in the editor or keep text between them.');
+  const oldAdjacency=adjacentLists(tools,base.blocks.map(b=>b.node));
+  if (adjacentLists(tools,nodes).some(pair=>{const i=oldAdjacency.indexOf(pair);if(i<0)return true;oldAdjacency.splice(i,1);return false;})) return refuse('These two lists will join when published. Join them in the editor or keep text between them.');
   const attempts = [first];
   if (!first.ok) for (const widen of [1,2]) {
     const r=splice(tools,base,doc,{widen,history}); attempts.push(r); if(r.ok)break;
   }
   if (!attempts.some(r=>r.ok)) attempts.push(splice(tools,base,doc,{dependencies:true,history}));
   const result=attempts.find(r=>r.ok);
-  if (!result) return refuse('Not saved: the saved Markdown would not match what you see. Undo the last change or copy your text.');
+  if (!result) return refuse('Not saved: the saved Markdown would not match what you see. Your text is kept. Copy it or edit the source to retain this formatting.');
   const problem=precheck(base.S,result.value); if(problem)return refuse(problem,result);
   const have=invisible(tools,result.value);
   const lost=base.invisible.filter(s=>{const i=have.indexOf(s);if(i<0)return true;have.splice(i,1);return false;});
@@ -384,9 +458,10 @@ export function prepareSource(tools: Tools, base: Base, doc: PMNode, history?: S
 /** Recovery may use a whole-document canonical candidate, but saves never do.
  * Unverified text is explicitly labeled and requires review before restoring. */
 export function recovery(tools: Tools, base: Base, doc: PMNode, history?: SourceHistory) {
+  const candidate=prepareSource(tools,base,doc,history);
+  if(candidate.ok)return {value:candidate.value,verified:candidate.status==='ok'};
   for (const options of [{history},{history,widen:1},{history,widen:2},{history,dependencies:true}]) {
-    const r=splice(tools,base,doc,options); if(r.ok)return {value:r.value,verified:true};
+    const r=splice(tools,base,doc,options); if(r.ok)return {value:r.value,verified:false};
   }
-  const value=tools.serialize(norm(doc));
-  return {value,verified:sameMeaning(tools,value,contentNodes(doc))};
+  return {value:tools.serialize(norm(doc)),verified:false};
 }

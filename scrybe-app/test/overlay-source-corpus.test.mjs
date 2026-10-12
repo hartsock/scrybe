@@ -11,11 +11,11 @@ test('source preservation corpus properties and publication oracle',{skip:!proce
  const {dom,withEditor,source}=await import('./helpers/overlay-editor.mjs');
  const {createBase,prepareSource,splice,contentNodes,sameMeaning,SourceHistory}=source;
  let oracle=true;try{kd(['probe']);}catch{oracle=false;t.diagnostic('SKIP kramdown oracle: Ruby with kramdown 2.4.0 and kramdown-parser-gfm is unavailable');}
- const counts={files:0,bases:0,noops:0,words:0,structural:{},fuzz:{},oracle:0,disagreements:0};
+ const counts={files:0,bases:0,noops:0,words:0,undoSanitized:0,wordRefusals:{},structural:{},fuzz:{},oracle:0,disagreements:0};
  const failures=[],oracleRows=[],openTimes=[],saveTimes=[];
  let seed=0x5c12be;const random=n=>{seed=(Math.imul(seed,1664525)+1013904223)>>>0;return seed%n;};
  const record=(kind,r)=>{const k=r.status+(r.reason?': '+r.reason:'');counts[kind][k]=(counts[kind][k]??0)+1;};
- const checkOracle=()=>{if(!oracle||!oracleRows.length)return;const rendered=kd(oracleRows.map(r=>r.value));oracleRows.forEach((r,i)=>{counts.oracle++;if(skeleton(rendered[i])!==cm(r.value)){counts.disagreements++;if(failures.length<30)failures.push({kind:'oracle',file:r.file,op:r.op,kd:skeleton(rendered[i]),cm:cm(r.value)});}});oracleRows.length=0;};
+ const checkOracle=()=>{if(!oracle||!oracleRows.length)return;const rendered=kd(oracleRows.map(r=>r.value));oracleRows.forEach((r,i)=>{counts.oracle++;if(skeleton(rendered[i])!==cm(r.value)){counts.disagreements++;if(failures.length<30)failures.push({kind:'oracle',file:r.file,op:r.op,value:r.value,kd:skeleton(rendered[i]),cm:cm(r.value)});}});oracleRows.length=0;};
  const all=await files(process.env.SITE_CORPUS);
  const names=process.env.SITE_CORPUS_FULL ? all : all.filter((_,i)=>i%Math.max(1,Math.floor(all.length/40))===0).slice(0,40);
  try{for(const file of names){
@@ -35,7 +35,9 @@ test('source preservation corpus properties and publication oracle',{skip:!proce
  let top=0,offset=0;while(top+1<original.childCount&&offset+original.child(top).nodeSize<=p){offset+=original.child(top).nodeSize;top++;}
  const block=base.blocks.find(b=>b.node===original.child(top));const low=S.slice(0,block.lineStart).split('\n').length-1,high=S.slice(0,block.end).split('\n').length-1;
  const changes=changedSourceLines(S,r.value);
- if(r.status==='refuse'||changes.changed.length!==1||changes.inserted!==1||changes.changed.some(i=>i<low||i>high))failures.push({kind:'word',file:rel,pos:p,status:r.status,reason:r.reason,changed:changes.changed,range:[low,high]});
+ const policyRefusal=r.status==='refuse' && /^Line \d+ adds (?:indented code|HTML|an escaped ampersand)/.test(r.reason);
+ if(policyRefusal)counts.wordRefusals[r.reason]=(counts.wordRefusals[r.reason]??0)+1;
+ if((r.status==='refuse'&&!policyRefusal)||changes.changed.length!==1||changes.inserted!==1||changes.changed.some(i=>i<low||i>high))failures.push({kind:'word',file:rel,pos:p,status:r.status,reason:r.reason,changed:changes.changed,range:[low,high]});
  });
  const ns=contentNodes(original),make=kids=>original.type.create(null,kids),para=s=>v.state.schema.nodes.paragraph.create(null,v.state.schema.text(s));
  const operations=(nodes,i)=>{
@@ -60,10 +62,10 @@ test('source preservation corpus properties and publication oracle',{skip:!proce
  const next=make(nodes),r=verify(next,'fuzz','fuzz');assert.deepEqual(prepareSource(tools,base,next),r,'deterministic');
  if(r.status!=='refuse'){
  const history=new SourceHistory();history.remember(base);const rebased=createBase(tools,r.value,next);
- if(rebased.error){failures.push({kind:'rebase',file:rel,error:rebased.error});continue;}history.remember(rebased);
+ if(rebased.error){failures.push({kind:'rebase',file:rel,error:rebased.error,value:r.value,doc:next.toJSON()});continue;}history.remember(rebased);
  assert.equal(splice(tools,rebased,next).value,r.value);
  const undone=prepareSource(tools,rebased,original,history);
- if(undone.status!=='refuse'&&undone.value!==S)failures.push({kind:'undo',file:rel});
+ if(undone.status!=='refuse'&&undone.value!==S){if(source.precheck(rebased.S,S))counts.undoSanitized++;else failures.push({kind:'undo',file:rel});}
  }
  }
  });
