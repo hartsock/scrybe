@@ -1,6 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 // Bounded line/token three-way merge. The canonical edit is applied to source
 // spelling; verification by the caller is mandatory before using the result.
+import { decodeNamedCharacterReference } from "decode-named-character-reference";
+
+function decodeReference(reference: string): string {
+  const body=reference.slice(1,-1);
+  if(!body.startsWith("#"))return decodeNamedCharacterReference(body) || reference;
+  const value=/^#x/i.test(body)?parseInt(body.slice(2),16):parseInt(body.slice(1),10);
+  return value>0 && value<=0x10ffff && !(value>=0xd800&&value<=0xdfff)?String.fromCodePoint(value):reference;
+}
 type Pair = [number, number];
 type Edit = { from: number; to: number; text: string };
 type SideEdit = Edit & { side: string };
@@ -119,7 +127,7 @@ export function lineKey(line: string) {
     .replace(/^([> ]*)[ \t]*(?:[-*+]|\d{1,9}[.)])(?=[ \t]|$)[ \t]*/, '$1\u2022 ')
     .replace(/^([> ]*)[ \t]*(#{1,6})(?=[ \t]|$)[ \t]*/, '$1$2 ')
     .replace(/\[(https?:[^\]\s]*)\]\(\1\)/g, '$1').replace(/<(https?:[^>\s]*)>/g, '$1')
-    .replace(/&(?:[A-Za-z][A-Za-z0-9]*|#[0-9]{1,7}|#[xX][0-9A-Fa-f]{1,6});/g, '&')
+    .replace(/&(?:[A-Za-z][A-Za-z0-9]*|#[0-9]{1,7}|#[xX][0-9A-Fa-f]{1,6});/g, decodeReference)
     .replace(/\\([!-\/:-@\[-`{-~])/g, '$1').replace(/[*_~]/g, '')
     .replace(/[ \t]+/g, ' ').trim();
 }

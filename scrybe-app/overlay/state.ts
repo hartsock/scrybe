@@ -33,7 +33,9 @@ export interface Stash {
 export function stashRead(storage: Pick<Storage, 'getItem'>, path: string): Stash | null {
     try {
         const x = JSON.parse(storage.getItem('scrybe-edit:' + path) ?? 'null');
-        return x && typeof x.baseSha === 'string' && typeof x.value === 'string' ? x : null;
+        return x && typeof x.baseSha === 'string' && typeof x.value === 'string' &&
+            (x.v===undefined || x.v===2) && (x.verified===undefined || typeof x.verified==='boolean') &&
+            (x.key===undefined || typeof x.key==='string') && (x.note===undefined || typeof x.note==='string') ? x : null;
     }
     catch {
         return null;

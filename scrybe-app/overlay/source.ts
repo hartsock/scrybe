@@ -216,13 +216,18 @@ export function complete(tools: Tools, source: string, doc: PMNode): boolean {
 /** Retired blocks live as long as the editor's undo history. This registry is
  * session-local, never stored or shared between files. */
 export class SourceHistory {
+  private documents = new Map<string, string>();
   private identity = new WeakMap<PMNode, string>();
   private tokens = new Map<string, string>();
   remember(base: Base) {
+    this.documents.set(JSON.stringify(base.blocks.map(b=>b.token)),base.S);
     for (const b of base.blocks) {
       const text = base.S.slice(b.lineStart, b.end);
       this.identity.set(b.node, text); this.tokens.set(b.token, text);
     }
+  }
+  document(tools: Tools, nodes: PMNode[]): string | undefined {
+    return this.documents.get(JSON.stringify(nodes.map(n=>serializeRun(tools,[n]))));
   }
   find(tools: Tools, node: PMNode): string | undefined {
     return this.identity.get(node) ?? this.tokens.get(serializeRun(tools, [node]));
@@ -245,6 +250,9 @@ const changedCount = (a: string, b: string) => {
 export function splice(tools: Tools, base: Base, doc: PMNode,
   options: { widen?: number; dependencies?: boolean; history?: SourceHistory } = {}): Spliced {
   const nodes = contentNodes(doc), { S, blocks } = base;
+  const historical = options.history?.document(tools,nodes);
+  if (historical !== undefined && sameMeaning(tools,historical,nodes))
+    return {value:historical,windows:[],reformat:[],ok:true};
   const units: { first: number | null; last: number | null; text: string }[] = [], windows: Window[] = [];
   let kept = align(tools, base, nodes);
   if (options.widen) kept = widenKept(kept, blocks.length, nodes.length, options.widen);
@@ -266,6 +274,8 @@ export function splice(tools: Tools, base: Base, doc: PMNode,
       if (text !== undefined) moved.set(j, {text, index: null});
     }
   });
+  const unmatchedSpelling=blocks.some((b,i)=>!used.has(i) && S.slice(b.lineStart,b.end)!==b.token);
+  const relocationConsent=new Set<Window>();
   const emit = (a: number, b: number, c: number, d: number) => {
     if (a === b && c === d) return;
     const line = S.slice(0, a < blocks.length ? blocks[a].lineStart : S.length).split('\n').length;
@@ -298,7 +308,10 @@ export function splice(tools: Tools, base: Base, doc: PMNode,
         if (after.some((_,k) => !moved.has(c+k)) && s !== c0) mode = 'canonical';
       } else units.push({first:a < b ? a : null,last:a < b ? b-1 : null,text});
     }
-    windows.push({old:[a,b],new:[c,d],line,s,c0,c1,text,mode});
+    const window: Window={old:[a,b],new:[c,d],line,s,c0,c1,text,mode};windows.push(window);
+    // Moving and editing in one transaction can leave a new node without an
+    // unambiguous source partner. Canonical recovery of that node needs review.
+    if(moved.size && unmatchedSpelling && a===b && after.some((_,k)=>!moved.has(c+k))) relocationConsent.add(window);
   };
   let pi = -1, pj = -1;
   for (const [i,j] of [...kept, [blocks.length,nodes.length] as [number,number]]) {
@@ -313,7 +326,7 @@ export function splice(tools: Tools, base: Base, doc: PMNode,
   };
   let value = base.lead;
   units.forEach((u,k)=>{if(k)value+=sep(units[k-1],u);value+=u.text;}); value+=base.tail;
-  const reformat = windows.filter(w => options.widen || options.dependencies ||
+  const reformat = windows.filter(w => relocationConsent.has(w) || options.widen || options.dependencies ||
     changedCount(w.s,w.text) > changedCount(w.c0,w.c1) ||
     (w.mode === 'canonical' && w.s !== w.c0));
   return {value,windows,reformat,ok:sameMeaning(tools,value,nodes)};
@@ -342,6 +355,14 @@ export function prepareSource(tools: Tools, base: Base, doc: PMNode, history?: S
   const refuse = (reason: string, result=first): Candidate => ({...result,status:'refuse',reason});
   // Preserve no-ops even for empty bodies or pre-existing dialect disagreements.
   if (first.value === base.S && first.ok) return {...first,status:'ok',reason:''};
+  let hasHTML=false;
+  walk(tools.remark.parse(base.S) as MdNode,n=>{if(n.type==='html')hasHTML=true;});
+  const shape=(n: PMNode): string => n.isText ? '' : n.type.name+'('+contentNodes(n).map(shape).join(',')+')';
+  const structural=first.windows.some(w=>w.old[1]-w.old[0]!==w.new[1]-w.new[0] ||
+    base.blocks.slice(...w.old).map(b=>shape(b.node)).join() !== nodes.slice(...w.new).map(shape).join());
+  // Kramdown can treat custom HTML as a container spanning later Markdown.
+  // CommonMark verification cannot prove a structural edit in that region.
+  if(hasHTML && structural)return refuse('Not saved: structural edits around HTML cannot be verified for publication. Edit plain text or use the source editor.');
   if (adjacentLists(nodes)) return refuse('These two lists will join when published. Join them in the editor or keep text between them.');
   const attempts = [first];
   if (!first.ok) for (const widen of [1,2]) {

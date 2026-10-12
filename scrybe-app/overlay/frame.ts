@@ -21,6 +21,7 @@ const savedPaths = new Set<string>();
 const pagePaths = meta('paths').split(',').filter(Boolean).slice(0, 20);
 let outdated = false, resume = false, booting = false;
 let tracker: SourceTracker | undefined, sourceDisabled = false, approvedValue: string | undefined;
+let sentNote: string | undefined;
 let stashTimer: ReturnType<typeof setTimeout> | undefined;
 let csrf = meta('csrf'), dirty = false, live = false, waiting = false, closed = false;
 let controller: SaveController | undefined, current: FileResult | undefined, key: string | undefined;
@@ -72,6 +73,7 @@ function changed() {
     setDirty((tracker ? tracker.dirty(baseline) : getValue() !== baseline) || !!note?.value);
     clearTimeout(stashTimer);
     if (dirty) stashTimer=setTimeout(stash,400);
+    else if(current && !controller?.pending) stashClear(storage,current.path);
 }
 function showDiff(before: string, after: string, parent = content) { const diff = byteGate(before, after); const details = el('details', '', parent); el('summary', `${diff.count} changed lines; first at line ${diff.first}`, details); el('pre', diff.hunks.filter(h => h.kind !== 'same').map(h => `${h.beforeLine ?? h.afterLine}: - ${h.before ?? ''}\n+ ${h.after ?? ''}`).join('\n'), details); }
 async function session() { try {
@@ -81,14 +83,13 @@ async function session() { try {
         csrf = s.csrf;
         if (controller)
             controller.csrf = csrf;
-        if (resume && !booting) void boot();
         if (s.buildId !== BUILD_ID && BUILD_ID !== 'dev') {
             outdated = true;
             stash();
             report('Editor updated. Reload before saving.');
             if (controller)
                 controller.set({ kind: 'outdated' });
-        }
+        } else if (resume && !booting) void boot();
     }
 }
 catch {
@@ -121,6 +122,7 @@ async function close() {
         return;
     if (dirty && current)
         stashClear(storage, current.path);
+    clearTimeout(stashTimer);
     setDirty(false);
     if (waiting && !live) {
         closed = true;
@@ -178,7 +180,7 @@ function beginPoll(saved: Saved, path: string) {
     }, poll.signal);
 }
 function prepare(file: FileResult, fieldKey?: string) {
-    clearTimeout(stashTimer); tracker=undefined; sourceDisabled=false; approvedValue=undefined;
+    clearTimeout(stashTimer); sentNote=undefined; tracker=undefined; sourceDisabled=false; approvedValue=undefined;
     setValue=undefined; getValue=()=>''; baseline=''; saveButton.disabled=true;
     current = file;
     key = fieldKey;
@@ -193,26 +195,26 @@ function prepare(file: FileResult, fieldKey?: string) {
         if (state.kind === 'rate') {
             saveButton.disabled = true;
             retry.disabled = true;
-            setTimeout(() => { retry.disabled = false; saveButton.disabled = false; }, Math.max(0, (state.retryAt ?? Date.now()) - Date.now()));
+            setTimeout(() => { retry.disabled = false; saveButton.disabled = sourceDisabled; }, Math.max(0, (state.retryAt ?? Date.now()) - Date.now()));
         }
         if (state.kind === 'outdated')
             stash();
         if (state.kind === 'saved' && state.result) {
+            clearTimeout(stashTimer);
             baseline = controller!.value;
             file.sha = state.result.sha;
             if (tracker && !tracker.saved(baseline)) {
                 sourceDisabled=true; saveButton.disabled=true; reloadButton.hidden=false;
                 report('Saved to drafts. Reload to keep editing.');
             }
-            if (note?.value) file.pendingNote={date:new Date().toISOString().slice(0,10),by:'',note:note.value};
-            if (note) note.value='';
-            setDirty(tracker ? tracker.dirty(baseline) : getValue() !== baseline);
+            if (sentNote) file.pendingNote={date:new Date().toISOString().slice(0,10),by:'',note:sentNote};
+            if (note && note.value===sentNote) note.value='';
+            setDirty((tracker ? tracker.dirty(baseline) : getValue() !== baseline) || !!note?.value);
             if (!dirty)
                 stashClear(storage, file.path);
             else
                 stash();
-            if (note)
-                note.value = '';
+
             rememberPath(file.path);
             post('scrybe:saved', { path: file.path, commit: state.result.commit, sha: state.result.sha });
             if (!sourceDisabled) beginPoll(state.result, file.path);
@@ -224,6 +226,7 @@ function prepare(file: FileResult, fieldKey?: string) {
     }
 }
 async function save() {
+    if (dirty) stash();
     if (cancelDiscard) return;
     if (outdated) {
         stash();
@@ -273,6 +276,8 @@ async function save() {
         }
     }
     stash();
+    if(controller.state.kind==='saving')return;
+    sentNote=note?.value || undefined;
     tracker?.capture(value);
     await controller.save(value, key, note?.value || undefined);
 }
@@ -390,15 +395,20 @@ async function openBody(file: FileResult) {
         baseline = file.editable;
         getValue = () => tracker!.recovery().value;
         setValue = async value => {
-            const previous=tracker!.recovery(), history=tracker!.history;
-            observer.disconnect();
+            // Build and validate beside the live editor. A failed recovery must
+            // leave the exact current document (even unrepresentable edits) intact.
+            const candidateRoot=el('div','',mount); candidateRoot.className='pending';
+            let candidateEditor: typeof editor | undefined;
+            observer.disconnect(); mount.inert=true;
             try {
-                await editor.destroy();mount.replaceChildren();editor=await mountEditor(mount,value);
-                tracker=trackSource(editor,value,history);
+                candidateEditor=await mountEditor(candidateRoot,value);
+                const candidateTracker=trackSource(candidateEditor,value,tracker!.history);
+                await editor.destroy();
+                editor=candidateEditor; tracker=candidateTracker;
+                mount.replaceChildren(candidateRoot);candidateRoot.classList.remove('pending');
             } catch (error) {
-                await editor.destroy();mount.replaceChildren();editor=await mountEditor(mount,previous.value);
-                tracker=trackSource(editor,previous.value,history);throw error;
-            } finally { observer.observe(mount,{subtree:true,childList:true,characterData:true}); }
+                await candidateEditor?.destroy();candidateRoot.remove();throw error;
+            } finally { mount.inert=false;observer.observe(mount,{subtree:true,childList:true,characterData:true}); }
         };
         mount.addEventListener('keydown', e => { if (e.key === 'Enter' && (e.shiftKey || e.metaKey || e.ctrlKey)) {
             e.preventDefault();
@@ -454,7 +464,7 @@ async function panel() { content.replaceChildren(); saveButton.hidden = true; el
         loadFailure(error);
         el('p', error instanceof Error ? error.message : 'Cannot open file.');
     }
-} }
+} if(!resume)report('Choose text to edit'); }
 window.addEventListener('message', event => { if (event.origin !== staging || event.source !== parent || event.data?.v !== 1)
     return; if (event.data.type === 'scrybe:close-request')
     close(); if (event.data.type === 'scrybe:theme')
@@ -478,7 +488,7 @@ window.addEventListener('beforeunload', e => { if (dirty) {
     e.preventDefault();
     e.returnValue = '';
 } });
-window.addEventListener('pagehide', () => { if(dirty)stash(); });
+window.addEventListener('pagehide', () => { if(current && setValue)stash(); });
 new ResizeObserver(() => post('scrybe:size', { height: Math.ceil(app.getBoundingClientRect().height) })).observe(app);
 theme(meta('theme'));
 post('scrybe:ready');

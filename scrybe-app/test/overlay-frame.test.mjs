@@ -64,3 +64,19 @@ test('Web Locks prevent a second frame from sending the same-path save',async()=
   try{const {controller,calls}=setup([]);await controller.save('draft');assert.equal(controller.state.kind,'busy');assert.equal(calls.length,0);assert.ok(names[0].endsWith('/about.md'));}
   finally{if(previous)Object.defineProperty(globalThis,'window',previous);else delete globalThis.window;}
 });
+test('401 on both verification reads requests sign-in and retains retry identity',async()=>{
+ const {controller:c,calls}=setup([()=>response(503,{code:'outcome_unknown'}),()=>response(401,{code:'unauthenticated'}),()=>response(401,{code:'unauthenticated'}),()=>response(200,{sha:'other'}),()=>response(200,success)]);
+ await c.save('draft');assert.equal(c.state.kind,'signin');const original={...c.pending};assert.equal(c.requiresRead,true);
+ await c.save('draft');assert.equal(c.state.kind,'signin');assert.deepEqual(c.pending,original);
+ await c.save('draft');assert.equal(c.state.kind,'saved');const puts=calls.filter(x=>x.init?.method==='PUT');assert.equal(puts.length,2);assert.deepEqual(JSON.parse(puts[1].init.body),original);
+});
+test('structured load errors include useful, safely rendered messages',async()=>{
+ const {LoadError,loadFile}=await import('../overlay/api.ts');
+ for(const [code,part]of [['not_found','drafts branch'],['path_not_allowed','cannot be edited'],['not_text','UTF-8'],['verification_failed','failed verification'],['closer_unsupported','front matter'],['gitea_unavailable','unavailable'],['editor_credential','admin attention']]){
+ await assert.rejects(loadFile('https://editor.example','article.md',async()=>response(503,{code})),e=>e instanceof LoadError&&e.status===503&&e.code===code&&e.message.includes(part));}
+ await assert.rejects(loadFile('https://editor.example','article.md',async()=>new Response('bad',{status:502})),/Cannot open file \(502\)/);
+});
+test('stash accepts legacy and v2 but refuses unknown or malformed versions',()=>{
+ for(const extra of [{v:3},{v:2,verified:'false'},{v:2,key:123},{v:2,note:[]}])assert.equal(stashRead({getItem:()=>JSON.stringify({baseSha:'a',value:'text',...extra})},'article.md'),null);
+ const value={v:2,build:'test',baseSha:'a',value:'text',verified:false};assert.deepEqual(stashRead({getItem:()=>JSON.stringify(value)},'article.md'),value);
+});
