@@ -3,6 +3,7 @@ import { apiURL } from './api.ts';
 import type { FileResult, Session, Saved } from './api.ts';
 import { validateField, trimOffer, scalarDisplay } from './field.ts';
 import { byteGate, splitParity, SaveController, stashRead, stashWrite, stashClear, pollLive } from './state.ts';
+import type { SourceTracker } from './editor.ts';
 import './frame.css';
 const BUILD_ID = import.meta.env.VITE_BUILD_ID || 'dev';
 const meta = (name: string) => document.querySelector<HTMLMetaElement>(`meta[name="scrybe-${name}"]`)?.content ?? '';
@@ -19,6 +20,8 @@ app.append(actions, status, content);
 const savedPaths = new Set<string>();
 const pagePaths = meta('paths').split(',').filter(Boolean).slice(0, 20);
 let outdated = false;
+let tracker: SourceTracker | undefined, sourceDisabled = false, approvedValue: string | undefined;
+let stashTimer: ReturnType<typeof setTimeout> | undefined;
 let csrf = meta('csrf'), dirty = false, live = false, waiting = false, closed = false;
 let controller: SaveController | undefined, current: FileResult | undefined, key: string | undefined;
 let getValue = () => '', setValue: ((v: string) => Promise<void>) | undefined, baseline = '', note: HTMLInputElement | undefined;
@@ -57,10 +60,19 @@ function askDiscard(message: string, label: string): Promise<boolean> {
     });
 }
 function setDirty(value: boolean) { dirty = value; post('scrybe:dirty', { dirty }); }
-function stash() { if (current)
-    stashWrite(storage, current.path, { baseSha: controller?.pending?.baseSha ?? controller?.sha ?? current.sha, value: getValue(), ...(key ? { key } : {}), ...(note?.value ? { note: note.value } : {}) }); }
-function changed() { setDirty(getValue() !== baseline || !!note?.value); if (dirty)
-    stash(); }
+function stash() {
+    clearTimeout(stashTimer);
+    if (!current) return;
+    const recovered = tracker?.recovery() ?? {value:getValue(),verified:true};
+    stashWrite(storage, current.path, {v:2,build:BUILD_ID,verified:recovered.verified,
+        baseSha:controller?.pending?.baseSha ?? controller?.sha ?? current.sha,value:recovered.value,
+        ...(key ? {key} : {}), ...(note?.value ? {note:note.value} : {})});
+}
+function changed() {
+    setDirty((tracker ? tracker.dirty(baseline) : getValue() !== baseline) || !!note?.value);
+    clearTimeout(stashTimer);
+    if (dirty) stashTimer=setTimeout(stash,400);
+}
 function showDiff(before: string, after: string, parent = content) { const diff = byteGate(before, after); const details = el('details', '', parent); el('summary', `${diff.count} changed lines; first at line ${diff.first}`, details); el('pre', diff.hunks.filter(h => h.kind !== 'same').map(h => `${h.beforeLine ?? h.afterLine}: - ${h.before ?? ''}\n+ ${h.after ?? ''}`).join('\n'), details); }
 async function session() { try {
     const r = await fetch(apiURL(origin, 'session'), { cache: 'no-store', credentials: 'same-origin' });
@@ -132,7 +144,7 @@ const reloadButton = button('Reload', reload);
 reloadButton.hidden = true;
 const copy = button('Copy text', async () => { try {
     await navigator.clipboard.writeText(getValue());
-    report('Text copied.');
+    report(tracker?.recovery().verified === false ? 'Copied recovery text could not be verified. Review it before restoring.' : 'Text copied.');
 }
 catch {
     report('Copy unavailable; select and copy the source below.');
@@ -165,6 +177,7 @@ function beginPoll(saved: Saved, path: string) {
     }, poll.signal);
 }
 function prepare(file: FileResult, fieldKey?: string) {
+    clearTimeout(stashTimer); tracker=undefined; sourceDisabled=false; approvedValue=undefined;
     setValue=undefined; getValue=()=>''; baseline=''; saveButton.disabled=true;
     current = file;
     key = fieldKey;
@@ -175,7 +188,7 @@ function prepare(file: FileResult, fieldKey?: string) {
         retry.hidden = !['error', 'unknown', 'signin', 'rate', 'invalid'].includes(state.kind);
         reloadButton.hidden = !['outdated', 'stale', 'reload'].includes(state.kind);
         copy.hidden = !['outdated', 'stale', 'admin'].includes(state.kind);
-        saveButton.disabled = ['saving', 'admin', 'stale', 'outdated', 'reload'].includes(state.kind);
+        saveButton.disabled = sourceDisabled || ['saving', 'admin', 'stale', 'outdated', 'reload'].includes(state.kind);
         if (state.kind === 'rate') {
             saveButton.disabled = true;
             retry.disabled = true;
@@ -186,7 +199,13 @@ function prepare(file: FileResult, fieldKey?: string) {
         if (state.kind === 'saved' && state.result) {
             baseline = controller!.value;
             file.sha = state.result.sha;
-            setDirty(getValue() !== baseline);
+            if (tracker && !tracker.saved(baseline)) {
+                sourceDisabled=true; saveButton.disabled=true; reloadButton.hidden=false;
+                report('Saved to drafts. Reload to keep editing.');
+            }
+            if (note?.value) file.pendingNote={date:new Date().toISOString().slice(0,10),by:'',note:note.value};
+            if (note) note.value='';
+            setDirty(tracker ? tracker.dirty(baseline) : getValue() !== baseline);
             if (!dirty)
                 stashClear(storage, file.path);
             else
@@ -195,7 +214,7 @@ function prepare(file: FileResult, fieldKey?: string) {
                 note.value = '';
             rememberPath(file.path);
             post('scrybe:saved', { path: file.path, commit: state.result.commit, sha: state.result.sha });
-            beginPoll(state.result, file.path);
+            if (!sourceDisabled) beginPoll(state.result, file.path);
         }
     };
     if (!file.containsMaster || !file.guard.publishable) {
@@ -211,9 +230,25 @@ async function save() {
         reloadButton.hidden = false;
         return;
     }
-    if (!controller || !current || !setValue)
+    if (!controller || !current || !setValue || sourceDisabled)
         return;
-    const value = getValue();
+    let value = getValue();
+    if (tracker) {
+        const candidate=tracker.prepare(); value=candidate.value;
+        if (candidate.status==='refuse') { stash();copy.hidden=false;report(candidate.reason);return; }
+        if (candidate.status==='consent' && approvedValue!==value) {
+            const box=el('aside'); showDiff(baseline,value,box);
+            box.querySelector('details')!.open=true;
+            const accepted=await askDiscard(candidate.reason,'Save with these changes');box.remove();
+            if(!accepted)return;
+            // Consent is tied to exact bytes, not a mutable editor state.
+            if(tracker.prepare().value!==value){report('Text changed. Review the save again.');return;}
+            approvedValue=value;
+        }
+    }
+    if (value===baseline && !controller.pending) {
+        report(note?.value ? 'A revision note is saved together with a text change. Edit the text, or clear the note.' : 'No changes to save.');return;
+    }
     if (key) {
         const field = current.fields.find(field => field.key === key);
         if (!field?.editable) {
@@ -237,6 +272,7 @@ async function save() {
         }
     }
     stash();
+    tracker?.capture(value);
     await controller.save(value, key, note?.value || undefined);
 }
 function offerStash() {
@@ -251,8 +287,12 @@ function offerStash() {
     const restore=button('Restore recovered text', async () => { if (saved.key !== key) {
         report('This recovery belongs to ' + (saved.key ?? 'the body') + '. Open that editor to restore it.');
         return;
-    } await setValue?.(saved.value); if (controller)
-        controller.sha = saved.baseSha; if (note)
+    }
+    if(saved.verified===false && !await askDiscard('This recovered text could not be verified. Review the full diff before restoring.','Restore after review'))return;
+    try { await setValue?.(saved.value); } catch {
+        report('Recovered text cannot be edited safely here. Use Show recovered source.');return;
+    }
+    if (note)
         note.value = saved.note ?? ''; changed(); box.remove(); }, box);
     restore.disabled=!setValue;
     button('Show recovered source',()=>{el('pre',saved.value,box);},box);
@@ -332,25 +372,29 @@ async function openBody(file: FileResult) {
     baseline = file.editable;
     getValue = () => file.editable;
     try {
-        const [{ mountEditor, placeCaret, cleanPaste }] = await Promise.all([import('./editor.ts'), import('./editor.css')]);
+        const [{ mountEditor, placeCaret, cleanPaste, trackSource }] = await Promise.all([import('./editor.ts'), import('./editor.css')]);
         let editor = await mountEditor(mount, file.editable);
         destroy = () => editor.destroy();
-        const serialized = editor.getMarkdown();
-        const gate = byteGate(file.editable, serialized);
-        if (!gate.open) {
-            await editor.destroy();
-            destroy = undefined;
-            mount.remove();
-            report(`Read only: a save would reformat ${gate.count} lines, first at line ${gate.first}.`);
-            showDiff(file.editable, serialized);
-            el('pre', file.editable);
-            offerStash();
-            return;
+        try { tracker=trackSource(editor,file.editable); }
+        catch (error) {
+            const serialized=editor.getMarkdown(); await editor.destroy();destroy=undefined;mount.remove();
+            report(`Read only: the editor cannot map this text back to its source (${error instanceof Error ? error.message : 'mapping'}).`);
+            showDiff(file.editable,serialized);el('pre',file.editable);offerStash();return;
         }
         mount.classList.remove('pending');
         baseline = file.editable;
-        getValue = () => editor.getMarkdown();
-        setValue = async (value) => { await editor.destroy(); mount.replaceChildren(); editor = await mountEditor(mount, value); };
+        getValue = () => tracker!.recovery().value;
+        setValue = async value => {
+            const previous=tracker!.recovery(), history=tracker!.history;
+            observer.disconnect();
+            try {
+                await editor.destroy();mount.replaceChildren();editor=await mountEditor(mount,value);
+                tracker=trackSource(editor,value,history);
+            } catch (error) {
+                await editor.destroy();mount.replaceChildren();editor=await mountEditor(mount,previous.value);
+                tracker=trackSource(editor,previous.value,history);throw error;
+            } finally { observer.observe(mount,{subtree:true,childList:true,characterData:true}); }
+        };
         mount.addEventListener('keydown', e => { if (e.key === 'Enter' && (e.shiftKey || e.metaKey || e.ctrlKey)) {
             e.preventDefault();
             e.stopPropagation();
@@ -415,7 +459,7 @@ else
     delete document.documentElement.dataset.theme; }
 window.addEventListener('focus', () => void session());
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible')
-    void session(); });
+    void session(); else if(dirty) stash(); });
 document.addEventListener('keydown', e => { if (e.key === 'Escape') {
     e.preventDefault();
     if (cancelDiscard) cancelDiscard(); else void close();
@@ -428,6 +472,7 @@ window.addEventListener('beforeunload', e => { if (dirty) {
     e.preventDefault();
     e.returnValue = '';
 } });
+window.addEventListener('pagehide', () => { if(dirty)stash(); });
 new ResizeObserver(() => post('scrybe:size', { height: Math.ceil(app.getBoundingClientRect().height) })).observe(app);
 theme(meta('theme'));
 post('scrybe:ready');

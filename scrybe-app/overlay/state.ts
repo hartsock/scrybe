@@ -22,6 +22,9 @@ export function splitParity(file: Pick<FileResult, 'prefix' | 'editable' | 'suff
         : remaining === '' && file.suffix === '';
 }
 export interface Stash {
+    v?: 2;
+    build?: string;
+    verified?: boolean;
     baseSha: string;
     value: string;
     key?: string;
