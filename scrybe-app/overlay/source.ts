@@ -250,6 +250,8 @@ const changedCount = (a: string, b: string) => {
 export function splice(tools: Tools, base: Base, doc: PMNode,
   options: { widen?: number; dependencies?: boolean; history?: SourceHistory } = {}): Spliced {
   const nodes = contentNodes(doc), { S, blocks } = base;
+  // Undo restores bytes from an actual prior file, so historical documents need
+  // neither formatting consent nor the HTML structural guard for new rewrites.
   const historical = options.history?.document(tools,nodes);
   if (historical !== undefined && sameMeaning(tools,historical,nodes))
     return {value:historical,windows:[],reformat:[],ok:true};

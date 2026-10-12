@@ -144,13 +144,12 @@ export function rebase(S: string, C: string, N: string, level: 'token' | 'line' 
   const pa = alignSource(C, S), pb = matchPairs(lc, ln);
   if (!pa || !pb) return null;
   const A = toMap(pa, lc.length), B = toMap(pb, lc.length);
-  const forced = new Uint8Array(lc.length + 1);
   const chunkList = () => {
     const out: Chunk[] = []; let i = 0, j = 0, k = 0;
     while (i < lc.length || j < ls.length || k < ln.length) {
-      if (i < lc.length && A[i] === j && B[i] === k && !forced[i]) { out.push({c: [i, i + 1], s: [j, j + 1], n: [k, k + 1], stable: true}); i++; j++; k++; continue; }
+      if (i < lc.length && A[i] === j && B[i] === k) { out.push({c: [i, i + 1], s: [j, j + 1], n: [k, k + 1], stable: true}); i++; j++; k++; continue; }
       let i2 = i;
-      while (i2 < lc.length && !(A[i2] >= 0 && B[i2] >= 0 && !forced[i2])) i2++;
+      while (i2 < lc.length && !(A[i2] >= 0 && B[i2] >= 0)) i2++;
       // the first candidate stable line must also be reachable (monotone maps guarantee A[i2] >= j)
       const j2 = i2 < lc.length ? A[i2] : ls.length, k2 = i2 < lc.length ? B[i2] : ln.length;
       out.push({c: [i, i2], s: [j, j2], n: [k, k2]});
@@ -159,7 +158,7 @@ export function rebase(S: string, C: string, N: string, level: 'token' | 'line' 
     return out;
   };
   const text = (arr: string[], [x, y]: Pair) => arr.slice(x, y).join('');
-  let chunks = chunkList();
+  const chunks = chunkList();
   const kind = (ch: Chunk) => { const c = text(lc, ch.c), s = text(ls, ch.s), n = text(ln, ch.n);
     return c === n ? 'a' : c === s ? 'b' : s === n ? 'same' : 'conflict'; };
   let out = '';
@@ -167,8 +166,6 @@ export function rebase(S: string, C: string, N: string, level: 'token' | 'line' 
   for (const ch of chunks) {
     if (ch.stable) { out += text(ls, ch.s); continue; }
     const c = text(lc, ch.c), s = text(ls, ch.s), n = text(ln, ch.n), kd = kind(ch);
-    const isForced = ch.c[0] < ch.c[1] && forced.slice(ch.c[0], ch.c[1]).some(Boolean);
-    if (kd === 'a' && !isForced) { out += s; continue; }
     if (kd === 'a') { out += s; continue; }
     if (kd === 'b' || kd === 'same') { out += n; report.push({...ch, kind: kd}); continue; }
     if (level === 'token') {

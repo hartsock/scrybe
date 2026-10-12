@@ -60,13 +60,23 @@ for(const mode of ['body','panel'])test('401 resumes '+mode+' after sign-in',asy
  if(mode==='panel')assert.equal(h.w.document.querySelectorAll('h1').length,1);
  }finally{h.close();}
 });
-for(const version of ['legacy','v2'])test('restore '+version+' source keeps current CAS base',async()=>{
+for(const version of ['legacy','v2'])test('restore '+version+' source uses recovered CAS base',async()=>{
  const h=await bootFrame({stash:{baseSha:'older',value:' Recovered &copy; text\n',...(version==='v2'?{v:2,build:'old-build',verified:true}:{})}});
- try{await h.until(()=>h.status()==='Ready to edit');h.button('Restore recovered text').click();await h.until(()=>h.w.document.querySelector('.ProseMirror').textContent.includes('Recovered'));h.button('Save').click();await h.until(()=>h.puts.length===1);assert.equal(h.puts[0].value,' Recovered &copy; text\n');assert.equal(h.puts[0].baseSha,'old');}finally{h.close();}
+ try{await h.until(()=>h.status()==='Ready to edit');h.button('Restore recovered text').click();await h.until(()=>h.w.document.querySelector('.ProseMirror').textContent.includes('Recovered'));h.button('Save').click();await h.until(()=>h.puts.length===1);assert.equal(h.puts[0].value,' Recovered &copy; text\n');assert.equal(h.puts[0].baseSha,'older');}finally{h.close();}
+});
+test('older recovery cannot overwrite content added by another tab',async()=>{
+ const value=' Lead &mdash; para, edited offline\n\n####  Heading\n';
+ const h=await bootFrame({S:' Lead &mdash; para\n\n####  Heading\n\nAdded by another tab.\n',stash:{v:2,verified:true,baseSha:'older',value},fetchHook:(_e,init)=>init?.method==='PUT'?new Response(JSON.stringify({code:'stale'}),{status:409}):null});
+ try{
+ await h.until(()=>h.status()==='Ready to edit');h.button('Restore recovered text').click();await h.until(()=>h.w.document.querySelector('.ProseMirror').textContent.includes('edited offline'));
+ h.button('Save').click();await h.until(()=>h.puts.length===1);assert.equal(h.puts[0].baseSha,'older');assert.equal(h.puts[0].value,value);
+ await h.until(()=>h.status()==='stale');assert.equal(h.button('Save').disabled,true);assert.equal(h.button('Reload').hidden,false);
+ assert.match(h.w.document.querySelector('.ProseMirror').textContent,/edited offline/);h.button('Copy text').click();await h.until(()=>h.copied.length===1);assert.equal(h.copied[0],value);
+ }finally{h.close();}
 });
 test('unverified and unmappable restore requires review and keeps previous editor and recovery',async()=>{
  const h=await bootFrame({stash:{baseSha:'older',value:'Text\n\n[r]: /url\n',v:2,verified:false}});
- try{await h.until(()=>h.status()==='Ready to edit');h.button('Restore recovered text').click();await h.until(()=>!!h.button('Restore after review'));assert.equal(h.puts.length,0);h.button('Restore after review').click();await h.until(()=>h.status().includes('cannot be edited safely'));assert.match(h.w.document.querySelector('.ProseMirror').textContent,/Lead/);assert.ok(h.button('Show recovered source'));h.button('Save').click();await pause();assert.equal(h.puts.length,0);}finally{h.close();}
+ try{await h.until(()=>h.status()==='Ready to edit');h.button('Restore recovered text').click();await h.until(()=>!!h.button('Restore after review'));assert.equal(h.puts.length,0);h.button('Restore after review').click();await h.until(()=>h.status().includes('cannot be edited safely'));assert.match(h.w.document.querySelector('.ProseMirror').textContent,/Lead/);assert.ok(h.button('Show recovered source'));h.button('Save').click();await pause();assert.equal(h.puts.length,0);h.w.document.querySelector('.ProseMirror p').firstChild.textContent+=' edited';await pause();h.button('Save').click();await h.until(()=>h.puts.length===1);assert.equal(h.puts[0].baseSha,'old');}finally{h.close();}
 });
 test('formatting consent binds exact bytes, cancel sends nothing, retry does not ask twice',async()=>{
  let first=true;

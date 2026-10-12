@@ -200,6 +200,7 @@ function prepare(file: FileResult, fieldKey?: string) {
         if (state.kind === 'outdated')
             stash();
         if (state.kind === 'saved' && state.result) {
+            approvedValue = undefined;
             clearTimeout(stashTimer);
             baseline = controller!.value;
             file.sha = state.result.sha;
@@ -298,6 +299,7 @@ function offerStash() {
     try { await setValue?.(saved.value); } catch {
         report('Recovered text cannot be edited safely here. Use Show recovered source.');return;
     }
+    if (controller) controller.sha = saved.baseSha;
     if (note)
         note.value = saved.note ?? ''; changed(); box.remove(); }, box);
     restore.disabled=!setValue;
