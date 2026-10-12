@@ -28,6 +28,9 @@ export async function bootFrame({S=' Lead &mdash; para\n\n####  Heading\n',note=
  let text=await readFile(new URL('../overlay/frame.ts',import.meta.url),'utf8');
  text=text.replace("import './frame.css';",'').replace("import.meta.env.VITE_BUILD_ID",JSON.stringify(build)).replace("import('./editor.css')","Promise.resolve()").replace("import('./editor.ts')",`import('${new URL('./helpers/overlay-frame-editor.mjs',import.meta.url).href}')`);
  text=ts.transpileModule(text,{compilerOptions:{module:ts.ModuleKind.ESNext,target:ts.ScriptTarget.ES2022}}).outputText.replace(/from (['"])(\.\/[^'"]+)\1/g,(_,q,s)=>`from ${q}${new URL('../overlay/'+s,import.meta.url).href}${q}`);
+ // Each browser frame has its own globals. Node shares ours across tests;
+ // a late save callback must not clear the next frame's seeded recovery.
+ text='const {window,document,navigator,location,sessionStorage,parent,MutationObserver,fetch}=globalThis;\n'+text;
  await import('data:text/javascript;base64,'+Buffer.from(text).toString('base64')+'#'+run++);
  const hooks=await import('./helpers/overlay-frame-editor.mjs');
  const button=label=>[...w.document.querySelectorAll('button')].find(b=>b.textContent===label);
@@ -180,4 +183,31 @@ test('FIX3 Save, Close and reload wait for asynchronous Restore',async()=>{
   (await h.waitButton('Restore recovered text')).click();await pause();h.button('Save').onclick();h.button('Close').click();assert.match(h.status(),/finish, then close/);h.button('Reload').onclick();assert.match(h.status(),/finish, then reload/);assert.equal(h.puts.length,0);
   release();await h.until(()=>!h.w.document.querySelector('aside'));h.button('Save').click();await h.until(()=>h.puts.length===1);assert.equal(h.puts[0].baseSha,'older');
  }finally{h.close();}
+});
+
+
+test('FIX5 a prior frame save cannot clear the next frame recovery',async()=>{
+ let release;
+ const h=await bootFrame({S:'First frame.\n',fetchHook:(_e,i)=>i?.method==='PUT'?new Promise(r=>release=r):null});
+ let next;
+ try{
+  await h.until(()=>h.status()==='Ready to edit');
+  h.view().dispatch(h.view().state.tr.insertText(' edited',textPos(h.view(),'First frame.')));
+  await pause();h.button('Save').click();await h.until(()=>!!release);
+  const recovery={v:2,verified:true,baseSha:'older',value:'Second frame recovery.\n'};
+  next=await bootFrame({S:'Second frame.\n',stash:recovery});
+  await next.until(()=>next.status()==='Ready to edit');
+  assert.deepEqual(next.stash(),recovery);
+  release(new Response(JSON.stringify({sha:'first-saved',commit:'first-saved'})));
+  await h.until(()=>h.status()==='Live on staging');
+  assert.deepEqual(next.stash(),recovery,'the first frame must clear only its own storage');
+  assert.equal(next.w.sessionStorage.getItem('scrybe-saved-paths'),null,'the first frame must not mark paths saved in the next frame');
+  assert.equal(h.stash(),null);
+  assert.deepEqual(JSON.parse(h.w.sessionStorage.getItem('scrybe-saved-paths')),['article.md']);
+  (await next.waitButton('Restore recovered text')).click();
+  await next.until(()=>!next.w.document.querySelector('aside'));
+  next.button('Save').click();await next.until(()=>next.status()==='Live on staging');
+  assert.equal(next.puts[0].baseSha,'older');
+  assert.equal(next.puts[0].value,recovery.value);
+ }finally{next?.close();h.close();}
 });
