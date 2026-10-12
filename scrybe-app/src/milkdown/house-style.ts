@@ -4,7 +4,7 @@ import { remarkStringifyOptionsCtx } from "@milkdown/kit/core";
 import { remarkGFMPlugin } from "@milkdown/kit/preset/gfm";
 import { imageSchema, paragraphSchema, codeBlockSchema, linkSchema } from "@milkdown/kit/preset/commonmark";
 import { gfmTableToMarkdown } from "mdast-util-gfm-table";
-import { defaultHandlers } from "mdast-util-to-markdown";
+import { defaultHandlers, type State } from "mdast-util-to-markdown";
 import { decodeNamedCharacterReference } from "decode-named-character-reference";
 
 const table = gfmTableToMarkdown({ tablePipeAlign: false }).handlers!.table!;
@@ -19,19 +19,33 @@ function balancedDestination(url: string): boolean {
   return depth === 0;
 }
 
-const link: typeof defaultHandlers.link = (node, parent, state, info) => {
-  const unsafe = state.unsafe;
-  if (balancedDestination(node.url)) {
-    state.unsafe = unsafe.filter(pattern => !(pattern.inConstruct === "destinationRaw" &&
-      (pattern.character === "(" || pattern.character === ")")));
-  }
+// Only actual, semicolon-terminated references need an ampersand escape.
+function references(value: string): string {
+  const names = [...value.matchAll(/&([A-Za-z][A-Za-z0-9]*);/g)]
+    .map(match => match[1]).filter(name => decodeNamedCharacterReference(name));
+  return `(?:#[0-9]{1,7};|#[xX][A-Fa-f0-9]{1,6};${names.length ? "|" + names.join(";|") + ";" : ""})`;
+}
+
+// kramdown keeps a backslash before & in a destination, so escape & there
+// only where CommonMark would otherwise decode a character reference.
+function destination(state: State, url: string, title: string | null | undefined, serialize: () => string): string {
+  const unsafe = state.unsafe, reference = references(url + " " + (title ?? ""));
+  state.unsafe = unsafe.filter(pattern => !(balancedDestination(url) && pattern.inConstruct === "destinationRaw" &&
+    (pattern.character === "(" || pattern.character === ")")))
+    .map(pattern => pattern.character === "&" && pattern.inConstruct === "phrasing"
+      ? { ...pattern, after: reference, _compiled: undefined } : pattern);
   try {
-    return defaultHandlers.link(node, parent, state, info);
+    return serialize();
   } finally {
     state.unsafe = unsafe;
   }
-};
+}
+const link: typeof defaultHandlers.link = (node, parent, state, info) =>
+  destination(state, node.url, node.title, () => defaultHandlers.link(node, parent, state, info));
 link.peek = defaultHandlers.link.peek;
+const image: typeof defaultHandlers.image = (node, parent, state, info) =>
+  destination(state, node.url, node.title, () => defaultHandlers.image(node, parent, state, info));
+image.peek = defaultHandlers.image.peek;
 
 /** Merge with Milkdown's handlers: replacing them breaks inline escaping. */
 export function houseStyle(ctx: Ctx): void {
@@ -102,12 +116,13 @@ export function houseStyle(ctx: Ctx): void {
   ctx.update(remarkStringifyOptionsCtx, options => ({
     ...options,
     bullet: "-" as const,
+    bulletOrdered: "." as const,
     rule: "-" as const,
     emphasis: "*" as const,
     strong: "*" as const,
     handlers: {
       ...options.handlers,
-      text: (node, parent, state, info) => {
+      text: (node, _parent, state, info) => {
         const unsafe = state.unsafe;
         // Only actual, semicolon-terminated references need an ampersand escape.
         const names = [...(node.value + info.after).matchAll(/&([A-Za-z][A-Za-z0-9]*);/g)]
@@ -129,13 +144,30 @@ export function houseStyle(ctx: Ctx): void {
           }
           return pattern;
         });
+        // Kramdown recognizes tables outside GFM table contexts and $$ math.
+        state.unsafe = [...state.unsafe, { character: "|", inConstruct: "phrasing" },
+          { character: "$", inConstruct: "phrasing", after: "\\$" },
+          { character: "$", inConstruct: "phrasing", before: "\\$" }];
         try {
-          return (options.handlers?.text ?? defaultHandlers.text)(node, parent, state, info);
+          // Milkdown's core text handler returns text that ends in whitespace without
+          // escaping it at all (core/src/__internal__/remark-handlers.ts:4-15), so a
+          // paragraph like "+ L *e*" re-parses as a list. Always escape; an empty
+          // encode list keeps trailing spaces before marks as plain spaces.
+          const escaped = state.safe(node.value, { ...info, encode: [] });
+          // Kramdown consumes a lone caret at the end of a paragraph.
+          return escaped.replace(/\^(?=\s*$)/, "&#94;");
         } finally {
           state.unsafe = unsafe;
         }
       },
       link,
+      image,
+      list: (node, parent, state, info) => {
+        // Adjacent ordered lists must be refused by the overlay, not serialized
+        // with a CommonMark-only delimiter that publishes as ordinary text.
+        if (node.ordered) state.bulletLastUsed = undefined;
+        return defaultHandlers.list(node, parent, state, info);
+      },
       // Restore upstream attention metadata and delimiter checks so punctuation
       // beside a word re-parses as a mark. Keep Milkdown's text escaping intact.
       strong: defaultHandlers.strong,
