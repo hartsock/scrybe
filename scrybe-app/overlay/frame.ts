@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { apiURL } from './api.ts';
+import { apiURL, loadFile, LoadError } from './api.ts';
 import type { FileResult, Session, Saved } from './api.ts';
 import { validateField, trimOffer, scalarDisplay } from './field.ts';
 import { byteGate, splitParity, SaveController, stashRead, stashWrite, stashClear, pollLive } from './state.ts';
@@ -19,7 +19,7 @@ actions.setAttribute('aria-label', 'Editor actions');
 app.append(actions, status, content);
 const savedPaths = new Set<string>();
 const pagePaths = meta('paths').split(',').filter(Boolean).slice(0, 20);
-let outdated = false;
+let outdated = false, resume = false, booting = false;
 let tracker: SourceTracker | undefined, sourceDisabled = false, approvedValue: string | undefined;
 let stashTimer: ReturnType<typeof setTimeout> | undefined;
 let csrf = meta('csrf'), dirty = false, live = false, waiting = false, closed = false;
@@ -81,6 +81,7 @@ async function session() { try {
         csrf = s.csrf;
         if (controller)
             controller.csrf = csrf;
+        if (resume && !booting) void boot();
         if (s.buildId !== BUILD_ID && BUILD_ID !== 'dev') {
             outdated = true;
             stash();
@@ -134,7 +135,7 @@ async function close() {
         window.close();
 }
 button('Close', close);
-button('Sign in', signin);
+const signInButton = button('Sign in', signin);
 button('Publish…', publish).hidden = !meta('publish-url');
 const saveButton = button('Save', save);
 saveButton.disabled = true;
@@ -300,9 +301,13 @@ function offerStash() {
 }
 function noteInput(file: FileResult) { if (key || file.note === 'unsupported')
     return; const label = el('label', file.pendingNote ? `Revision note (pending: ${file.pendingNote.note})` : `Revision note (${file.note})`); note = el('input', '', label); note.oninput = changed; }
-async function load(path: string) { const r = await fetch(apiURL(origin, 'file', { path }), { credentials: 'same-origin', cache: 'no-store' }); if (!r.ok) {
-    throw Error(`Cannot open file (${r.status}).`);
-} return await r.json() as FileResult; }
+async function load(path: string) { return loadFile(origin,path); }
+function loadFailure(error: unknown) {
+    report(error instanceof Error ? error.message : 'Cannot open file. Reload to try again.');
+    if(error instanceof LoadError && error.status===401) {
+        resume=true;reloadButton.hidden=true;signInButton.focus();
+    } else reloadButton.hidden=false;
+}
 async function openField(file: FileResult, fieldKey: string) {
     await destroy?.();
     destroy = undefined;
@@ -432,7 +437,7 @@ async function openBody(file: FileResult) {
         el('pre', file.editable);
     }
 }
-async function panel() { saveButton.hidden = true; el('h1', 'Page text'); for (const path of pagePaths) {
+async function panel() { content.replaceChildren(); saveButton.hidden = true; el('h1', 'Page text'); for (const path of pagePaths) {
     try {
         const file = await load(path);
         const group = el('section');
@@ -446,7 +451,8 @@ async function panel() { saveButton.hidden = true; el('h1', 'Page text'); for (c
         }
     }
     catch (error) {
-        el('p', String(error));
+        loadFailure(error);
+        el('p', error instanceof Error ? error.message : 'Cannot open file.');
     }
 } }
 window.addEventListener('message', event => { if (event.origin !== staging || event.source !== parent || event.data?.v !== 1)
@@ -476,7 +482,7 @@ window.addEventListener('pagehide', () => { if(dirty)stash(); });
 new ResizeObserver(() => post('scrybe:size', { height: Math.ceil(app.getBoundingClientRect().height) })).observe(app);
 theme(meta('theme'));
 post('scrybe:ready');
-void (async () => { try {
+async function boot() { if(booting)return;booting=true;resume=false;try {
     if (meta('build-id') && meta('build-id') !== BUILD_ID) {
         report('Editor updated. Reload this frame.');
         reloadButton.hidden = false;
@@ -494,6 +500,6 @@ void (async () => { try {
     }
 }
 catch (error) {
-    report(String(error));
-    reloadButton.hidden = false;
-} })();
+    loadFailure(error);
+} finally { booting=false; } }
+void boot();

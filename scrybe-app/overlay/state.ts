@@ -105,7 +105,7 @@ export class SaveController {
             if (this.requiresRead) {
                 const current = await this.fetcher(apiURL(this.origin, 'file', { path: this.path }), { cache: 'no-store', credentials: 'same-origin' });
                 if (!current.ok) {
-                    this.set({ kind: 'error', message: 'Outcome unknown. Read the file successfully before retrying.' });
+                    this.set(current.status===401 ? {kind:'signin',message:'Sign in, then retry this save.'} : { kind: 'error', message: 'Outcome unknown. Read the file successfully before retrying.' });
                     return;
                 }
                 await current.json();
@@ -136,7 +136,7 @@ export class SaveController {
                 this.requiresRead = true;
                 const current = await this.fetcher(apiURL(this.origin, 'file', { path: this.path }), { cache: 'no-store', credentials: 'same-origin' });
                 if (!current.ok) {
-                    this.set({ kind: 'error', message: 'Outcome unknown. Read the file successfully before retrying.' });
+                    this.set(current.status===401 ? {kind:'signin',message:'Sign in, then retry this save.'} : { kind: 'error', message: 'Outcome unknown. Read the file successfully before retrying.' });
                     return;
                 }
                 await current.json();
