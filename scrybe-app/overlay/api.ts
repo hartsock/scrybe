@@ -129,3 +129,31 @@ export function apiURL(origin: string, resource: string, query: Record<string, s
     url.search = new URLSearchParams(query).toString();
     return url;
 }
+
+export class LoadError extends Error {
+    status: number;
+    code: string;
+    detail: string;
+    constructor(status: number, code = '', detail = '') {
+        const messages: Record<string,string> = {
+            not_found: 'This file is not on the drafts branch.',
+            path_not_allowed: 'This file cannot be edited in the browser.',
+            not_text: 'This file is not plain UTF-8 text with LF line endings, so it cannot be edited here.',
+            verification_failed: 'The drafts copy of this file failed verification. Ask the site admin.',
+            closer_unsupported: 'This front matter layout is not supported here.',
+            gitea_unavailable: 'The drafts repository is unavailable. Reload in a minute.',
+            editor_credential: 'Editor needs admin attention.',
+        };
+        super(status===401 ? 'Sign in, then retry' : messages[code] ?? `Cannot open file (${status}${code ? ', '+code : ''}). ${detail}`.trim());
+        this.name='LoadError';this.status=status;this.code=code;this.detail=detail;
+    }
+}
+export async function loadFile(origin: string, path: string, fetcher: typeof fetch = fetch): Promise<FileResult> {
+    const r=await fetcher(apiURL(origin,'file',{path}),{credentials:'same-origin',cache:'no-store'});
+    if (!r.ok) {
+        let data: Partial<APIError> = {};
+        try { data=await r.json(); } catch { /* Proxies can return non-JSON errors. */ }
+        throw new LoadError(r.status,typeof data?.code==='string'?data.code:'',typeof data?.error==='string'?data.error:'');
+    }
+    return await r.json() as FileResult;
+}

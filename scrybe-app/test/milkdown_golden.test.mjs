@@ -244,6 +244,12 @@ function renderedMarkdown(source) {
   return micromark(source, { extensions: [gfm()], htmlExtensions: [gfmHtml()], allowDangerousHtml: true });
 }
 const escapeCases = [
+  ["destination ampersands", "[x](https://e.x/?a=1&b=2)\n", "[x](https://e.x/?a=1&b=2)\n"],
+  ["image ampersands", "![x](https://e.x/?a=1&b=2)\n", "![x](https://e.x/?a=1&b=2)\n"],
+  ["marker before emphasis", "\\+ L *e*\n", "\\+ L *e*\n"],
+  ["literal pipe", "a | b\n", "a \\| b\n"],
+  ["literal math", "$$x$$\n", "\\$\\$x\\$\\$\n"],
+  ["literal caret", "^\n", "&#94;\n"],
   [
     "bare ampersands",
     "AT&T and R&D\n",
@@ -252,7 +258,7 @@ const escapeCases = [
   [
     "literal entity",
     "\\&copy;\n",
-    "\\&copy;\n"
+    "&amp;copy;\n"
   ],
   [
     "ellipsis",
@@ -322,7 +328,7 @@ const escapeCases = [
   [
     "numeric reference",
     "\\&#169;\n",
-    "\\&#169;\n"
+    "&amp;#169;\n"
   ],
   [
     "unknown entity",

@@ -1,6 +1,6 @@
 AT&T and R&D
 
-\&copy;
+&amp;copy;
 
 Wait...
 
@@ -28,7 +28,7 @@ Now...
 
 \---
 
-\&#169;
+&amp;#169;
 
 &notAnEntity;
 

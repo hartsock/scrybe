@@ -22,6 +22,9 @@ export function splitParity(file: Pick<FileResult, 'prefix' | 'editable' | 'suff
         : remaining === '' && file.suffix === '';
 }
 export interface Stash {
+    v?: 2;
+    build?: string;
+    verified?: boolean;
     baseSha: string;
     value: string;
     key?: string;
@@ -30,7 +33,9 @@ export interface Stash {
 export function stashRead(storage: Pick<Storage, 'getItem'>, path: string): Stash | null {
     try {
         const x = JSON.parse(storage.getItem('scrybe-edit:' + path) ?? 'null');
-        return x && typeof x.baseSha === 'string' && typeof x.value === 'string' ? x : null;
+        return x && typeof x.baseSha === 'string' && typeof x.value === 'string' &&
+            (x.v===undefined || x.v===2) && (x.verified===undefined || typeof x.verified==='boolean') &&
+            (x.key===undefined || typeof x.key==='string') && (x.note===undefined || typeof x.note==='string') ? x : null;
     }
     catch {
         return null;
@@ -102,7 +107,7 @@ export class SaveController {
             if (this.requiresRead) {
                 const current = await this.fetcher(apiURL(this.origin, 'file', { path: this.path }), { cache: 'no-store', credentials: 'same-origin' });
                 if (!current.ok) {
-                    this.set({ kind: 'error', message: 'Outcome unknown. Read the file successfully before retrying.' });
+                    this.set(current.status===401 ? {kind:'signin',message:'Sign in, then retry this save.'} : { kind: 'error', message: 'Outcome unknown. Read the file successfully before retrying.' });
                     return;
                 }
                 await current.json();
@@ -133,7 +138,7 @@ export class SaveController {
                 this.requiresRead = true;
                 const current = await this.fetcher(apiURL(this.origin, 'file', { path: this.path }), { cache: 'no-store', credentials: 'same-origin' });
                 if (!current.ok) {
-                    this.set({ kind: 'error', message: 'Outcome unknown. Read the file successfully before retrying.' });
+                    this.set(current.status===401 ? {kind:'signin',message:'Sign in, then retry this save.'} : { kind: 'error', message: 'Outcome unknown. Read the file successfully before retrying.' });
                     return;
                 }
                 await current.json();

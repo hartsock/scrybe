@@ -13,11 +13,11 @@ tags: [a, b]
 |---|---|
 | {{ a \| b }} | Liquid filter |
 
-$$E=mc^2$$
+\$\$E=mc^2\$\$
 
-$$
+\$\$
 E=mc^2
-$$
+\$\$
 
 ```latex
 E=mc^2
