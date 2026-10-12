@@ -48,3 +48,11 @@ test('C/J authored empty lists retain ownership across save and undo',async()=>w
   }
  }
 }));
+for(const typed of [' \\&',' &#92; \\&'])scenario('FIX3 literal typed '+typed,'Intro text.\n',v=>{select(v,pos(v,'Intro text'));type(v,typed);},(r,v)=>{
+ assert.equal(r.status,'ok',r.reason);for(const html of [commonmark(r.value),...(oracle?kramdown([r.value]):[])])assert.equal(new dom.window.DOMParser().parseFromString(html,'text/html').body.textContent.trim(),v.state.doc.textContent);
+});
+test('FIX3 precheck uses ASCII conflict whitespace and escaped-lt ordering',()=>{
+ assert.equal(source.precheck('Body.\n','=======\u00a0text\n'),undefined);
+ assert.match(source.precheck('Body.\n','======= text\n'),/conflict marker/);
+ assert.match(source.precheck('Body.\n','\\\\\\<&\n'),/escaped ampersand/);
+});

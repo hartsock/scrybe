@@ -23,6 +23,29 @@ let outdated = false, resume = false, booting = false;
 let tracker: SourceTracker | undefined, sourceDisabled = false, approvedValue: string | undefined;
 let sentNote: string | undefined;
 let discarded = false;
+// Keep the transaction lock independent of presentation state (e.g. outdated).
+let saving = false, restoring = false;
+let recoveryPath = '';
+const recoveryButtons = new Set<HTMLButtonElement>();
+function syncRecoveryButtons() { for (const b of recoveryButtons) b.disabled = saving || restoring || !setValue; }
+// An offered or unknown recovery is never the current tab's scratch slot.
+// Numbered v2 slots also preserve an existing secondary recovery on reopen.
+function recoverySlots(path: string) {
+    try {
+        const prefix = 'scrybe-edit:' + path;
+        return [path, ...Object.keys(sessionStorage)
+            .filter(k => k.startsWith(prefix) && /^#v2(?::\d+)?$/.test(k.slice(prefix.length)))
+            .sort().map(k => k.slice('scrybe-edit:'.length))];
+    } catch { return [path]; }
+}
+function freshRecoveryPath(path: string) {
+    let slot = path, i = 0;
+    try {
+        while (storage.getItem('scrybe-edit:' + slot) !== null)
+            slot = path + '#v2' + (++i === 1 ? '' : ':' + i);
+    } catch { /* Storage may be unavailable; stashWrite is also best effort. */ }
+    return slot;
+}
 let stashTimer: ReturnType<typeof setTimeout> | undefined;
 let csrf = meta('csrf'), dirty = false, live = false, waiting = false, closed = false;
 let controller: SaveController | undefined, current: FileResult | undefined, key: string | undefined;
@@ -65,13 +88,12 @@ function setDirty(value: boolean) { dirty = value; post('scrybe:dirty', { dirty 
 function stash() {
     clearTimeout(stashTimer); stashTimer=undefined;
     if (!current || !dirty || discarded) return;
-    try { if(storage.getItem('scrybe-edit:'+current.path)!==null && !stashRead(storage,current.path))return; } catch { return; }
     const recovered = tracker?.recovery() ?? {value:getValue(),verified:true};
-    stashWrite(storage, current.path, {v:2,build:BUILD_ID,verified:recovered.verified,
+    stashWrite(storage, recoveryPath, {v:2,build:BUILD_ID,verified:recovered.verified,
         baseSha:controller?.pending?.baseSha ?? controller?.sha ?? current.sha,value:recovered.value,
         ...(key ? {key} : {}), ...(note?.value ? {note:note.value} : {})});
 }
-function clearRecovery(path: string) { if(stashRead(storage,path))stashClear(storage,path); }
+function clearRecovery() { if(stashRead(storage,recoveryPath))stashClear(storage,recoveryPath); }
 function changed() {
     if(discarded)return;
     setDirty((tracker ? tracker.dirty(baseline) : getValue() !== baseline) || !!note?.value);
@@ -92,7 +114,7 @@ async function session() { try {
             stash();
             report('Editor updated. Reload before saving.');
             reloadButton.hidden=false;
-            if (controller)
+            if (controller && !saving)
                 controller.set({ kind: 'outdated' });
         } else if (resume && !booting && !current) void boot();
     }
@@ -113,21 +135,24 @@ function rememberPath(path: string) { savedPaths.add(path); try {
 }
 catch { } }
 function publish() { if (!meta('publish-url')) return; const url = new URL(meta('publish-url'), origin); url.searchParams.set('paths', [...new Set([...pagePaths, ...rememberedPaths(), ...savedPaths, current?.path ?? ''].filter(Boolean))].join(',')); window.open(url.href, '_blank', 'noopener,noreferrer'); }
-async function reload() { if (controller?.state.kind === 'stale') {
+async function reload() {
+    if(saving || restoring){report('Wait for the save or restore to finish, then reload.');return;}
+    if (controller?.state.kind === 'stale') {
     if (!await askDiscard('Discard your text and reload the changed file?', 'Discard and reload'))
         return;
     if (current)
-        clearRecovery(current.path);
+        clearRecovery();
     discarded=true;clearTimeout(stashTimer);stashTimer=undefined;
     setDirty(false);
 }
 else
     stash(); location.reload(); }
 async function close() {
+    if(saving || restoring){report('Wait for the save or restore to finish, then close.');return;}
     if (dirty && !await askDiscard('Discard unsaved edits and close?', 'Discard and close'))
         return;
     if (dirty && current)
-        clearRecovery(current.path);
+        clearRecovery();
     discarded=true;clearTimeout(stashTimer);stashTimer=undefined;
     setDirty(false);
     if (waiting && !live) {
@@ -138,6 +163,8 @@ async function close() {
         post('scrybe:size', { height: 80 });
         return;
     }
+    current=undefined;setValue=undefined;
+    if(meta('mode')==='panel'){await destroy?.();destroy=undefined;content.replaceChildren();saveButton.hidden=true;}
     post('scrybe:closed', { refresh: live });
     if (window.parent === window)
         window.close();
@@ -189,6 +216,7 @@ function prepare(file: FileResult, fieldKey?: string) {
     clearTimeout(stashTimer); stashTimer=undefined; discarded=false; sentNote=undefined; tracker=undefined; sourceDisabled=false; approvedValue=undefined;
     setValue=undefined; getValue=()=>''; baseline=''; saveButton.disabled=true;
     current = file;
+    recoveryButtons.clear();recoveryPath=freshRecoveryPath(file.path);
     key = fieldKey;
     controller = new SaveController(file.path, file.sha, fetch.bind(window), origin, BUILD_ID);
     controller.csrf = csrf;
@@ -218,7 +246,7 @@ function prepare(file: FileResult, fieldKey?: string) {
             if (note && note.value===sentNote) note.value='';
             setDirty((tracker ? tracker.dirty(baseline) : getValue() !== baseline) || !!note?.value);
             if (!dirty)
-                clearRecovery(file.path);
+                clearRecovery();
             else
                 stash();
 
@@ -233,6 +261,7 @@ function prepare(file: FileResult, fieldKey?: string) {
     }
 }
 async function save() {
+    if(saving || restoring)return;
     if (dirty) stash();
     if (cancelDiscard) return;
     if (outdated) {
@@ -286,35 +315,51 @@ async function save() {
     if(controller.state.kind==='saving')return;
     sentNote=note?.value || undefined;
     tracker?.capture(value);
-    await controller.save(value, key, note?.value || undefined);
+    saving=true;syncRecoveryButtons();
+    try { await controller.save(value, key, note?.value || undefined); }
+    finally {
+        saving=false;syncRecoveryButtons();
+        if(outdated){controller.set({kind:'outdated'});report('Editor updated. Reload before saving.');}
+    }
 }
 function offerStash() {
     if (!current)
         return;
-    const saved = stashRead(storage, current.path);
-    if (!saved)
-        return;
-    const box = el('aside');
-    el('p', `Recovered unsaved text (${saved.baseSha === current.sha ? 'same base' : 'older base'}).`, box);
-    showDiff(baseline, saved.value, box);
-    const restore=button('Restore recovered text', async () => { if (saved.key !== key) {
-        report('This recovery belongs to ' + (saved.key ?? 'the body') + '. Open that editor to restore it.');
-        return;
+    for(const slot of recoverySlots(current.path)) {
+        const saved = stashRead(storage, slot);
+        if (!saved)
+            continue;
+        const box = el('aside');
+        el('p', `Recovered unsaved text (${saved.baseSha === current.sha ? 'same base' : 'older base'}).`, box);
+        showDiff(baseline, saved.value, box);
+        const restore=button('Restore recovered text', async () => {
+        if(saving || controller?.state.kind==='saving'){report('Wait for the save to finish, then restore.');return;}
+        if(restoring)return;
+        if (saved.key !== key) {
+            report('This recovery belongs to ' + (saved.key ?? 'the body') + '. Open that editor to restore it.');
+            return;
+        }
+        if(saved.verified===false && !await askDiscard('This recovered text could not be verified. Review the full diff before restoring.','Restore after review'))return;
+        if(saving || restoring || !setValue)return;
+        restoring=true;syncRecoveryButtons();
+        try { await setValue(saved.value); } catch {
+            report('Recovered text cannot be edited safely here. Use Show recovered source.');return;
+        } finally {restoring=false;syncRecoveryButtons();}
+        clearRecovery();recoveryPath=slot;
+        if (controller) {
+            controller.sha = saved.baseSha;
+            // A prior failed request cannot lend its newer CAS base to recovery.
+            if(controller.pending?.baseSha!==saved.baseSha)controller.pending=undefined;
+        }
+        if (note)
+            note.value = saved.note ?? ''; changed(); box.remove(); }, box);
+        recoveryButtons.add(restore);restore.disabled=!setValue;
+        button('Show recovered source',()=>{el('pre',saved.value,box);},box);
+        const discard=button('Discard recovery', () => {
+            if(saving || restoring){report('Wait for the save or restore to finish, then discard recovery.');return;}
+            stashClear(storage,slot);box.remove();
+        }, box);recoveryButtons.add(discard);
     }
-    if(saved.verified===false && !await askDiscard('This recovered text could not be verified. Review the full diff before restoring.','Restore after review'))return;
-    try { await setValue?.(saved.value); } catch {
-        report('Recovered text cannot be edited safely here. Use Show recovered source.');return;
-    }
-    if (controller) {
-        controller.sha = saved.baseSha;
-        // A prior failed request cannot lend its newer CAS base to recovery.
-        if(controller.pending?.baseSha!==saved.baseSha)controller.pending=undefined;
-    }
-    if (note)
-        note.value = saved.note ?? ''; changed(); box.remove(); }, box);
-    restore.disabled=!setValue;
-    button('Show recovered source',()=>{el('pre',saved.value,box);},box);
-    button('Discard recovery', () => { clearRecovery(current!.path); box.remove(); }, box);
 }
 function noteInput(file: FileResult) { if (key || file.note === 'unsupported')
     return; const label = el('label', file.pendingNote ? `Revision note (pending: ${file.pendingNote.note})` : `Revision note (${file.note})`); note = el('input', '', label); note.oninput = changed; }
@@ -355,7 +400,7 @@ async function openField(file: FileResult, fieldKey: string) {
     } });
     input.oninput = () => { update(); changed(); };
     getValue = () => input.value;
-    setValue = field.editable ? async (v) => { input.value = v; update(); } : undefined;
+    setValue = field.editable ? async (v) => { if(saving)throw new Error('Save outstanding'); input.value = v; update(); } : undefined;
     baseline = field.value;
     update();
     offerStash();
@@ -407,6 +452,7 @@ async function openBody(file: FileResult) {
         baseline = file.editable;
         getValue = () => tracker!.recovery().value;
         setValue = async value => {
+            if(saving)throw new Error('Save outstanding');
             // Build and validate beside the live editor. A failed recovery must
             // leave the exact current document (even unrepresentable edits) intact.
             const candidateRoot=el('div','',mount); candidateRoot.className='pending';

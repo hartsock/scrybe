@@ -155,9 +155,11 @@ export function houseStyle(ctx: Ctx): void {
           // paragraph like "+ L *e*" re-parses as a list. Always escape; an empty
           // encode list keeps trailing spaces before marks as plain spaces.
           const escaped = state.safe(node.value, { ...info, encode: [] });
+          // Entity-encode literal backslashes before ampersands: a residual
+          // slash would escape the entity and change its displayed text.
           // Kramdown consumes a lone caret at the end of a paragraph.
           return escaped.replace(/\^(?=\s*$)/, "&#94;")
-            .replace(/\\&/g, "&amp;")
+            .replace(/(\\+)&/g, (_, slashes: string) => "&#92;".repeat(Math.floor(slashes.length / 2)) + "&amp;")
             .replace(/\\@/g, "&#64;")
             .replace(/\\\\(?=\n|$)/g, (match, offset: number) =>
               offset+match.length<escaped.length || info.after.startsWith('\n') ? '&#92;' : match);

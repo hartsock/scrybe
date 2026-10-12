@@ -408,12 +408,14 @@ export function precheck(source: string, value: string): string | undefined {
     const i=number-1;
     if (/[ \t]$/.test(line)) return `Line ${i+1} ends with spaces, which drafts refuses. Remove them to save.`;
     if (/ \t/.test(line.match(/^[ \t]*/)?.[0] ?? '')) return `Line ${i+1} has a space before a tab in its indentation.`;
-    const prose=line.replace(/(`+).*?\1/g,'');
+    // Editable server bases have no body findings, so added-line checks are
+    // equivalent while fence structure is preserved; the server remains final.
+    const html=line.replace(/(?<!\\)((?:\\\\)*)\\</g,'$1');
+    const prose=line.replace(/(`+).*?\1/g,'').replace(/(?<!\\)((?:\\\\)*)\\</g,'$1');
     if (!code.has(number) && /^(?: {4}|\t)\S/.test(prose)) return `Line ${i+1} adds indented code; use fenced code.`;
     if (!code.has(number) && /\\&/.test(prose)) return `Line ${i+1} adds an escaped ampersand that the renderer cannot display.`;
-    const html=line.replace(/(?<!\\)((?:\\\\)*)\\</g,'$1');
     if (/<!--|<\/?[A-Za-z][A-Za-z0-9-]*(?:\s[^>]*|\s*\/?)>|<![A-Z]|<[A-Za-z][\w-]*[^>]*$|<!\[/.test(html)) return `Line ${i+1} adds HTML, including in code; drafts refuses this.`;
-    if (/^([<=>|])\1{6}(?:\s|$)/.test(line)) return `Line ${i+1} contains a conflict marker.`;
+    if (/^([<=>|])\1{6}(?:[ \t\n\v\f\r]|$)/.test(line)) return `Line ${i+1} contains a conflict marker.`;
   }
 }
 function adjacentLists(tools: Tools, nodes: PMNode[]): string[] {

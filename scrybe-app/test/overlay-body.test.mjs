@@ -6,7 +6,7 @@ import ts from 'typescript';
 import {JSDOM} from 'jsdom';
 const pause=()=>new Promise(r=>setTimeout(r,10));
 let run=0;
-export async function bootFrame({S=' Lead &mdash; para\n\n####  Heading\n',note='unsupported',stash,fetchHook,mode='body',build='dev',paths='article.md'}={}){
+export async function bootFrame({S=' Lead &mdash; para\n\n####  Heading\n',note='unsupported',stash,secondary,fetchHook,mode='body',build='dev',paths='article.md'}={}){
  const dom=new JSDOM(`<!doctype html><meta name="scrybe-path" content="article.md"><meta name="scrybe-paths" content="${paths}"><meta name="scrybe-mode" content="${mode}"><body></body>`,{url:'https://editor.example/_edit/frame',pretendToBeVisual:true});
  const w=dom.window,puts=[],reads=[],copied=[];
  const closeWindow=w.close.bind(w);w.close=()=>{};
@@ -16,6 +16,7 @@ export async function bootFrame({S=' Lead &mdash; para\n\n####  Heading\n',note=
  globalThis.ResizeObserver=class{observe(){}disconnect(){}};
  globalThis.location={origin:w.location.origin,reload(){}};globalThis.sessionStorage=w.sessionStorage;globalThis.parent=w;
  Object.defineProperty(w.navigator,'clipboard',{value:{async writeText(s){copied.push(s);}}});
+ if(secondary)w.sessionStorage.setItem('scrybe-edit:article.md#v2',secondary);
  if(stash)w.sessionStorage.setItem('scrybe-edit:article.md',JSON.stringify(stash));
  const file={path:'article.md',sha:'old',commit:'base',prefix:'',suffix:'',editable:S,envelope:null,splitters:'agree',body:{editable:true,reasons:[]},fields:[],note,pendingNote:null,containsMaster:true,guard:{publishable:true}};
  globalThis.fetch=async(url,init)=>{
@@ -130,3 +131,46 @@ for(const [name,S,value,reason] of [
 ])test('A restore retains '+name+' guard',async()=>{const h=await bootFrame({S,stash:{v:2,verified:true,baseSha:'old',value}});try{await h.until(()=>h.status()==='Ready to edit');h.button('Restore recovered text').click();await h.until(()=>!h.w.document.querySelector('aside'));h.button('Save').click();await pause();assert.equal(h.puts.length,0);assert.match(h.status(),reason);}finally{h.close();}});
 test('Q unreadable recovery survives even a successful save',async()=>{const stash={v:3,baseSha:'old',value:'Future recovery format'};const h=await bootFrame({S:'Body.\n',stash});try{await h.until(()=>h.status()==='Ready to edit');h.view().dispatch(h.view().state.tr.insertText(' edited',textPos(h.view(),'Body')));await pause();h.button('Save').click();await h.until(()=>h.status()==='Live on staging');assert.deepEqual(h.stash(),stash);}finally{h.close();}});
 test('B restore invalidates a matching pending value with a newer CAS base',async()=>{const h=await bootFrame({S:'Current.\n',stash:{v:2,verified:true,baseSha:'older',value:'Previous.\n'},fetchHook:(_e,i)=>i?.method==='PUT'?new Response(JSON.stringify({code:'gitea_unavailable'}),{status:503}):null});try{await h.until(()=>h.status()==='Ready to edit');const v=h.view();v.dispatch(v.state.tr.insertText('Previous.',1,1+'Current.'.length));await pause();h.button('Save').click();await h.until(()=>h.puts.length===1);await pause();h.button('Restore recovered text').click();await h.until(()=>!h.w.document.querySelector('aside'));h.button('Save').click();await h.until(()=>h.puts.length===2);assert.equal(h.puts[0].baseSha,'old');assert.equal(h.puts[1].baseSha,'older');assert.notEqual(h.puts[0].saveId,h.puts[1].saveId);}finally{h.close();}});
+
+for(const deploy of [false,true])test('FIX3 restore and discard cannot change recovery during outstanding PUT'+(deploy?' with deployment':''),async()=>{
+ const original={v:2,verified:true,baseSha:'older',value:'Para one.\n\nPara two.\n'};
+ let release,updated=false;
+ const h=await bootFrame({S:'Para one, with a sentence W written in another session.\n\nPara two.\n',stash:original,build:deploy?'b1':'dev',fetchHook:(e,i)=>{
+  if(e==='session'&&deploy)return new Response(JSON.stringify({csrf:'token',buildId:updated?'b2':'b1'}));
+  if(i?.method==='PUT')return !release?new Promise(r=>release=r):new Response(JSON.stringify({code:'stale'}),{status:409});
+ }});
+ try{
+  await h.until(()=>h.status()==='Ready to edit');h.view().dispatch(h.view().state.tr.insertText(' EDIT-E',textPos(h.view(),'Para two.')));await pause();h.button('Save').click();await h.until(()=>!!release);
+  if(deploy){updated=true;h.w.dispatchEvent(new h.w.Event('focus'));await h.until(()=>h.status().includes('updated'));}
+  const restore=h.button('Restore recovered text'),discard=h.button('Discard recovery');assert.equal(restore.disabled,true);assert.equal(discard.disabled,true);
+  restore.onclick();assert.equal(h.status(),'Wait for the save to finish, then restore.');discard.onclick();assert.deepEqual(h.stash(),original);
+  release(new Response(JSON.stringify({sha:'saved1',commit:'saved1'})));await h.until(()=>!restore.disabled);assert.deepEqual(h.stash(),original);assert.match(h.w.document.querySelector('.ProseMirror').textContent,/sentence W/);
+  if(!deploy){restore.click();await h.until(()=>!h.w.document.querySelector('aside'));h.button('Save').click();await h.until(()=>h.status()==='stale');assert.equal(h.puts[1].baseSha,'older');assert.equal(h.puts[1].value,original.value);}
+  else {h.button('Save').onclick();assert.equal(h.puts.length,1);assert.match(h.status(),/updated/);}
+ }finally{h.close();}
+});
+test('FIX3 unknown recovery and current dirty recovery both survive reopen',async()=>{
+ const unknown={v:3,baseSha:'future',value:'Future recovery format'};let secondary;
+ const h=await bootFrame({S:'Body.\n',stash:unknown});try{
+  await h.until(()=>h.status()==='Ready to edit');h.view().dispatch(h.view().state.tr.insertText(' CURRENT',textPos(h.view(),'Body')));await pause();h.w.dispatchEvent(new h.w.Event('pagehide'));
+  assert.deepEqual(h.stash(),unknown);secondary=h.w.sessionStorage.getItem('scrybe-edit:article.md#v2');assert.match(JSON.parse(secondary).value,/CURRENT/);
+ }finally{h.close();}
+ const r=await bootFrame({S:'Body.\n',stash:unknown,secondary});try{await r.until(()=>r.status()==='Ready to edit');r.button('Restore recovered text').click();await r.until(()=>!r.w.document.querySelector('aside'));assert.match(r.w.document.querySelector('.ProseMirror').textContent,/CURRENT/);assert.deepEqual(r.stash(),unknown);}finally{r.close();}
+});
+test('FIX3 partial panel sign-in resumes after field closes',async()=>{
+ let signed=false,loaded=false;
+ const h=await bootFrame({mode:'panel',paths:'a.md,b.md',fetchHook:(e,_i,url)=>{
+  if(e!=='file')return;const path=url.searchParams.get('path');if(path==='b.md'&&!signed)return new Response(JSON.stringify({code:'unauthenticated'}),{status:401});if(path==='b.md')loaded=true;
+  return new Response(JSON.stringify({path,sha:'old',editable:'Body.\n',fields:[{key:'title',value:'Original title',editable:true,style:'plain',line:2}],note:'unsupported',containsMaster:true,guard:{publishable:true}}));
+ }});try{await h.until(()=>h.status()==='Sign in, then retry');h.button('Edit title').click();await h.until(()=>!!h.w.document.querySelector('label input'));h.button('Close').click();await pause();signed=true;h.w.dispatchEvent(new h.w.Event('focus'));await h.until(()=>loaded);assert.equal(h.w.document.querySelector('label input'),null);assert.equal(h.w.document.querySelectorAll('h1').length,1);}finally{h.close();}
+});
+
+test('FIX3 Save, Close and reload wait for asynchronous Restore',async()=>{
+ const h=await bootFrame({S:'Current.\n',stash:{v:2,verified:true,baseSha:'older',value:'Recovered.\n'}});
+ try{
+  await h.until(()=>h.status()==='Ready to edit');let release;
+  const {holdNextMount}=await import('./helpers/overlay-frame-editor.mjs');holdNextMount(new Promise(r=>release=r));
+  h.button('Restore recovered text').click();await pause();h.button('Save').onclick();h.button('Close').click();assert.match(h.status(),/finish, then close/);h.button('Reload').onclick();assert.match(h.status(),/finish, then reload/);assert.equal(h.puts.length,0);
+  release();await h.until(()=>!h.w.document.querySelector('aside'));h.button('Save').click();await h.until(()=>h.puts.length===1);assert.equal(h.puts[0].baseSha,'older');
+ }finally{h.close();}
+});
