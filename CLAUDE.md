@@ -51,7 +51,7 @@ just build
 # Release build
 just release
 
-# Build + install Tauri desktop app to ~/Applications and ~/venv/bin
+# Build + install app/toolkit and a managed ~/.local/bin/scrybe link
 just install
 
 # Tauri dev server (live reload)
@@ -182,7 +182,9 @@ explicit persist (the agent-side twin of Cmd+S / 💾).
 Every human control in scrybe-app has an MCP equivalent and vice versa
 (`state`/`set_theme`/`view_mode`/`set_vim`/`export`/`export_figures` mirror
 the path bar, theme dropdown, View button, Vim toggle, the Export button,
-and the "Export Diagrams…" menu item; `gdoc_export`/`gdoc_import`/`gdoc_list`/
+and the "Export Diagrams…" menu item; `mermaid_to_png` mirrors right-clicking
+a rendered Mermaid diagram, with GUI and headless renderers sharing the embedded
+source/UUID/SHA-256 provenance contract; `gdoc_export`/`gdoc_import`/`gdoc_list`/
 `gdoc_auth` mirror the ☁️ Google Docs toolbar button (File ▸ Export to Google
 Docs…), File ▸ Import from Google Docs…, that picker's list, and File ▸ Google
 Docs ▸ "Sign in to Google…" / "Sign out of Google"). The `gdoc_*`

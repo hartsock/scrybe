@@ -11,7 +11,7 @@ document through one tool contract.
 ## Install
 
 ```bash
-brew install --cask hartsock/scrybe/scrybe    # macOS (Apple silicon)
+brew install --cask hartsock/scrybe/scrybe    # macOS app + matching CLI
 npm install -g scrybe-ai                      # CLI via npm
 pip install scrybe.ai                         # Python toolkit
 cargo install scrybe-cli scrybe-mcp-server    # from source via crates.io
@@ -26,6 +26,12 @@ Windows: `choco install scrybe` (package staged each release; community-feed
 publication pending — see [#2](https://github.com/hartsock/scrybe/issues/2)).
 All installers are on [GitHub Releases](https://github.com/hartsock/scrybe/releases):
 dmg · setup.exe/msi · AppImage · deb · rpm.
+
+For a direct macOS DMG install, drag Scrybe into Applications, open it, then
+choose **Scrybe → Install or Repair 'scrybe' Command…**. The operation is
+idempotent and conflict-safe: it repairs broken Scrybe links but never
+overwrites an unrelated file. **Remove 'scrybe' Command…** removes only the
+managed link.
 
 All packages version in lock-step: one release, one version. The brew tap and
 choco feed are catching up to automation — they may lag a release until
@@ -43,8 +49,10 @@ scrybe --help           # everything the CLI can do
 claude mcp add scrybe -- scrybe-mcp-server stdio
 ```
 
-Every human control has an agent equivalent and vice versa. The full MCP tool
-surface — names, schemas, semantics — is frozen per release in
+Every document and editor control has an agent equivalent and vice versa.
+Host installation controls are intentionally local-only: changing `PATH` is
+machine administration, not document editing. The full MCP tool surface —
+names, schemas, semantics — is frozen per release in
 [`docs/mcp-contract-0.6.json`](docs/mcp-contract-0.6.json); the CLI↔GUI socket
 contract lives in [`docs/rpc-contract-0.6.md`](docs/rpc-contract-0.6.md).
 Agent workflow guide: [`AGENTS.md`](AGENTS.md).
@@ -55,6 +63,9 @@ Agent workflow guide: [`AGENTS.md`](AGENTS.md).
 git clone https://github.com/hartsock/scrybe && cd scrybe
 just check              # full lint + test suite
 just dev                # Tauri dev server
+just install            # app + toolkit + ~/.local/bin/scrybe
+just repair-install     # safely re-run the idempotent installer
+just uninstall          # remove development-install artifacts only
 ```
 
 Architecture, crate map, and conventions: [`CLAUDE.md`](CLAUDE.md).

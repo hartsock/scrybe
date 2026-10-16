@@ -4349,6 +4349,7 @@ dependencies = [
  "scrybe-tools",
  "serde",
  "serde_json",
+ "tempfile",
  "tracing",
  "tracing-subscriber",
 ]
@@ -4511,6 +4512,7 @@ name = "scrybe-tools"
 version = "0.6.3"
 dependencies = [
  "anyhow",
+ "base64 0.22.1",
  "scrybe-core",
  "scrybe-gdocs",
  "scrybe-mermaid",

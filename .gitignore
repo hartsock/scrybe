@@ -27,5 +27,9 @@ __pycache__/
 # never be committed.
 *.scrybe-buffer
 
+# Tauri externalBin staging artifacts. Built for the active target by
+# scrybe-app/scripts/stage-cli.mjs and embedded in signed release bundles.
+scrybe-app/src-tauri/scrybe-*
+
 # Python editable-install artifacts
 *.egg-info/

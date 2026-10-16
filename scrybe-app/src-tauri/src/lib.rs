@@ -41,6 +41,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 use std::time::Instant;
 use tauri::{Emitter as _, Manager as _};
+use tauri_plugin_shell::ShellExt as _;
 
 // ─── File watcher state ───────────────────────────────────────────────────────
 
@@ -130,6 +131,76 @@ fn quit_app(app: tauri::AppHandle) {
 #[tauri::command]
 fn print_document(window: tauri::WebviewWindow) -> Result<(), String> {
     window.print().map_err(|e| e.to_string())
+}
+
+// ─── macOS shell-command lifecycle ──────────────────────────────────────────
+
+/// Result emitted by the bundled CLI's idempotent shell-link manager.
+///
+/// The backend intentionally delegates filesystem ownership decisions to the
+/// exact same CLI code used by just install. This prevents the app and
+/// developer installer from drifting into two subtly different repair rules.
+#[derive(Debug, Clone, serde::Deserialize, serde::Serialize, PartialEq, Eq)]
+struct ShellCommandReport {
+    outcome: String,
+    command_path: String,
+    target_path: Option<String>,
+    path_winner: Option<String>,
+    other_installations: Vec<String>,
+    app_bundles: Vec<String>,
+    warnings: Vec<String>,
+    message: String,
+}
+
+async fn run_shell_command_lifecycle(
+    app: &tauri::AppHandle,
+    action: &str,
+) -> Result<ShellCommandReport, String> {
+    let output = app
+        .shell()
+        .sidecar("scrybe")
+        .map_err(|error| format!("bundled scrybe command is unavailable: {error}"))?
+        .args(["shell-command", action, "--json"])
+        .output()
+        .await
+        .map_err(|error| format!("could not run the bundled scrybe command: {error}"))?;
+    decode_shell_command_report(output.status.success(), &output.stdout, &output.stderr)
+}
+
+fn decode_shell_command_report(
+    success: bool,
+    stdout: &[u8],
+    stderr: &[u8],
+) -> Result<ShellCommandReport, String> {
+    if !success {
+        let detail = String::from_utf8_lossy(stderr).trim().to_string();
+        return Err(if detail.is_empty() {
+            "the bundled scrybe command failed without an error message".to_string()
+        } else {
+            detail
+        });
+    }
+    serde_json::from_slice(stdout)
+        .map_err(|error| format!("bundled scrybe command returned an invalid report: {error}"))
+}
+
+/// Install the command or repair a broken/older managed link. Repeated calls
+/// are a no-op. Conflicting regular files and unrelated symlinks fail closed.
+#[tauri::command]
+async fn install_shell_command(app: tauri::AppHandle) -> Result<ShellCommandReport, String> {
+    run_shell_command_lifecycle(&app, "install").await
+}
+
+/// Inspect the command link without changing the filesystem.
+#[tauri::command]
+async fn shell_command_status(app: tauri::AppHandle) -> Result<ShellCommandReport, String> {
+    run_shell_command_lifecycle(&app, "status").await
+}
+
+/// Remove only a link recognized as Scrybe-managed.
+#[tauri::command]
+async fn uninstall_shell_command(app: tauri::AppHandle) -> Result<ShellCommandReport, String> {
+    run_shell_command_lifecycle(&app, "uninstall").await
 }
 
 /// List the entries of a directory, returning name, path, and isDir for each.
@@ -927,9 +998,53 @@ async fn gdoc_logout() -> Result<scrybe_gdocs::AuthStatus, String> {
     gdoc_blocking(scrybe_gdocs::logout).await
 }
 
+const DEBUG_FRONTEND_ORIGIN: &str = "http://localhost:5173";
+
+/// Allow only Scrybe's own frontend to occupy the application WebView.
+///
+/// Preview links are routed to the system browser in TypeScript. This native
+/// guard is the non-bypassable fallback for generated markup, redirects, and
+/// any future frontend regression: a remote page must never replace the editor.
+fn is_trusted_app_navigation(url: &tauri::Url) -> bool {
+    match url.scheme() {
+        "tauri" => url.host_str() == Some("localhost"),
+        "http" if url.host_str() == Some("tauri.localhost") && url.port().is_none() => true,
+        "http" if cfg!(debug_assertions) => {
+            url.origin().ascii_serialization() == DEBUG_FRONTEND_ORIGIN
+        }
+        _ => false,
+    }
+}
+
+fn navigation_guard<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
+    tauri::plugin::Builder::new("scrybe-navigation-guard")
+        .on_navigation(|_webview, url| is_trusted_app_navigation(url))
+        .build()
+}
+
+/// Save the PNG rasterized from the live Mermaid.js preview.
+///
+/// The frontend owns rendering so the pixels match what the user sees. This
+/// command does not render again: it embeds the original Mermaid source into
+/// the supplied PNG bytes, then writes (or replaces) the selected destination.
+///
+/// The image arrives as base64, not `Vec<u8>` — see
+/// [`scrybe_tools::write_embedded_png_base64`] for why.
+#[tauri::command]
+fn save_mermaid_png(output: String, source: String, png_base64: String) -> Result<usize, String> {
+    let result = scrybe_tools::write_embedded_png_base64(
+        &png_base64,
+        &source,
+        std::path::Path::new(&output),
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(result.bytes)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .plugin(navigation_guard())
         .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
             // A second instance was launched. Forward its first path arg to the
             // running frontend so it can open the file in an existing tab.
@@ -956,6 +1071,7 @@ pub fn run() {
             gdoc_status,
             gdoc_login,
             gdoc_logout,
+            save_mermaid_png,
             watch_file,
             unwatch_file,
             note_autosave,
@@ -989,6 +1105,9 @@ pub fn run() {
             cli_rpc::cli_rpc_reply,
             menu::menu_sync,
             print_document,
+            install_shell_command,
+            shell_command_status,
+            uninstall_shell_command,
         ])
         .menu(menu::build)
         .on_menu_event(|app, event| menu::handle_event(app, &event))
@@ -1083,6 +1202,64 @@ mod tests {
     //! sufficient. All tests use `tempfile::tempdir` to avoid touching
     //! real user files.
     use super::*;
+
+    #[test]
+    fn navigation_guard_allows_only_scrybe_frontend_origins() {
+        for trusted in [
+            "tauri://localhost/",
+            "tauri://localhost/#section",
+            "http://tauri.localhost/",
+        ] {
+            let url = tauri::Url::parse(trusted).unwrap();
+            assert!(is_trusted_app_navigation(&url), "should allow {trusted}");
+        }
+
+        for remote in [
+            "https://login.microsoftonline.com/",
+            "https://tauri.localhost.example.com/",
+            "https://tauri.localhost/",
+            "http://tauri.localhost:8080/",
+            "tauri://remote-host/",
+            "file:///tmp/replacement.html",
+            "data:text/html,replacement",
+            "javascript:document.body.textContent='replacement'",
+            "about:blank",
+        ] {
+            let url = tauri::Url::parse(remote).unwrap();
+            assert!(!is_trusted_app_navigation(&url), "should reject {remote}");
+        }
+    }
+
+    #[test]
+    fn navigation_guard_limits_the_debug_vite_origin() {
+        for remote in [
+            "http://localhost:5174/",
+            "https://localhost:5173/",
+            "http://127.0.0.1:5173/",
+            "http://127.0.0.1:5174/",
+        ] {
+            let url = tauri::Url::parse(remote).unwrap();
+            assert!(!is_trusted_app_navigation(&url), "should reject {remote}");
+        }
+
+        let vite = tauri::Url::parse("http://localhost:5173/").unwrap();
+        assert_eq!(is_trusted_app_navigation(&vite), cfg!(debug_assertions));
+    }
+
+    #[test]
+    fn navigation_guard_debug_vite_origin_matches_tauri_configuration() {
+        let config: serde_json::Value =
+            serde_json::from_str(include_str!("../tauri.conf.json")).unwrap();
+        let configured = config["build"]["devUrl"].as_str().unwrap();
+        assert_eq!(configured, DEBUG_FRONTEND_ORIGIN);
+
+        let url = tauri::Url::parse(configured).unwrap();
+        assert_eq!(
+            is_trusted_app_navigation(&url),
+            cfg!(debug_assertions),
+            "the configured Vite origin must be the debug exception"
+        );
+    }
 
     fn temp_file(name: &str, content: &str) -> (tempfile::TempDir, String) {
         let dir = tempfile::tempdir().expect("tempdir");
@@ -1267,5 +1444,30 @@ mod tests {
             existing_file(path.clone()),
             Some(path.to_string_lossy().into_owned())
         );
+    }
+
+    #[test]
+    fn shell_command_report_decodes_from_bundled_cli_json() {
+        let stdout = br#"{
+          "outcome":"repaired",
+          "command_path":"/Users/test/.local/bin/scrybe",
+          "target_path":"/Applications/Scrybe.app/Contents/MacOS/scrybe",
+          "path_winner":null,
+          "other_installations":[],
+          "app_bundles":["/Applications/Scrybe.app"],
+          "warnings":[],
+          "message":"Repaired the scrybe command"
+        }"#;
+        let report = decode_shell_command_report(true, stdout, b"").unwrap();
+        assert_eq!(report.outcome, "repaired");
+        assert_eq!(report.warnings, Vec::<String>::new());
+    }
+
+    #[test]
+    fn shell_command_failure_preserves_cli_explanation() {
+        let error =
+            decode_shell_command_report(false, b"", b"refusing to overwrite existing non-symlink")
+                .unwrap_err();
+        assert_eq!(error, "refusing to overwrite existing non-symlink");
     }
 }

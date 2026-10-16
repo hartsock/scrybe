@@ -10,8 +10,9 @@
 #   brew install --cask scrybe
 #
 # Scrybe is a GUI app, so this is a CASK (mounts the DMG and installs
-# Scrybe.app), not a formula. The `scrybe` CLI and MCP server binaries ship
-# separately via npm (scrybe-ai), PyPI (scrybe.ai), and crates.io.
+# Scrybe.app), not a formula. The app bundle includes the matching human CLI;
+# Homebrew links it into its managed bin directory. The MCP server and
+# CLI-only installation paths remain available through npm, PyPI, and crates.io.
 #
 # arm64-only for now: the Tauri release matrix builds an Apple Silicon DMG
 # only (GitHub-hosted Intel Mac runners have multi-hour queues — see the
@@ -30,6 +31,7 @@ cask "scrybe" do
   depends_on arch: :arm64
 
   app "Scrybe.app"
+  binary "#{appdir}/Scrybe.app/Contents/MacOS/scrybe"
 
   # Conservative cleanup hints: `brew uninstall --zap scrybe` moves these to
   # the Trash only (no delete:, no pkgutil:). ~/.scrybe is the CLI/GUI shared
