@@ -35,6 +35,10 @@ pub const MENU_IDS: &[&str] = &[
     "save",
     "reload",
     "export_docx",
+    "export_gdoc",
+    "import_gdoc",
+    "gdoc_sign_in",
+    "gdoc_sign_out",
     "export_figures",
     "print",
     "close_tab",
@@ -85,6 +89,36 @@ pub fn build(app: &AppHandle<Wry>) -> tauri::Result<Menu<Wry>> {
     let save = MenuItem::with_id(app, "save", "Save", true, Some("CmdOrCtrl+S"))?;
     let reload = MenuItem::with_id(app, "reload", "Reload from Disk", true, Some("CmdOrCtrl+R"))?;
     let export_docx = MenuItem::with_id(app, "export_docx", "Export to Word…", true, None::<&str>)?;
+    let export_gdoc = MenuItem::with_id(
+        app,
+        "export_gdoc",
+        "Export to Google Docs…",
+        true,
+        None::<&str>,
+    )?;
+    let import_gdoc = MenuItem::with_id(
+        app,
+        "import_gdoc",
+        "Import from Google Docs…",
+        true,
+        None::<&str>,
+    )?;
+    let gdoc_sign_in = MenuItem::with_id(
+        app,
+        "gdoc_sign_in",
+        "Sign in to Google…",
+        true,
+        None::<&str>,
+    )?;
+    let gdoc_sign_out = MenuItem::with_id(
+        app,
+        "gdoc_sign_out",
+        "Sign out of Google",
+        true,
+        None::<&str>,
+    )?;
+    let google_docs =
+        Submenu::with_items(app, "Google Docs", true, &[&gdoc_sign_in, &gdoc_sign_out])?;
     let export_figures = MenuItem::with_id(
         app,
         "export_figures",
@@ -108,6 +142,9 @@ pub fn build(app: &AppHandle<Wry>) -> tauri::Result<Menu<Wry>> {
             &reload,
             &PredefinedMenuItem::separator(app)?,
             &export_docx,
+            &export_gdoc,
+            &import_gdoc,
+            &google_docs,
             &export_figures,
             &print,
             &PredefinedMenuItem::separator(app)?,
@@ -304,6 +341,21 @@ mod tests {
         // frontend as an action.
         for id in ["quit", "copy", "paste", "", "bogus", "SAVE"] {
             assert_eq!(menu_action(id), None);
+        }
+    }
+
+    #[test]
+    fn google_docs_ids_are_in_contract() {
+        // The toolbar ☁️ button and File ▸ Export/Import/Google Docs items
+        // all dispatch through these ids in the frontend `scrybe://menu`
+        // switch; dropping one silently kills that menu entry.
+        for id in [
+            "export_gdoc",
+            "import_gdoc",
+            "gdoc_sign_in",
+            "gdoc_sign_out",
+        ] {
+            assert_eq!(menu_action(id), Some(id));
         }
     }
 

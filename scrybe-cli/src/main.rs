@@ -52,6 +52,8 @@ SUBCOMMANDS
     mermaid    Embed/extract/verify Mermaid source in PNG iTXt metadata.
     embed      Top-level shortcut for `mermaid embed`.
     extract    Top-level shortcut for `mermaid extract`.
+    gdoc       Google Docs: login/logout/status, list, export, import
+               (bring-your-own OAuth client — see docs/google-docs.md).
 
   Meta:
     shell-command  Install, inspect, repair, or remove the user-level command link.
@@ -68,6 +70,7 @@ CONNECTION MODEL
       - `save`, `close`, `quit`  silent no-op (nothing open, nothing to do).
       - `read`, `find`, `section`, `edit`  error: no Scrybe running.
       - `render`, `view`, `lint`, `mermaid`, `embed`, `extract`  run inline — no GUI required.
+      - `gdoc`  runs inline too; needs network access and a Google sign-in.
 
 EXAMPLES
     scrybe foo.md                  # open or refresh foo.md in the GUI
@@ -84,12 +87,18 @@ EXAMPLES
     scrybe view foo.md             # read foo.md in the terminal (q quits)
     scrybe lint foo.md --json
     scrybe extract diagram.png > diagram.mmd
+    scrybe gdoc login              # one-time Google sign-in (opens a browser)
+    scrybe gdoc export notes.md    # create or update the Google Doc for notes.md
+    scrybe gdoc import <DOC_ID_OR_URL> --out notes.md
 
 ENVIRONMENT
     SCRYBE_SOCK     Override the local endpoint (~/.scrybe/sock on Unix;
                     \\\\.\\pipe\\scrybe-<user> on Windows)
     SCRYBE_APP_BIN  Path to the GUI binary for launch-when-no-app on Linux
                     (macOS uses `open -a Scrybe`)
+    SCRYBE_GOOGLE_DIR
+                    Directory holding the Google OAuth client.json + token.json
+                    (default: the platform config dir — see docs/google-docs.md)
 
 INSTALL
     pip install scrybe.ai            # full Python toolkit (metapackage)
@@ -172,6 +181,18 @@ enum Command {
     Mermaid {
         #[command(subcommand)]
         cmd: MermaidCmd,
+    },
+
+    /// Google Docs: sign in, list, export and import (see docs/google-docs.md).
+    ///
+    /// Needs a bring-your-own Google OAuth client and a one-time
+    /// `scrybe gdoc login`. The first export of a file creates the doc and
+    /// writes a sidecar `<stem>.gdoc.json` beside it; later exports update
+    /// that same doc in place. Drives the shared `gdoc_*` tools, so the MCP
+    /// surface matches by construction.
+    Gdoc {
+        #[command(subcommand)]
+        cmd: GdocCmd,
     },
 
     /// List the tabs open in the running Scrybe GUI (#46).
@@ -443,12 +464,85 @@ enum MermaidCmd {
     },
 }
 
+#[derive(Subcommand)]
+enum GdocCmd {
+    /// Sign in to Google: opens a browser for the consent screen and caches
+    /// the token (`drive.file` scope only).
+    ///
+    /// Requires a bring-your-own OAuth client — `client.json` in the Google
+    /// config directory or SCRYBE_GOOGLE_CLIENT_ID/_SECRET; see
+    /// docs/google-docs.md.
+    Login {
+        /// Output JSON (`{status, expires_at, config_dir}`) instead of one line.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Sign out: revoke and forget the cached token.
+    Logout {
+        /// Output JSON (`{status, expires_at, config_dir}`) instead of one line.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Report the sign-in state without contacting Google.
+    ///
+    /// Prints the Google config directory (where `client.json` goes) in
+    /// every state. Exits 0 when signed in, 1 otherwise, so scripts can
+    /// branch; `--json` is the machine-readable form.
+    Status {
+        /// Output JSON (`{status, expires_at, config_dir}`) instead of one line.
+        #[arg(long)]
+        json: bool,
+    },
+    /// List the Google Docs Scrybe created, newest first.
+    ///
+    /// With `drive.file`, only docs Scrybe made are visible.
+    List {
+        /// Output JSON (`{count, docs}`) instead of one `<id>  <name>  <url>` line per doc.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Export a Markdown file to a Google Doc in the Scrybe folder of Drive.
+    ///
+    /// Creates the doc on the first export (writing `<stem>.gdoc.json` beside
+    /// the file) and updates that same doc in place afterwards. Mermaid
+    /// fences travel as PNGs that carry their source, so `scrybe gdoc import`
+    /// restores them.
+    Export {
+        /// Markdown file to export.
+        #[arg(value_name = "FILE")]
+        input: std::path::PathBuf,
+        /// Doc name (default: the first H1, then the file stem).
+        #[arg(long, value_name = "TITLE")]
+        title: Option<String>,
+        /// Output JSON (`{path, doc_id, url, folder_id, action, figures}`).
+        #[arg(long)]
+        json: bool,
+    },
+    /// Import a Google Doc (id or URL) as Markdown.
+    ///
+    /// Mermaid PNGs become ```mermaid fences again; other images are written
+    /// beside the output as `<stem>_img_NN.<ext>`; a `<stem>.gdoc.json`
+    /// sidecar links the file to the doc for later in-place exports.
+    Import {
+        /// Google Doc id, or a docs.google.com / drive.google.com URL.
+        #[arg(value_name = "DOC")]
+        doc: String,
+        /// Markdown file to write (.md or .markdown; its directory must exist).
+        #[arg(short, long, value_name = "FILE")]
+        out: std::path::PathBuf,
+        /// Output JSON (`{path, doc_id, diagrams, images, figures, image_paths}`).
+        #[arg(long)]
+        json: bool,
+    },
+}
+
 /// Known subcommand names. Anything else in argv[1] is treated as a path to open.
 const SUBCOMMANDS: &[&str] = &[
     "render",
     "view",
     "lint",
     "mermaid",
+    "gdoc",
     "tabs",
     "open",
     "save",
@@ -670,6 +764,8 @@ fn main() -> anyhow::Result<()> {
                 }
             }
         },
+
+        Command::Gdoc { cmd } => run_gdoc(cmd)?,
 
         Command::Open { path } => match path {
             Some(p) => {
@@ -908,6 +1004,156 @@ fn run_mermaid_extract(png: &std::path::Path, unverified: bool) -> anyhow::Resul
         }
         Err(e) => Err(e.into()),
     }
+}
+
+// ---------------------------------------------------------------------------
+// Google Docs (`scrybe gdoc …`) — the shared `gdoc_*` tools, headless
+// ---------------------------------------------------------------------------
+
+/// Call a `gdoc_*` tool through the shared registry. A business failure is
+/// printed as `scrybe gdoc <sub>: <message>` and exits 1 (same contract as
+/// the `mermaid` arms); an engine fault propagates as an error.
+fn call_gdoc(sub: &str, tool: &str, args: serde_json::Value) -> anyhow::Result<serde_json::Value> {
+    let reg = scrybe_tools::Registry::default();
+    let outcome = reg.call(tool, &scrybe_tools::Ctx::headless(), &args)?;
+    if let Some(err) = outcome.tool_error {
+        eprintln!("scrybe gdoc {sub}: {}", err.message);
+        std::process::exit(1);
+    }
+    Ok(outcome.data)
+}
+
+/// One line for a `gdoc_auth` payload: signed in / out / not configured,
+/// always naming the config directory so the one-time setup is self-serve.
+fn auth_status_line(d: &serde_json::Value) -> String {
+    let config_dir = d["config_dir"].as_str().unwrap_or("?");
+    match d["status"].as_str() {
+        Some("logged_in") => format!(
+            "Signed in (token expires {}; config {config_dir})",
+            d["expires_at"].as_str().unwrap_or("unknown")
+        ),
+        Some("logged_out") => format!("Signed out (config {config_dir})"),
+        _ => format!(
+            "Not configured — put client.json in {config_dir} or set \
+             SCRYBE_GOOGLE_CLIENT_ID/SCRYBE_GOOGLE_CLIENT_SECRET (see docs/google-docs.md)"
+        ),
+    }
+}
+
+/// Print a `gdoc_auth` payload as JSON or as the one-line summary.
+fn print_auth(d: &serde_json::Value, json: bool) -> anyhow::Result<()> {
+    if json {
+        println!("{}", serde_json::to_string_pretty(d)?);
+    } else {
+        println!("{}", auth_status_line(d));
+    }
+    Ok(())
+}
+
+fn run_gdoc(cmd: GdocCmd) -> anyhow::Result<()> {
+    match cmd {
+        GdocCmd::Login { json } => {
+            let d = call_gdoc(
+                "login",
+                "gdoc_auth",
+                serde_json::json!({ "action": "login" }),
+            )?;
+            print_auth(&d, json)?;
+        }
+        GdocCmd::Logout { json } => {
+            let d = call_gdoc(
+                "logout",
+                "gdoc_auth",
+                serde_json::json!({ "action": "logout" }),
+            )?;
+            print_auth(&d, json)?;
+        }
+        GdocCmd::Status { json } => {
+            let d = call_gdoc(
+                "status",
+                "gdoc_auth",
+                serde_json::json!({ "action": "status" }),
+            )?;
+            print_auth(&d, json)?;
+            // Scriptable: `scrybe gdoc status && scrybe gdoc export …`.
+            if d["status"].as_str() != Some("logged_in") {
+                std::process::exit(1);
+            }
+        }
+        GdocCmd::List { json } => {
+            let d = call_gdoc("list", "gdoc_list", serde_json::json!({}))?;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&d)?);
+            } else {
+                let docs = d["docs"].as_array().cloned().unwrap_or_default();
+                if docs.is_empty() {
+                    println!("No documents.");
+                }
+                for doc in &docs {
+                    println!(
+                        "{}  {}  {}",
+                        doc["id"].as_str().unwrap_or(""),
+                        doc["name"].as_str().unwrap_or(""),
+                        doc["url"].as_str().unwrap_or("")
+                    );
+                }
+            }
+        }
+        GdocCmd::Export { input, title, json } => {
+            let d = call_gdoc(
+                "export",
+                "gdoc_export",
+                serde_json::json!({ "path": input.to_string_lossy(), "title": title }),
+            )?;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&d)?);
+            } else {
+                println!(
+                    "Exported to Google Docs ({}): {}",
+                    d["action"].as_str().unwrap_or("created"),
+                    d["url"].as_str().unwrap_or("")
+                );
+                println!("{} diagram(s)", d["figures"].as_u64().unwrap_or(0));
+                let skipped: Vec<&str> = d["images_skipped"]
+                    .as_array()
+                    .map(|a| a.iter().filter_map(serde_json::Value::as_str).collect())
+                    .unwrap_or_default();
+                if !skipped.is_empty() {
+                    eprintln!(
+                        "{} image(s) not embedded (must be files under the document's \
+                         directory): {}",
+                        skipped.len(),
+                        skipped.join(", ")
+                    );
+                }
+            }
+        }
+        GdocCmd::Import { doc, out, json } => {
+            let d = call_gdoc(
+                "import",
+                "gdoc_import",
+                serde_json::json!({ "doc": doc, "output": out.to_string_lossy() }),
+            )?;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&d)?);
+            } else {
+                println!(
+                    "Wrote {} ({} diagram(s), {} image(s))",
+                    d["path"].as_str().unwrap_or(""),
+                    d["diagrams"].as_u64().unwrap_or(0),
+                    d["images"].as_u64().unwrap_or(0)
+                );
+                for f in d["figures"].as_array().cloned().unwrap_or_default() {
+                    println!(
+                        "  figure {}: {}",
+                        f["index"].as_u64().unwrap_or(0),
+                        f["verification"].as_str().unwrap_or("")
+                    );
+                }
+            }
+        }
+    }
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------
@@ -1194,6 +1440,129 @@ mod tests {
     fn inject_open_leaves_view_alone() {
         let args = vec!["scrybe".to_string(), "view".to_string(), "x.md".to_string()];
         assert_eq!(inject_open_if_path(args.clone()), args);
+    }
+
+    /// The whole command tree is well-formed (clap's own consistency checks —
+    /// duplicate flags, bad defaults, …), `gdoc` included.
+    #[test]
+    fn command_tree_passes_clap_debug_assert() {
+        use clap::CommandFactory;
+        Cli::command().debug_assert();
+    }
+
+    #[test]
+    fn gdoc_subcommands_parse() {
+        for argv in [
+            &["scrybe", "gdoc", "login"][..],
+            &["scrybe", "gdoc", "login", "--json"],
+            &["scrybe", "gdoc", "logout"],
+            &["scrybe", "gdoc", "logout", "--json"],
+            &["scrybe", "gdoc", "status"],
+            &["scrybe", "gdoc", "list", "--json"],
+        ] {
+            let cli = Cli::try_parse_from(argv).unwrap_or_else(|e| panic!("{argv:?}: {e}"));
+            assert!(matches!(cli.command, Command::Gdoc { .. }), "{argv:?}");
+        }
+
+        let cli =
+            Cli::try_parse_from(["scrybe", "gdoc", "status", "--json"]).expect("status parses");
+        assert!(matches!(
+            cli.command,
+            Command::Gdoc {
+                cmd: GdocCmd::Status { json: true }
+            }
+        ));
+        let cli = Cli::try_parse_from(["scrybe", "gdoc", "status"]).expect("status parses");
+        assert!(matches!(
+            cli.command,
+            Command::Gdoc {
+                cmd: GdocCmd::Status { json: false }
+            }
+        ));
+
+        let cli = Cli::try_parse_from([
+            "scrybe", "gdoc", "export", "notes.md", "--title", "Q4 Plan", "--json",
+        ])
+        .expect("export parses");
+        match cli.command {
+            Command::Gdoc {
+                cmd: GdocCmd::Export { input, title, json },
+            } => {
+                assert_eq!(input, std::path::PathBuf::from("notes.md"));
+                assert_eq!(title.as_deref(), Some("Q4 Plan"));
+                assert!(json);
+            }
+            _ => panic!("expected gdoc export"),
+        }
+
+        let cli = Cli::try_parse_from(["scrybe", "gdoc", "import", "1DocAbc", "--out", "in.md"])
+            .expect("import parses");
+        match cli.command {
+            Command::Gdoc {
+                cmd: GdocCmd::Import { doc, out, json },
+            } => {
+                assert_eq!(doc, "1DocAbc");
+                assert_eq!(out, std::path::PathBuf::from("in.md"));
+                assert!(!json);
+            }
+            _ => panic!("expected gdoc import"),
+        }
+    }
+
+    /// `import` needs `--out`; `export` needs a file; a bare `gdoc` needs a verb.
+    #[test]
+    fn gdoc_required_arguments_are_enforced() {
+        assert!(Cli::try_parse_from(["scrybe", "gdoc"]).is_err());
+        assert!(Cli::try_parse_from(["scrybe", "gdoc", "export"]).is_err());
+        assert!(Cli::try_parse_from(["scrybe", "gdoc", "import", "1DocAbc"]).is_err());
+        assert!(Cli::try_parse_from(["scrybe", "gdoc", "frobnicate"]).is_err());
+    }
+
+    /// `gdoc` is a known subcommand, so `scrybe gdoc status` must not become
+    /// `scrybe open gdoc status`.
+    #[test]
+    fn inject_open_leaves_gdoc_alone() {
+        let args = vec![
+            "scrybe".to_string(),
+            "gdoc".to_string(),
+            "status".to_string(),
+        ];
+        assert_eq!(inject_open_if_path(args.clone()), args);
+    }
+
+    /// Every state names the config directory: it is the one thing a user
+    /// doing the one-time setup needs, and `not_configured` must say where
+    /// `client.json` goes rather than send them back to the docs.
+    #[test]
+    fn auth_status_line_covers_every_state() {
+        let dir = "/home/u/.config/scrybe/google";
+        assert_eq!(
+            auth_status_line(&serde_json::json!({
+                "status": "logged_in", "expires_at": "2026-10-16T12:00:00Z", "config_dir": dir
+            })),
+            format!("Signed in (token expires 2026-10-16T12:00:00Z; config {dir})")
+        );
+        assert_eq!(
+            auth_status_line(&serde_json::json!({
+                "status": "logged_out", "expires_at": null, "config_dir": dir
+            })),
+            format!("Signed out (config {dir})")
+        );
+        let line = auth_status_line(&serde_json::json!({
+            "status": "not_configured", "expires_at": null, "config_dir": dir
+        }));
+        assert!(
+            line.starts_with("Not configured — put client.json in "),
+            "{line}"
+        );
+        assert!(line.contains(dir), "{line}");
+        assert!(line.contains("SCRYBE_GOOGLE_CLIENT_ID"), "{line}");
+        assert!(line.contains("docs/google-docs.md"), "{line}");
+        // A payload without the directory still prints something sensible.
+        assert_eq!(
+            auth_status_line(&serde_json::json!({ "status": "logged_out" })),
+            "Signed out (config ?)"
+        );
     }
 
     /// The installer lifecycle is a real subcommand, not a path shortcut.

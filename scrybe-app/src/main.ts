@@ -7,6 +7,7 @@ import "./styles/mcp_panel.css";
 import "./styles/vcs_panel.css";
 import "./styles/pathbar.css";
 import "./styles/print.css";
+import "./styles/gdocs.css";
 import { invoke, convertFileSrc } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { basename, dirname, homeDir, join } from "@tauri-apps/api/path";
@@ -15,7 +16,7 @@ import { ask, message, save as saveDialog } from "@tauri-apps/plugin-dialog";
 import { showToast } from "./toast";
 import { AppState } from "./state";
 import { renderTabBar } from "./tabs";
-import { createEditor, swapDocument, shouldSuppressAutosave, setEditorTheme, setVim, setWrap, setEditorLanguage, classifyFile } from "./editor";
+import { createEditor, swapDocument, shouldSuppressAutosave, setEditorTheme, setVim, setWrap, setEditorLanguage, classifyFile, isImagePath, asMarkdown } from "./editor";
 import { PreviewPane, SAVE_MERMAID_PNG_EVENT } from "./preview";
 import type { MermaidPngExportDetail, MermaidPreviewDocument } from "./mermaid_png";
 import { documentStem, mermaidPngFilename, rasterizeMermaidSvg } from "./mermaid_png";
@@ -26,6 +27,8 @@ import { Sidebar } from "./sidebar";
 import { PluginManager } from "./plugins";
 import { McpPanel } from "./mcp_panel";
 import { VcsPanel } from "./vcs_panel";
+import { exportActiveTabToGdoc, importFromGdoc, closeImportPanel, gdocSignIn, gdocSignOut } from "./gdocs";
+import type { GdocsDeps } from "./gdocs";
 
 // Keep recent console output in an in-memory ring so the socket `logs`
 // method can surface errors to agents without DevTools open. Replaces the
@@ -246,6 +249,13 @@ async function reloadActiveTabNow(): Promise<void> {
   await reloadTabFromDisk(tab.path);
 }
 
+// Google Docs export/import (gdocs.ts) borrows the active tab and the one
+// open-file path, so an imported .md opens exactly like a sidebar click.
+const gdocs: GdocsDeps = {
+  activeTab: () => state.activeTab(),
+  openFile: openFileByPath,
+};
+
 buildToolbar(toolbarEl, {
   onThemeChange: (theme) => applyTheme(theme),
   onCyclePreview: () => cyclePreviewMode(),
@@ -254,6 +264,7 @@ buildToolbar(toolbarEl, {
   onSave: () => { void saveActiveTabNow(); },
   onReload: () => { void reloadActiveTabNow(); },
   onExport: () => { void exportActiveTabToWord(); },
+  onExportGdoc: () => { void exportActiveTabToGdoc(gdocs); },
   onPrint: () => { void printActiveTab(); },
   onToggleVim: () => setVimEnabled(!vimEnabled),
   onToggleWrap: () => setWrapEnabled(!wrapEnabled),
@@ -272,6 +283,9 @@ async function printActiveTab(): Promise<void> {
     showToast("Printing is available for Markdown documents", "info");
     return;
   }
+  // print.css hides the import panel too, but an open one is dismissed so
+  // the page the user sees afterwards matches what printed.
+  closeImportPanel();
   const request = beginPreviewRequest(tab.id, tab.path);
   await preview.render(tab.content, request.document);
   // KaTeX/Mermaid post-processing is async; give it a beat before the snapshot.
@@ -689,16 +703,10 @@ function closeTab(id: string): void {
   doCloseTab(id);
 }
 
-function extOf(path: string): string {
-  return path.split(".").pop()?.toLowerCase() ?? "";
-}
-
 async function openFileByPath(path: string): Promise<void> {
   try {
-    const ext = extOf(path);
-
-    // PNG — binary file, render as image directly
-    if (ext === "png" || ext === "jpg" || ext === "jpeg" || ext === "gif" || ext === "webp") {
+    // Raster image — binary file, render as image directly
+    if (isImagePath(path)) {
       const existing = state.tabs.find(t => t.path === path);
       if (existing) {
         state.activeTabId = existing.id;
@@ -719,7 +727,7 @@ async function openFileByPath(path: string): Promise<void> {
       swapDocument(view, existing.content);
       void setEditorLanguage(view, existing.path);
       applyViewMode(existing.viewMode);
-      renderPreview(ext === "mmd" ? "```mermaid\n" + existing.content + "\n```" : existing.content);
+      renderPreview(asMarkdown(path, existing.content));
       redrawTabs();
       return;
     }
@@ -764,7 +772,7 @@ async function openFileByPath(path: string): Promise<void> {
     // Highlight for the file's language and open code/text edit-only.
     void setEditorLanguage(view, path);
     applyViewMode(state.activeTab()?.viewMode ?? "both");
-    renderPreview(ext === "mmd" ? "```mermaid\n" + useContent + "\n```" : useContent);
+    renderPreview(asMarkdown(path, useContent));
     // Restored buffer differs from disk → flag the tab dirty so the user
     // gets the dirty indicator and the save-on-close prompt next time.
     if (restoredFromBuffer) state.markDirty(newTabId);
@@ -863,6 +871,10 @@ listen<string>("scrybe://menu", event => {
     case "save":        void saveActiveTabNow(); break;
     case "reload":      void reloadActiveTabNow(); break;
     case "export_docx": void exportActiveTabToWord(); break;
+    case "export_gdoc": void exportActiveTabToGdoc(gdocs); break;
+    case "import_gdoc": void importFromGdoc(gdocs); break;
+    case "gdoc_sign_in": void gdocSignIn(); break;
+    case "gdoc_sign_out": void gdocSignOut(); break;
     case "export_figures": void exportActiveTabFigures(); break;
     case "print":       void printActiveTab(); break;
     case "close_tab":

@@ -187,7 +187,7 @@ fn with_remote_error_app<T>(f: impl FnOnce() -> T) -> T {
 // ── (a) tools/list — the complete advertised surface ────────────────────────
 
 #[test]
-fn tools_list_serves_22_tools_each_with_schemas_and_annotations() {
+fn tools_list_serves_26_tools_each_with_schemas_and_annotations() {
     let resp = handle(&tools_list_request());
     assert_eq!(resp["jsonrpc"], "2.0");
     assert_eq!(resp["id"], 41);
@@ -205,6 +205,10 @@ fn tools_list_serves_22_tools_each_with_schemas_and_annotations() {
             "export_figures",
             "extract",
             "find",
+            "gdoc_auth",
+            "gdoc_export",
+            "gdoc_import",
+            "gdoc_list",
             "lint",
             "list_tabs",
             "logs",
@@ -221,7 +225,7 @@ fn tools_list_serves_22_tools_each_with_schemas_and_annotations() {
             "state",
             "view_mode",
         ],
-        "the 0.6.0 tool surface changed{REGEN_HINT}"
+        "the frozen 0.6 tool surface changed{REGEN_HINT}"
     );
     for tool in tools {
         assert!(tool["inputSchema"].is_object(), "no inputSchema: {tool}");
