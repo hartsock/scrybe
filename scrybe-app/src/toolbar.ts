@@ -20,6 +20,8 @@ export interface ToolbarHandlers {
   onReload: () => void;
   /// Export the active tab to a Word (.docx) document.
   onExport: () => void;
+  /// Export the active tab's live buffer to Google Docs (create or update).
+  onExportGdoc: () => void;
   /// Print the active tab (⌘P / Ctrl+P) — opens the OS print dialog, which
   /// also offers "Save as PDF". Prints the rendered document, not the editor.
   onPrint: () => void;
@@ -37,6 +39,7 @@ export function buildToolbar(container: HTMLElement, handlers: ToolbarHandlers):
       <button id="tb-save" title="Save active tab (⌘S / Ctrl+S)" style="${btn}">💾 Save</button>
       <button id="tb-reload" title="Reload active tab from disk (⌘R / Ctrl+R)" style="${btn}">🔄 Reload</button>
       <button id="tb-export" title="Export active tab to Word (.docx)" style="${btn}">📄 Export…</button>
+      <button id="tb-gdoc" title="Export active tab to Google Docs" style="${btn}">☁️ Google Docs</button>
       <button id="tb-print" title="Print active tab (⌘P / Ctrl+P) — or Save as PDF" style="${btn}">🖨️ Print</button>
       <button id="open-file" title="Open file (⌘O)" style="${btn}">Open…</button>
       <button id="open-folder" title="Open folder" style="${btn}">Open Folder…</button>
@@ -57,6 +60,8 @@ export function buildToolbar(container: HTMLElement, handlers: ToolbarHandlers):
     .addEventListener("click", () => handlers.onReload());
   container.querySelector<HTMLButtonElement>("#tb-export")!
     .addEventListener("click", () => handlers.onExport());
+  container.querySelector<HTMLButtonElement>("#tb-gdoc")!
+    .addEventListener("click", () => handlers.onExportGdoc());
   container.querySelector<HTMLButtonElement>("#tb-print")!
     .addEventListener("click", () => handlers.onPrint());
   container.querySelector<HTMLButtonElement>("#open-file")!

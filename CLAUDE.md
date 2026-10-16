@@ -22,10 +22,11 @@ not make the toolchain more impressive.
 | `scrybe-core/` | Rust | AST, Document, ContentAddressable (BLAKE3+CBOR), Plugin trait, Workspace |
 | `scrybe-render/` | Rust | HTML pipeline, syntect highlighting, KaTeX/Mermaid |
 | `scrybe-tools/` | Rust | The ONE shared ToolSpec registry (handlers, schemas, dispatch) consumed by both the CLI and the MCP server |
-| `scrybe-mcp-server/` | Rust | Inbound MCP server — a thin stdio shim over `scrybe-tools`. Tools: open/read/section/edit/save/find/render/embed/extract/lint/list_tabs/mermaid_to_png/export_figures/logs/reload/quit/close_tab + UI-parity tools state/set_theme/view_mode/set_vim/export |
+| `scrybe-mcp-server/` | Rust | Inbound MCP server — a thin stdio shim over `scrybe-tools`. Tools: open/read/section/edit/save/find/render/embed/extract/lint/list_tabs/mermaid_to_png/export_figures/logs/reload/quit/close_tab + UI-parity tools state/set_theme/view_mode/set_vim/export + Google Docs tools gdoc_auth/gdoc_list/gdoc_export/gdoc_import |
 | `scrybe-mcp-client/` | Rust | Outbound MCP — registers external agent servers |
 | `scrybe-mermaid/` | Rust | PNG iTXt codec (Mermaid source embedded in PNG metadata) |
 | `scrybe-mermaid-render/` | Rust | Thin wrapper over the adopted `mermaid-rs-renderer`: SVG `<metadata>` provenance (source + sha256) + PNG via resvg |
+| `scrybe-gdocs/` | Rust | Google Docs integration: OAuth 2.0 PKCE (bring-your-own client, `drive.file`), Drive upload/export, Markdown ⇄ Google Doc with Mermaid PNG provenance |
 | `scrybe-rpc/` | Rust | CLI↔GUI local IPC (Unix socket / Windows named pipe) |
 | `scrybe-ratatui/` | Rust | Markdown → ratatui widget rendering (wrap-aware scrolling; opt-in syntect `highlight` feature) |
 | `scrybe-tui/` | Rust | Terminal Markdown viewer (`scrybe view` drives it) |
@@ -168,7 +169,8 @@ claude mcp add scrybe -- scrybe-mcp-server stdio
 Available tools: `open`, `read`, `section`, `edit`, `save`, `find`,
 `render`, `embed`, `extract`, `lint`, `list_tabs`, `mermaid_to_png`,
 `export_figures`, `logs`, `reload`, `quit`, `close_tab`, `state`,
-`set_theme`, `view_mode`, `set_vim`, `export`
+`set_theme`, `view_mode`, `set_vim`, `export`, `gdoc_auth`, `gdoc_list`,
+`gdoc_export`, `gdoc_import`
 
 All tools are served by the one shared `scrybe-tools` registry (the same
 handlers, schemas, and dispatch the CLI uses), so the MCP and CLI surfaces
@@ -180,7 +182,13 @@ explicit persist (the agent-side twin of Cmd+S / 💾).
 Every human control in scrybe-app has an MCP equivalent and vice versa
 (`state`/`set_theme`/`view_mode`/`set_vim`/`export`/`export_figures` mirror
 the path bar, theme dropdown, View button, Vim toggle, the Export button,
-and the "Export Diagrams…" menu item).
+and the "Export Diagrams…" menu item; `gdoc_export`/`gdoc_import`/`gdoc_list`/
+`gdoc_auth` mirror the ☁️ Google Docs toolbar button (File ▸ Export to Google
+Docs…), File ▸ Import from Google Docs…, that picker's list, and File ▸ Google
+Docs ▸ "Sign in to Google…" / "Sign out of Google"). The `gdoc_*`
+tools need no running app but do need the user's Google sign-in
+(`docs/google-docs.md`); `scrybe-gdocs` is pure Rust and all its tests run
+offline against a fake HTTP client.
 
 See `AGENTS.md` for full agent interaction guide.
 

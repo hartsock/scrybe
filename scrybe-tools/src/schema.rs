@@ -6,7 +6,7 @@
 //! Every tool's `data` object carries the same envelope keys added by
 //! dispatch — `v` (payload version), `kind` (the tool name), and, on a
 //! business failure, `tool_error {code, message}`. [`envelope`] wraps a
-//! tool's payload properties in that envelope exactly once, so the 22 tool
+//! tool's payload properties in that envelope exactly once, so the 26 tool
 //! schemas don't hand-copy it (and can't drift).
 //!
 //! Semantics: the payload's `required` keys describe the SUCCESS shape —

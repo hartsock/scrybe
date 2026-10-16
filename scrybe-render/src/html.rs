@@ -5,7 +5,7 @@
 
 use std::sync::OnceLock;
 
-use pulldown_cmark::{CodeBlockKind, Event, Options, Parser, Tag, TagEnd};
+use pulldown_cmark::{CodeBlockKind, Event, Parser, Tag, TagEnd};
 use syntect::easy::HighlightLines;
 use syntect::highlighting::ThemeSet;
 use syntect::html::{styled_line_to_highlighted_html, IncludeBackground};
@@ -55,8 +55,7 @@ pub fn render_html(doc: &Document, theme: Theme) -> RenderOutput {
 
 /// Runs pulldown-cmark with custom syntax-highlighted code blocks.
 fn render_with_highlighting(source: &str) -> String {
-    let opts = Options::all();
-    let parser = Parser::new_ext(source, opts);
+    let parser = Parser::new_ext(source, crate::PARSE_OPTIONS);
 
     let mut output = String::new();
     let mut in_code_block = false;
@@ -287,6 +286,32 @@ mod tests {
         assert!(
             !out.body_html.contains("title="),
             "body_html: {}",
+            out.body_html
+        );
+    }
+
+    #[test]
+    fn test_footnote_nested_fence_is_highlighted_inside_the_definition() {
+        let md = "Text[^1]\n\n[^1]: Note\n\n    ```rust\n    fn main() {}\n    ```\n";
+        let out = render_html(&doc(md), Theme::Default);
+        let open = out
+            .body_html
+            .find("<div class=\"footnote-definition\"")
+            .expect("footnote definition div");
+        let close = out.body_html[open..]
+            .find("</div>")
+            .expect("definition closes")
+            + open;
+        let inside = &out.body_html[open..close];
+        assert!(
+            inside.contains(r#"<code class="language-rust">"#),
+            "fenced block inside the footnote: {}",
+            out.body_html
+        );
+        assert!(inside.contains("<span"), "highlighted: {}", out.body_html);
+        assert!(
+            !out.body_html.contains("```"),
+            "no raw fence text: {}",
             out.body_html
         );
     }

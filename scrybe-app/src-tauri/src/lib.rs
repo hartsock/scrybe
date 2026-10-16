@@ -27,6 +27,8 @@
 //! - [`vcs_fetch`]         — fetch from a named remote (P4.8)
 //! - [`vcs_log`]           — return recent commit summaries (P4.8)
 //! - [`vcs_remotes`]       — list configured remotes with roles (P4.8)
+//! - [`gdoc_export`] / [`gdoc_import`] / [`gdoc_list`] / [`gdoc_status`] /
+//!   [`gdoc_login`] / [`gdoc_logout`] — Google Docs via `scrybe-gdocs`
 //!
 //! Full editor integration (P4.2–P4.11) builds on this IPC bridge.
 
@@ -833,6 +835,98 @@ fn export_figures(content: String, path: String) -> Result<Vec<String>, String> 
     Ok(results.into_iter().map(|r| r.path).collect())
 }
 
+// ─── Google Docs (scrybe-gdocs) ──────────────────────────────────────────────
+//
+// Every scrybe-gdocs entry point is synchronous and may sit on an OAuth
+// consent round-trip or a Drive upload, so each command hops to a blocking
+// thread and the webview never stalls. Errors are returned as
+// `"<code>: <message>"`: the frontend branches on the code prefix
+// (`not_logged_in:` offers sign-in and retries, `not_configured:` shows the
+// message as-is) and strips it for everything else. MCP/CLI twins:
+// `gdoc_export`, `gdoc_import`, `gdoc_list`, `gdoc_auth`.
+
+/// `"<code>: <message>"` — the error contract shared by every `gdoc_*` command.
+fn gdoc_error(e: scrybe_gdocs::GdocsError) -> String {
+    format!("{}: {e}", e.code())
+}
+
+/// A tools-layer path gate's refusal in the same string contract.
+fn gdoc_gate(err: scrybe_tools::ToolError) -> String {
+    format!("{}: {}", err.code, err.message)
+}
+
+/// Run a scrybe-gdocs call off the async runtime and flatten both failure
+/// kinds — a panicked worker and a `GdocsError` — into the string contract.
+async fn gdoc_blocking<T: Send + 'static>(
+    f: impl FnOnce() -> scrybe_gdocs::Result<T> + Send + 'static,
+) -> Result<T, String> {
+    tauri::async_runtime::spawn_blocking(f)
+        .await
+        .map_err(|e| format!("internal_error: {e}"))?
+        .map_err(gdoc_error)
+}
+
+/// Export the active tab's LIVE buffer `content` to Google Docs — created on
+/// the first export, updated after (the `<stem>.gdoc.json` sidecar beside
+/// `path` remembers the doc id, which is why an unsaved tab can't export).
+/// Mirrored by the MCP/CLI `gdoc_export` tool, whose path gate runs here too
+/// so the two refuse the same inputs (a `.mmd` tab arrives already fenced).
+#[tauri::command]
+async fn gdoc_export(
+    content: String,
+    path: String,
+    title: Option<String>,
+) -> Result<scrybe_gdocs::ExportReport, String> {
+    if let Some(err) = scrybe_tools::tools::gdoc::validate_export_path(&path) {
+        return Err(gdoc_gate(err));
+    }
+    gdoc_blocking(move || {
+        scrybe_gdocs::export_markdown_source(content, std::path::PathBuf::from(path), title)
+    })
+    .await
+}
+
+/// Import a Google Doc (`doc` is an id or a docs.google.com URL) to the
+/// Markdown file `output`, writing sibling images and a sidecar next to it.
+/// Mirrored by the MCP/CLI `gdoc_import` tool, whose output gate (a
+/// `.md`/`.markdown` path in an existing directory, no symlinks) runs here
+/// too.
+#[tauri::command]
+async fn gdoc_import(doc: String, output: String) -> Result<scrybe_gdocs::ImportReport, String> {
+    if let Some(err) = scrybe_tools::tools::gdoc::validate_output(&output) {
+        return Err(gdoc_gate(err));
+    }
+    gdoc_blocking(move || scrybe_gdocs::import_doc(doc, std::path::PathBuf::from(output))).await
+}
+
+/// List the Google Docs Scrybe created, newest first (`drive.file` scope only
+/// sees those). Mirrored by the MCP/CLI `gdoc_list` tool.
+#[tauri::command]
+async fn gdoc_list() -> Result<Vec<scrybe_gdocs::DocSummary>, String> {
+    gdoc_blocking(scrybe_gdocs::list_docs).await
+}
+
+/// Report the cached sign-in state without touching the network. Mirrored by
+/// the MCP/CLI `gdoc_auth` tool (`status`).
+#[tauri::command]
+async fn gdoc_status() -> Result<scrybe_gdocs::AuthStatus, String> {
+    gdoc_blocking(scrybe_gdocs::status).await
+}
+
+/// Run Google's consent flow in the user's browser and cache the token.
+/// Mirrored by the MCP/CLI `gdoc_auth` tool (`login`).
+#[tauri::command]
+async fn gdoc_login() -> Result<scrybe_gdocs::AuthStatus, String> {
+    gdoc_blocking(scrybe_gdocs::login).await
+}
+
+/// Revoke and forget the cached token. Mirrored by the MCP/CLI `gdoc_auth`
+/// tool (`logout`).
+#[tauri::command]
+async fn gdoc_logout() -> Result<scrybe_gdocs::AuthStatus, String> {
+    gdoc_blocking(scrybe_gdocs::logout).await
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -856,6 +950,12 @@ pub fn run() {
             list_directory,
             export_docx,
             export_figures,
+            gdoc_export,
+            gdoc_import,
+            gdoc_list,
+            gdoc_status,
+            gdoc_login,
+            gdoc_logout,
             watch_file,
             unwatch_file,
             note_autosave,
@@ -1094,6 +1194,67 @@ mod tests {
         } else {
             assert_eq!(name, "scrybe-docx");
         }
+    }
+
+    #[test]
+    fn gdoc_error_is_code_prefixed_for_frontend_branching() {
+        let s = gdoc_error(scrybe_gdocs::GdocsError::NotLoggedIn(
+            "run gdoc login first".into(),
+        ));
+        assert_eq!(s, "not_logged_in: run gdoc login first");
+        let s = gdoc_error(scrybe_gdocs::GdocsError::NotConfigured("no client".into()));
+        assert!(s.starts_with("not_configured: "), "{s}");
+    }
+
+    #[test]
+    fn gdoc_import_rejects_bad_ref_offline() {
+        // parse_doc_ref fails before any config or network access, so this
+        // exercises the spawn_blocking + error-contract path deterministically.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let out = dir
+            .path()
+            .join("imported.md")
+            .to_string_lossy()
+            .into_owned();
+        let err = tauri::async_runtime::block_on(gdoc_import("not a doc ref".into(), out))
+            .expect_err("bad ref must fail");
+        assert!(err.starts_with("invalid_argument: "), "{err}");
+        assert!(!dir.path().join("imported.md").exists());
+    }
+
+    /// The human control runs the MCP/CLI output gate: a non-Markdown
+    /// destination (what a GTK save dialog hands back for a typed name) is
+    /// refused before any config or network access, as `gdoc_import` is.
+    #[test]
+    fn gdoc_import_rejects_a_non_markdown_output_offline() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let out = dir.path().join("imported.txt");
+        let err = tauri::async_runtime::block_on(gdoc_import(
+            // A well-formed doc id, so only the output gate can reject.
+            "1DocAbcdefghijklmnopqrstuvwxyz".into(),
+            out.to_string_lossy().into_owned(),
+        ))
+        .expect_err("non-Markdown output must fail");
+        assert!(err.starts_with("invalid_argument: "), "{err}");
+        assert!(err.contains(".md"), "{err}");
+        assert!(!out.exists());
+        assert!(!dir.path().join("imported.gdoc.json").exists());
+    }
+
+    /// Export runs the same path gate as the tool: an image or code tab's
+    /// path never gets a Google Doc and a sidecar written beside it.
+    #[test]
+    fn gdoc_export_rejects_a_non_markdown_path_offline() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let photo = dir.path().join("photo.png");
+        let err = tauri::async_runtime::block_on(gdoc_export(
+            String::new(),
+            photo.to_string_lossy().into_owned(),
+            None,
+        ))
+        .expect_err("image path must fail");
+        assert!(err.starts_with("invalid_argument: "), "{err}");
+        assert!(!dir.path().join("photo.gdoc.json").exists());
     }
 
     #[test]

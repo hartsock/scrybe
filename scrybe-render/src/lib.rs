@@ -14,10 +14,23 @@ pub mod math;
 pub mod mermaid;
 pub mod theme;
 
+use pulldown_cmark::Options;
+
 pub use html::render_html;
 pub use math::{extract_math, MathPlaceholder};
 pub use mermaid::inject_mermaid_wrappers;
 pub use theme::Theme;
+
+/// The pulldown-cmark option set every render uses: every extension except
+/// the legacy footnote mode. Under `ENABLE_OLD_FOOTNOTES` a footnote
+/// definition is a single paragraph, so a block indented under it (a fenced
+/// code block, say) renders as an indented code block outside the footnote;
+/// GFM-style footnotes nest it inside the definition, the same model
+/// scrybe-core's `Ast` uses. Consumers that must find the same blocks the
+/// renderer does (scrybe-gdocs) parse with this.
+pub const PARSE_OPTIONS: Options = Options::all()
+    .difference(Options::ENABLE_OLD_FOOTNOTES)
+    .union(Options::ENABLE_FOOTNOTES);
 
 /// The rendered output of a document.
 #[derive(Debug, Clone)]
