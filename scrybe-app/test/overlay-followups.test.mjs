@@ -2,7 +2,7 @@
 import test,{after} from 'node:test';
 import assert from 'node:assert/strict';
 import {dom,withEditor,trackSource} from './helpers/overlay-editor.mjs';
-import {select,pos,type} from './helpers/overlay-input.mjs';
+import {select,pos,type,press} from './helpers/overlay-input.mjs';
 after(()=>dom.window.close());
 for(const scheme of ['HTTP','Https','HTTPS'])
 test('typed upper-case '+scheme+':// link is saved, not refused',async()=>withEditor('Intro text.\n',(e,v)=>{
@@ -29,3 +29,9 @@ test('hung save PUT is aborted by the injected timer and surfaces as a retryable
   assert.ok(c.pending,'pending request kept so the retry reuses its saveId');
   assert.ok(cleared);
 });
+for(const S of ['* a\n* b\n\nEnd.\n','+ a\n+ b\n\nEnd.\n'])
+test('Enter in a '+S[0]+' list adds an item without a consent prompt',async()=>withEditor(S,(e,v)=>{
+  // Bug: the added item was serialized with "-", starting a new list; the merge failed and the save asked for consent.
+  const t=trackSource(e,S);select(v,pos(v,'b'));press(v,'Enter');type(v,'c');
+  const r=t.prepare();assert.equal(r.status,'ok',r.reason);assert.equal(r.value,S.replace('\n\nEnd','\n'+S[0]+' c\n\nEnd'));
+}));
