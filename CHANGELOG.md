@@ -21,6 +21,78 @@ lock-step version (`[workspace.package] version`).
   remove the command from the native Scrybe menu; Homebrew links the same
   version-matched binary through its cask.
 
+### Added — Google Docs (`scrybe-gdocs`)
+- **New crate `scrybe-gdocs`**: export a Markdown document to a native Google
+  Doc in Drive and import it back to Markdown. OAuth 2.0 installed-app flow
+  with PKCE and a loopback redirect; **bring-your-own OAuth client**
+  (`client.json` under `<config dir>/scrybe/google/`, or
+  `SCRYBE_GOOGLE_CLIENT_ID`/`SCRYBE_GOOGLE_CLIENT_SECRET`; `SCRYBE_GOOGLE_DIR`
+  moves the directory) — Scrybe ships no client id. Token cached beside the
+  client (mode 0600) and refreshed automatically. Scope is **`drive.file`**
+  only: Scrybe sees just the docs it created, kept in a **Scrybe** folder in
+  My Drive. Every Google call goes through an `HttpClient` seam, so the
+  whole test suite runs offline.
+- **Four tools** in the shared `scrybe-tools` registry, served by the MCP
+  server and the CLI alike: `gdoc_auth` (`action`: `login`/`logout`/`status`),
+  `gdoc_list`, `gdoc_export` (`path`, `title?`) and `gdoc_import` (`doc`,
+  `output`). Failures are typed business errors: `not_configured`,
+  `not_logged_in`, `auth_failed`, `doc_not_found`, `api_error`, `http_error`,
+  `render_failed`, `invalid_argument`, `io_error`.
+- **CLI**: `scrybe gdoc login|logout|status|list|export <FILE> [--title]
+  [--json]|import <DOC> --out <FILE> [--json]` (`<DOC>` is an id or a
+  `docs.google.com` URL).
+- **App** (parity rule): a ☁️ **Google Docs** toolbar button exports the
+  active tab; File ▸ Export to Google Docs… / Import from Google Docs…; a
+  File ▸ Google Docs submenu with "Sign in to Google…" / "Sign out of
+  Google".
+- **Update in place via sidecar**: the first export writes `<stem>.gdoc.json`
+  beside the file (doc id, URL, folder, export time, content hash, figure
+  manifest); later exports update that same doc, so its URL and sharing
+  settings survive. Import writes the sidecar too, so an imported file
+  re-exports to the doc it came from.
+- **Three-carrier Mermaid provenance**: each diagram's source, uuid and
+  SHA-256 travel in the PNG's iTXt chunk, in the image alt text
+  (`scrybe-mermaid:v1:…`), and in the sidecar manifest. Import tries them in
+  that order (iTXt → alt text from the Markdown export → sidecar manifest;
+  when no sidecar for the same doc exists, the HTML export's alt text is
+  tried before giving up) and reports which carrier each figure came back
+  from (`figures[].verification`: `verified` / `unverified` / `alt-text` /
+  `manifest`), so a doc whose images Google re-encoded still round-trips to
+  ```` ```mermaid ```` fences.
+- **Local images are embedded only from under the document's directory**
+  (subfolders included); `../` paths, absolute paths, missing files and
+  non-image extensions are left as written (Google shows them broken) and
+  listed in the export result's `images_skipped` — `scrybe gdoc export`
+  prints the count to stderr and the app's toast says how many.
+- **Path gates shared by every surface**: `gdoc_export` takes only Markdown
+  paths (`.md`, `.markdown`, `.mdown`, `.mkd`, `.mkdn`, `.mdx`, or a bare
+  `.mmd` diagram, which exports as a one-figure doc), `gdoc_import` writes
+  only `.md`/`.markdown` into an existing directory, and both refuse a
+  symlinked output, sidecar or `<stem>_img_NN` target (`invalid_argument`,
+  before any Google request). The app's ☁️ export and File ▸ Import run the
+  same gates, refuse image/code/text tabs, and append `.md` when a Linux
+  save dialog returns a bare name.
+- `scrybe gdoc status` (and `login`/`logout`) print the Google config
+  directory in every state and take `--json`; `status` exits 1 unless signed
+  in, so scripts can branch.
+
+### Changed
+- **Footnotes now parse GFM-style** (`scrybe-render` `PARSE_OPTIONS`): a
+  block indented under a footnote definition (a fenced code block or a second
+  paragraph) now belongs to that footnote instead of rendering as an indented
+  code block after it, and an undefined `[^n]` reference renders as literal
+  text rather than a dangling link. Applies everywhere `render_html` is used:
+  the app preview, `scrybe render`, the MCP `render` tool and the `scrybe-py`
+  `render_html` binding. (Word export parses separately and is unaffected.)
+- An unconfigured OAuth client now reports `not_configured` before
+  `not_logged_in` on every `gdoc_*` call (previously only `login` and
+  `status` noticed), so a fresh machine is told what to set up rather than
+  to sign in to nothing.
+
+### Docs
+- `docs/google-docs.md`: one-time OAuth client setup, the app/CLI/MCP
+  surface, error codes, the provenance fallbacks, and a round-trip check.
+
 ## [0.6.3] — 2026-07-21
 
 ### Added

@@ -33,6 +33,8 @@ pub enum Facet {
     Vcs,
     UiParity,
     Swarm,
+    /// Third-party services — Google Docs.
+    Integrations,
 }
 
 /// Versioned schema for a tool's stable `data` payload. Agents read `data`; they

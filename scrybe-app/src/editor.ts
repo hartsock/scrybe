@@ -16,9 +16,14 @@ import { vim } from "@replit/codemirror-vim";
 export type DocKind = "markdown" | "code" | "text";
 
 /// Extensions that Scrybe treats as its native Markdown surface. `.mmd` rides
-/// here too: it keeps a rendered (diagram) preview, wrapped in a fence at the
-/// open site — so it stays a preview-capable tab rather than edit-only code.
+/// here too: it keeps a rendered (diagram) preview, wrapped in a fence by
+/// [`asMarkdown`] — so it stays a preview-capable tab rather than edit-only code.
 const MARKDOWN_EXTS = new Set(["md", "markdown", "mdown", "mkd", "mkdn", "mdx", "mmd"]);
+
+/// Raster images the sidebar opens as an image preview rather than a buffer.
+/// Such a tab has a path but no text; anything that treats the active tab as
+/// a Markdown document (print, Google Docs export) must check this first.
+const IMAGE_EXTS = new Set(["png", "jpg", "jpeg", "gif", "webp"]);
 
 function fileName(path: string): string {
   return path.split("/").pop() ?? path;
@@ -28,6 +33,19 @@ function extOf(path: string): string {
   const base = fileName(path);
   const dot = base.lastIndexOf(".");
   return dot > 0 ? base.slice(dot + 1).toLowerCase() : "";
+}
+
+/// Whether `path` is one of the image files opened as an image tab.
+export function isImagePath(path: string | null): boolean {
+  return path !== null && IMAGE_EXTS.has(extOf(path));
+}
+
+/// A tab's buffer as the Markdown it is previewed as: a bare `.mmd` diagram
+/// is wrapped in a ```mermaid fence; everything else is itself.
+export function asMarkdown(path: string | null, content: string): string {
+  return path !== null && extOf(path) === "mmd"
+    ? "```mermaid\n" + content + "\n```"
+    : content;
 }
 
 /// Classify a file by name into a [`DocKind`]. Markdown extensions (and
