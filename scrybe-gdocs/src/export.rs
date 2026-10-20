@@ -9,9 +9,9 @@
 //! Local images are inlined as `data:` URIs so Drive's HTML import can embed
 //! them without fetching anything.
 //!
-//! Everything here parses with [`scrybe_render::PARSE_OPTIONS`], the option
-//! set the uploaded HTML is rendered with, so what is found, inlined and
-//! numbered is what Google sees.
+//! Everything here parses the body after any leading front matter with
+//! [`scrybe_render::PARSE_OPTIONS`], exactly as the uploaded HTML is
+//! rendered, so what is found, inlined and numbered is what Google sees.
 
 use std::borrow::Cow;
 use std::ops::Range;
@@ -160,10 +160,20 @@ fn is_mermaid_info(info: &str) -> bool {
     info.split_whitespace().next() == Some("mermaid")
 }
 
+/// The Markdown body after any leading front matter, with its byte offset in
+/// `md`. scrybe-render and scrybe-core's `Ast` parse only this, so YAML lines
+/// such as `# comment` are never mistaken for Markdown.
+fn body_of(md: &str) -> (usize, &str) {
+    let (_, body) = scrybe_core::frontmatter::split(md);
+    (md.len() - body.len(), body)
+}
+
 fn find_mermaid_fences(md: &str) -> Vec<Fence> {
+    let (offset, body) = body_of(md);
     let mut out = Vec::new();
     let mut current: Option<(Range<usize>, String)> = None;
-    for (event, range) in Parser::new_ext(md, scrybe_render::PARSE_OPTIONS).into_offset_iter() {
+    for (event, range) in Parser::new_ext(body, scrybe_render::PARSE_OPTIONS).into_offset_iter() {
+        let range = offset + range.start..offset + range.end;
         match event {
             Event::Start(Tag::CodeBlock(CodeBlockKind::Fenced(info))) if is_mermaid_info(&info) => {
                 current = Some((range, String::new()));
@@ -460,7 +470,9 @@ pub fn inline_local_images(md: &str, doc_dir: &Path) -> (String, Vec<String>) {
     let mut edits: Vec<(Range<usize>, String)> = Vec::new();
     let mut skipped = Vec::new();
     let mut image_depth = 0usize;
-    for (event, range) in Parser::new_ext(md, scrybe_render::PARSE_OPTIONS).into_offset_iter() {
+    let (offset, body) = body_of(md);
+    for (event, range) in Parser::new_ext(body, scrybe_render::PARSE_OPTIONS).into_offset_iter() {
+        let range = offset + range.start..offset + range.end;
         match event {
             Event::Start(Tag::Image {
                 link_type,
@@ -508,15 +520,15 @@ pub struct DocHtml {
     pub skipped_images: Vec<String>,
 }
 
-/// Text of the first H1 (ATX or setext), else `fallback`. Parsed as the
-/// renderer parses it, so heading attributes (`{#id}`) are not part of the
-/// name and smart punctuation matches the rendered body; an image inside
-/// the heading contributes nothing.
+/// Text of the first H1 (ATX or setext) of the body, else `fallback`. Parsed
+/// as the renderer parses it, so front matter is skipped, heading attributes
+/// (`{#id}`) are not part of the name and smart punctuation matches the
+/// rendered body; an image inside the heading contributes nothing.
 pub fn doc_title(md: &str, fallback: &str) -> String {
     let mut in_h1 = false;
     let mut image_depth = 0usize;
     let mut title = String::new();
-    for event in Parser::new_ext(md, scrybe_render::PARSE_OPTIONS) {
+    for event in Parser::new_ext(body_of(md).1, scrybe_render::PARSE_OPTIONS) {
         match event {
             Event::Start(Tag::Heading {
                 level: HeadingLevel::H1,
@@ -1179,6 +1191,41 @@ mod tests {
         assert_eq!(doc.title, "Untitled");
         assert!(doc.html.contains("<p>plain <em>text</em></p>"));
         assert!(doc.figures.is_empty());
+    }
+
+    const FRONT_MATTER: &str = "---\n# YAML comment\ntitle: Not this\n---\n";
+
+    #[test]
+    fn doc_title_skips_front_matter() {
+        let md = format!("{FRONT_MATTER}# Real Title\n\nBody.\n");
+        assert_eq!(doc_title(&md, "stem"), "Real Title");
+        assert_eq!(doc_title(&format!("{FRONT_MATTER}Body.\n"), "stem"), "stem");
+    }
+
+    #[test]
+    fn fences_after_front_matter_match_core_at_absolute_offsets() {
+        let md = format!("{FRONT_MATTER}Intro\n\n```mermaid\ngraph TD; A-->B\n```\n");
+        let fences = find_mermaid_fences(&md);
+        let sources: Vec<&str> = fences.iter().map(|f| f.source.as_str()).collect();
+        assert_eq!(sources, scrybe_core::Ast::parse(&md).mermaid_blocks());
+        assert_eq!(sources, ["graph TD; A-->B"]);
+        assert!(md[fences[0].range.clone()].starts_with("```mermaid"));
+
+        let (out, figures) = replace_mermaid_fences(&md).unwrap();
+        assert_eq!(figures.len(), 1);
+        assert!(out.starts_with(FRONT_MATTER), "{out}");
+        assert!(!out.contains("```mermaid"), "{out}");
+    }
+
+    #[test]
+    fn local_image_after_front_matter_is_inlined_in_place() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(tmp.path().join("a.png"), b"PNGDATA").unwrap();
+        let md = format!("{FRONT_MATTER}![pic](a.png)\n");
+        let (out, skipped) = inline_local_images(&md, tmp.path());
+        assert!(skipped.is_empty(), "{skipped:?}");
+        assert!(out.starts_with(FRONT_MATTER), "{out}");
+        assert!(out.contains("![pic](data:image/png;base64,"), "{out}");
     }
 
     #[test]

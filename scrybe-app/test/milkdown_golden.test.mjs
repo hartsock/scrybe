@@ -1,0 +1,526 @@
+// SPDX-License-Identifier: Apache-2.0
+import assert from "node:assert/strict";
+import { readFile, readdir, mkdtemp, writeFile, realpath, rm, symlink } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+import test, { after } from "node:test";
+import ts from "typescript";
+import { JSDOM } from "jsdom";
+import { micromark } from "micromark";
+import { gfm, gfmHtml } from "micromark-extension-gfm";
+
+// Install the DOM before importing Milkdown/ProseMirror (they inspect it at load).
+const dom = new JSDOM("<!doctype html><html><body></body></html>", {
+  pretendToBeVisual: true, url: "https://example.invalid/",
+});
+for (const name of ["window", "document", "navigator", "Node", "HTMLElement",
+  "Element", "SVGElement", "MutationObserver", "DOMParser", "CustomEvent", "Event", "getComputedStyle",
+  "requestAnimationFrame", "cancelAnimationFrame", "addEventListener", "removeEventListener", "dispatchEvent"]) {
+  Object.defineProperty(globalThis, name, { configurable: true, value:
+    typeof dom.window[name] === "function" && /^(getComputedStyle|requestAnimationFrame|cancelAnimationFrame|addEventListener|removeEventListener|dispatchEvent)$/.test(name)
+      ? dom.window[name].bind(dom.window) : dom.window[name] });
+}
+
+// JSDOM has no viewport; full Crepe's CodeMirror views only need lifecycle hooks.
+globalThis.IntersectionObserver = class {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+};
+
+// Use the actual TS modules without generated repository files or a bundler.
+async function loadTS(relative) {
+  const source = await readFile(new URL(relative, import.meta.url), "utf8");
+  const result = ts.transpileModule(source, {
+    compilerOptions: { module: ts.ModuleKind.ES2022, target: ts.ScriptTarget.ES2021 },
+    fileName: relative, reportDiagnostics: true,
+  });
+  assert.deepEqual(result.diagnostics?.filter(d => d.category === ts.DiagnosticCategory.Error) ?? [], []);
+  const code = result.outputText.replace(/\bfrom (["'])([^"']+)\1/g,
+    (_, quote, specifier) => `from ${quote}${import.meta.resolve(specifier)}${quote}`);
+  return import(`data:text/javascript;base64,${Buffer.from(code).toString("base64")}`);
+}
+const { Crepe } = await import("@milkdown/crepe");
+const { CrepeBuilder } = await import("@milkdown/crepe/builder");
+const { schemaCtx, serializerCtx, parserCtx } = await import("@milkdown/kit/core");
+const { toMarkdown } = await import("mdast-util-to-markdown");
+const { fromMarkdown } = await import("mdast-util-from-markdown");
+const { splitFrontMatter } = await loadTS("../src/frontmatter.ts");
+const { houseStyle } = await loadTS("../src/milkdown/house-style.ts");
+const { crepeSettings } = await loadTS("../src/milkdown/crepe-settings.ts");
+const goldenRoot = new URL("./golden/", import.meta.url);
+const outputRoot = await mkdtemp(path.join(tmpdir(), "scrybe-golden-"));
+const summary = [];
+
+async function withCrepe(body, action, full = false) {
+  const crepe = full
+    ? new Crepe({ root: null, defaultValue: body, ...crepeSettings })
+    : new CrepeBuilder({ root: null, defaultValue: body });
+  crepe.editor.config(houseStyle);
+  let created = false;
+  try {
+    await crepe.create();
+    created = true;
+    assert.ok(document.body.querySelector(".ProseMirror"), "real editor mounted on document.body");
+    return await action(crepe);
+  } finally {
+    // Milkdown destroy waits forever if create rejected while OnCreate.
+    if (created) await crepe.destroy();
+    document.body.replaceChildren();
+  }
+}
+async function cycle(source) {
+  const { raw, body } = splitFrontMatter(source);
+  return raw + await withCrepe(body, crepe => crepe.getMarkdown());
+}
+
+async function checkDocument(inputBytes, name, privateCorpus = false, progress) {
+  const input = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(inputBytes);
+  // Reject lossy decoding rather than claiming byte identity; preserve any BOM.
+  assert.ok(Buffer.from(input).equals(inputBytes), "input must round-trip as UTF-8 bytes");
+  const original = splitFrontMatter(input);
+  const output = await cycle(input);
+  if (progress) progress["byte-identical"] = Buffer.from(output).equals(inputBytes);
+  const saved = splitFrontMatter(output);
+  assert.ok(Buffer.from(original.raw).equals(Buffer.from(saved.raw)), "raw front matter bytes changed");
+  // Exact YAML source equality entails parsed deep-equality without choosing a YAML schema.
+  assert.ok(original.frontMatter === saved.frontMatter, "YAML source changed");
+  if (progress) progress["front matter"] = "unchanged";
+  await writeFile(path.join(outputRoot, `${privateCorpus ? "private-" : ""}${name}`), output, { mode: 0o600 });
+  let previous = output;
+  for (let i = 1; i <= 10; i++) {
+    const next = await cycle(previous);
+    assert.ok(next === output, `not idempotent at cycle ${i}`);
+    previous = next;
+    if (progress) progress["cycles stable"] = i;
+  }
+  if (!privateCorpus) summary.push({ corpus: "synthetic", file: name,
+    "byte-identical": Buffer.from(output).equals(inputBytes), "cycles stable": 10,
+    "front matter": "unchanged" });
+  return output;
+}
+
+const inputs = (await readdir(goldenRoot)).filter(name => name.endsWith(".md") &&
+  !name.endsWith(".out.md") && name !== "README.md").sort();
+assert.ok(inputs.length >= 13, "synthetic golden inputs are missing");
+for (const name of inputs) {
+  test(`golden: ${name}`, async () => {
+    const output = await checkDocument(await readFile(new URL(name, goldenRoot)), name);
+    const pinned = new URL(name.replace(/\.md$/, ".out.md"), goldenRoot);
+    let expected;
+    try { expected = await readFile(pinned, "utf8"); }
+    catch (error) {
+      if (error.code !== "ENOENT") throw error;
+      assert.fail(`missing golden ${path.basename(fileURLToPath(pinned))}; review the synthetic candidate in the temporary output directory`);
+    }
+    assert.equal(output, expected, "serializer differs from reviewed golden");
+  });
+}
+
+test("private corpus", { skip: !process.env.SCRYBE_GOLDEN_DIR &&
+  "SCRYBE_GOLDEN_DIR unset; private corpus not evaluated" }, async () => {
+  // No corpus content or absolute source paths in names, diagnostics or assertions.
+  try {
+    const root = await realpath(process.env.SCRYBE_GOLDEN_DIR);
+    const repo = await realpath(new URL("../../", import.meta.url));
+    const relative = path.relative(repo, root);
+    // Real paths close symlink bypasses; even node_modules is never corpus storage.
+    assert.ok(relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative),
+      "SCRYBE_GOLDEN_DIR must be outside the repository");
+    const names = (await readdir(root, { withFileTypes: true }))
+      .filter(entry => entry.isFile() && entry.name.endsWith(".md")).map(entry => entry.name).sort();
+    assert.ok(names.length > 0, "private corpus has no Markdown files");
+    const failures = [];
+    const results = [];
+    for (const name of names) {
+      const row = { corpus: "private", file: name, status: "fail",
+        "byte-identical": null, "cycles stable": 0, "front matter": "not checked" };
+      try {
+        await checkDocument(await readFile(path.join(root, name)), name, true, row);
+        row.status = "pass";
+      } catch {
+        failures.push(name);
+      } finally {
+        results.push(row);
+      }
+    }
+    console.table(results);
+    if (failures.length) {
+      throw new Error(`Private corpus checks failed: ${failures.join(", ")} (content withheld)`);
+    }
+  } catch (error) {
+    if (error.message === "SCRYBE_GOLDEN_DIR must be outside the repository" ||
+        error.message === "private corpus has no Markdown files" ||
+        error.message.startsWith("Private corpus checks failed:")) throw error;
+    throw new Error("Private corpus could not be checked (details withheld)");
+  }
+});
+
+// Child runs select only the corpus entry point, never these regression tests.
+const runNode = promisify(execFile);
+async function runCorpus(root) {
+  const env = { ...process.env, SCRYBE_GOLDEN_DIR: root };
+  // A nested CLI runner must not inherit the parent test worker protocol.
+  delete env.NODE_TEST_CONTEXT;
+  try {
+    const { stdout, stderr } = await runNode(process.execPath, [
+      "--test", "--test-reporter=tap", "--test-name-pattern=^private corpus$",
+      fileURLToPath(import.meta.url),
+    ], { env, timeout: 30000 });
+    return { code: 0, output: stdout + stderr };
+  } catch (error) {
+    if (typeof error.code !== "number") throw error;
+    return { code: error.code, output: error.stdout + error.stderr };
+  }
+}
+async function temporaryCorpus(t) {
+  const root = await mkdtemp(path.join(tmpdir(), "scrybe-corpus-test-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  return root;
+}
+function assertRefused(result) {
+  assert.equal(result.code, 1);
+  assert.ok(result.output.includes("SCRYBE_GOLDEN_DIR must be outside the repository"),
+    "repository refusal must explain the policy");
+}
+
+test("corpus policy refuses a repository directory", async () => {
+  assertRefused(await runCorpus(fileURLToPath(goldenRoot)));
+});
+test("corpus policy resolves a temporary symlink into the repository", async t => {
+  const root = await temporaryCorpus(t);
+  const link = path.join(root, "linked-corpus");
+  await symlink(fileURLToPath(goldenRoot), link, "dir");
+  assertRefused(await runCorpus(link));
+});
+test("corpus policy refuses node_modules without an exception", async t => {
+  const root = await mkdtemp(new URL("../node_modules/scrybe-corpus-test-", import.meta.url));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  await writeFile(path.join(root, "synthetic.md"), "# Synthetic\n");
+  assertRefused(await runCorpus(root));
+});
+test("corpus policy explains an empty directory", async t => {
+  const root = await temporaryCorpus(t);
+  const result = await runCorpus(root);
+  assert.equal(result.code, 1);
+  assert.ok(result.output.includes("private corpus has no Markdown files"),
+    "empty-directory reason must reach the user");
+  assert.ok(!result.output.includes(root), "source path withheld");
+});
+test("corpus results include every failure and success without content", async t => {
+  const root = await temporaryCorpus(t);
+  const marker = "SYNTHETIC_CORPUS_CONTENT_9341";
+  await writeFile(path.join(root, "a-invalid.md"), Buffer.concat([Buffer.from(marker), Buffer.from([255])]));
+  await writeFile(path.join(root, "b-valid.md"), `# ${marker}\n`);
+  await writeFile(path.join(root, "c-invalid.md"), Buffer.concat([Buffer.from(marker), Buffer.from([254])]));
+  const result = await runCorpus(root);
+  assert.equal(result.code, 1);
+  const rows = result.output.split("\n").filter(line => line.includes("│"));
+  for (const [name, status, identity, cycles] of [
+    ["a-invalid.md", "fail", "null", "0"],
+    ["b-valid.md", "pass", "true", "10"],
+    ["c-invalid.md", "fail", "null", "0"],
+  ]) {
+    const row = rows.find(line => line.includes(name));
+    assert.ok(row, `summary must include ${name}`);
+    assert.ok(row.includes(`'${status}'`) && row.includes(identity) && row.includes(cycles),
+      `summary must report status, byte identity and stable cycles for ${name}`);
+  }
+  assert.ok(result.output.includes("Private corpus checks failed: a-invalid.md, c-invalid.md (content withheld)"));
+  assert.ok(!result.output.includes(marker), "corpus content withheld");
+  assert.ok(!result.output.includes(root), "source path withheld");
+});
+
+// Compare mdast content without source positions, independently of Milkdown's
+// parser: comparing only two lossy editor documents would miss deleted images.
+function semanticMarkdown(source) {
+  return JSON.parse(JSON.stringify(fromMarkdown(source), (key, value) =>
+    key === "position" ? undefined : value));
+}
+function renderedMarkdown(source) {
+  return micromark(source, { extensions: [gfm()], htmlExtensions: [gfmHtml()], allowDangerousHtml: true });
+}
+const escapeCases = [
+  ["destination ampersands", "[x](https://e.x/?a=1&b=2)\n", "[x](https://e.x/?a=1&b=2)\n"],
+  ["image ampersands", "![x](https://e.x/?a=1&b=2)\n", "![x](https://e.x/?a=1&b=2)\n"],
+  ["marker before emphasis", "\\+ L *e*\n", "\\+ L *e*\n"],
+  ["literal pipe", "a | b\n", "a \\| b\n"],
+  ["literal math", "$$x$$\n", "\\$\\$x\\$\\$\n"],
+  ["literal caret", "^\n", "&#94;\n"],
+  [
+    "bare ampersands",
+    "AT&T and R&D\n",
+    "AT&T and R&D\n"
+  ],
+  [
+    "literal entity",
+    "\\&copy;\n",
+    "&amp;copy;\n"
+  ],
+  [
+    "ellipsis",
+    "Wait...\n",
+    "Wait...\n"
+  ],
+  [
+    "leading double dash",
+    "--all\n",
+    "--all\n"
+  ],
+  [
+    "inline dashes",
+    "a -- b and a --- b\n",
+    "a -- b and a --- b\n"
+  ],
+  [
+    "balanced destination",
+    "[x](https://e.x/a_(b))\n",
+    "[x](https://e.x/a_(b))\n"
+  ],
+  [
+    "literal emphasis",
+    "\\*not emphasis\\*\n",
+    "\\*not emphasis\\*\n"
+  ],
+  [
+    "literal heading",
+    "\\# heading\n",
+    "\\# heading\n"
+  ],
+  [
+    "literal bullet",
+    "\\- item\n",
+    "\\- item\n"
+  ],
+  [
+    "literal ordered list",
+    "1\\. item\n",
+    "1\\. item\n"
+  ],
+  [
+    "literal quote",
+    "\\> quote\n",
+    "\\> quote\n"
+  ],
+  [
+    "angle comparisons",
+    "a < b and c > d\n",
+    "a < b and c > d\n"
+  ],
+  [
+    "literal HTML",
+    "\\<span>text\\</span>\n",
+    "\\<span>text\\</span>\n"
+  ],
+  [
+    "ellipsis after w",
+    "Now...\n",
+    "Now...\n"
+  ],
+  [
+    "literal thematic break",
+    "\\---\n",
+    "\\---\n"
+  ],
+  [
+    "numeric reference",
+    "\\&#169;\n",
+    "&amp;#169;\n"
+  ],
+  [
+    "unknown entity",
+    "&notAnEntity;\n",
+    "&notAnEntity;\n"
+  ],
+  [
+    "unbalanced destination",
+    "[x](https://e.x/a\\(b)\n",
+    "[x](https://e.x/a\\(b)\n"
+  ]
+];
+for (const full of [false, true]) {
+  for (const [name, source, expected] of escapeCases) {
+    test(`escapes ${full ? "full Crepe" : "CrepeBuilder"}: ${name}`, async t => {
+      const first = await withCrepe(source, crepe => crepe.getMarkdown(), full);
+      t.diagnostic(`${name}: ${JSON.stringify(first)}`);
+      assert.equal(first, expected);
+      assert.deepEqual(semanticMarkdown(first), semanticMarkdown(source));
+      assert.equal(renderedMarkdown(first), renderedMarkdown(source));
+      let previous = first;
+      for (let i = 1; i <= 10; i++) {
+        const next = await withCrepe(previous, crepe => crepe.getMarkdown(), full);
+        assert.equal(next, expected, `escape output changed at cycle ${i}`);
+        assert.deepEqual(semanticMarkdown(next), semanticMarkdown(source));
+        assert.equal(renderedMarkdown(next), renderedMarkdown(source));
+        previous = next;
+      }
+    });
+  }
+}
+
+const saveCases = [
+  ["empty list item", "- first\n-\n- last\n"],
+  ["empty blockquote", ">\n"],
+  ["empty fenced code", "```\n```\n"],
+  ["one blank code line", "```\n\n```\n"],
+  ["two blank code lines", "```text\n\n\n```\n"],
+  ["emphasis starts link", "[*a* b](u)\n"],
+  ["strong starts link", "[**a** b](u)\n"],
+  ["nested emphasis", "*outer _inner_ tail*\n"],
+  ["nested strong", "**outer __inner__ tail**\n"],
+];
+for (const full of [false, true]) {
+  for (const [name, source] of saveCases) {
+    test(`saves ${full ? "full Crepe" : "CrepeBuilder"}: ${name}`, {
+      // Stopped per lane brief: ProseMirror cannot represent nested same-type
+      // marks. Keep the render-equality failures visible pending a schema decision.
+      todo: name.startsWith("nested ") && "same-type mark nesting needs a different document model",
+    }, async t => {
+      const first = await withCrepe(source, crepe => crepe.getMarkdown(), full);
+      t.diagnostic(`${name}: ${JSON.stringify(first)}`);
+      assert.equal(renderedMarkdown(first), renderedMarkdown(source), "save changed rendered HTML");
+      assert.deepEqual(semanticMarkdown(first), semanticMarkdown(source), "save changed parsed document");
+      for (let i = 1; i <= 10; i++) {
+        const next = await withCrepe(first, crepe => crepe.getMarkdown(), full);
+        assert.equal(next, first, `save changed at cycle ${i}`);
+        assert.equal(renderedMarkdown(next), renderedMarkdown(source));
+        assert.deepEqual(semanticMarkdown(next), semanticMarkdown(source));
+      }
+    });
+  }
+}
+
+const linkOrderingCases = [
+  "[*a* b](u)\n",
+  "[**a** b](u)\n",
+  "*[a](u) text*\n",
+  "*[a](u) [b](v)*\n",
+  "*[a](u)*\n",
+  "**[a](u)**\n",
+  "***[a](u)***\n",
+  "*text [a](u)*\n",
+  "**see [a](u) and [b](v)**\n"
+];
+for (const full of [false, true]) {
+  for (const source of linkOrderingCases) {
+    test(`link ordering ${full ? "full Crepe" : "CrepeBuilder"}: ${source.trim()}`, {
+      todo: /^\*+\[/.test(source) && "link-first canonical form requires owner sign-off; source nesting is lost",
+    }, async t => {
+      const first = await withCrepe(source, crepe => crepe.getMarkdown(), full);
+      const second = await withCrepe(first, crepe => crepe.getMarkdown(), full);
+      t.diagnostic(`${JSON.stringify(source)} -> ${JSON.stringify(first)} -> ${JSON.stringify(second)}`);
+      assert.equal(first, source, "first save must preserve mark nesting");
+      assert.equal(renderedMarkdown(first), renderedMarkdown(source));
+      assert.deepEqual(semanticMarkdown(first), semanticMarkdown(source));
+      assert.equal(second, first, "must be stable from the first save");
+      let previous = second;
+      for (let i = 2; i <= 10; i++) {
+        const next = await withCrepe(previous, crepe => crepe.getMarkdown(), full);
+        assert.equal(next, first, `mark nesting changed at cycle ${i}`);
+        assert.equal(renderedMarkdown(next), renderedMarkdown(source));
+        assert.deepEqual(semanticMarkdown(next), semanticMarkdown(source));
+        previous = next;
+      }
+    });
+  }
+  test(`equal-span nesting loses source order: ${full ? "full Crepe" : "CrepeBuilder"}`, async () => {
+    for (const marker of ["*", "**", "***"]) {
+      const outer = `${marker}[a](u)${marker}\n`;
+      const inner = `[${marker}a${marker}](u)\n`;
+      const parsed = [];
+      for (const source of [outer, inner]) {
+        parsed.push(await withCrepe(source, crepe => crepe.editor.action(ctx =>
+          ctx.get(parserCtx)(source).toJSON()), full));
+      }
+      assert.deepEqual(parsed[0], parsed[1], "same marks and run lengths; source order is absent");
+      assert.notEqual(renderedMarkdown(outer), renderedMarkdown(inner), "required HTML differs");
+    }
+  });
+}
+
+const imageCases = [
+  ["untitled image-only", "![alt text](a.png)\n"],
+  ["titled image-only", '![descriptive alt](a.png "Image title")\n'],
+  ["linked untitled image", "[![a](/x.png)](/y)\n"],
+  ["linked titled image", '[![linked alt](/x.png "Image title")](/y)\n'],
+  ["untitled mid-paragraph", "Before ![inline alt](a.png) after.\n"],
+  ["titled mid-paragraph", 'Before ![inline alt](a.png "Image title") after.\n'],
+  ["empty alt", "![](a.png)\n"],
+];
+for (const full of [false, true]) {
+  for (const [name, source] of imageCases) {
+    test(`images ${full ? "full Crepe" : "CrepeBuilder"}: ${name}`, async t => {
+      const original = semanticMarkdown(source);
+      const first = await withCrepe(source, crepe => crepe.getMarkdown(), full);
+      t.diagnostic(`${name}: ${JSON.stringify(first)}`);
+      assert.deepEqual(semanticMarkdown(first), original, "save changed image semantics");
+      assert.equal(first, source, "save changed image Markdown");
+      let previous = first;
+      for (let i = 1; i <= 10; i++) {
+        const next = await withCrepe(previous, crepe => crepe.getMarkdown(), full);
+        assert.deepEqual(semanticMarkdown(next), original, `image changed at cycle ${i}`);
+        assert.equal(next, first, `image serialization changed at cycle ${i}`);
+        previous = next;
+      }
+    });
+  }
+}
+
+const attentionCases = [
+  { name: "strong period after word", before: "uncertainty", marked: ".", after: "", mark: "strong",
+    expected: "uncertaint&#x79;**.**\n" },
+  { name: "strong comma after word", before: "word", marked: ",", after: "", mark: "strong" },
+  { name: "strong closing paren after word", before: "word", marked: ")", after: "", mark: "strong" },
+  { name: "emphasis punctuation after word", before: "word", marked: ".", after: "", mark: "emphasis" },
+  { name: "emphasis inside word", before: "un", marked: "certain", after: "ty", mark: "emphasis" },
+  { name: "strong at line start", before: "", marked: "bold", after: " text", mark: "strong" },
+  { name: "strong at line end", before: "text ", marked: "bold", after: "", mark: "strong" },
+];
+for (const entry of attentionCases) {
+  test(`edit-path attention: ${entry.name}`, async t => {
+    const { first, original } = await withCrepe("", crepe => crepe.editor.action(ctx => {
+      const schema = ctx.get(schemaCtx);
+      const children = [
+        ...(entry.before ? [schema.text(entry.before)] : []),
+        schema.text(entry.marked, [schema.marks[entry.mark].create()]),
+        ...(entry.after ? [schema.text(entry.after)] : []),
+      ];
+      const doc = schema.nodes.doc.create(null, schema.nodes.paragraph.create(null, children));
+      return { first: ctx.get(serializerCtx)(doc), original: doc.toJSON() };
+    }));
+    t.diagnostic(`${entry.name}: ${JSON.stringify(first)}`);
+    if (entry.expected) assert.equal(first, entry.expected);
+    let previous = first;
+    for (let i = 1; i <= 10; i++) {
+      const next = await withCrepe(previous, crepe => crepe.editor.action(ctx => {
+        assert.deepEqual(ctx.get(parserCtx)(previous).toJSON(), original,
+          `document changed at cycle ${i}`);
+        return crepe.getMarkdown();
+      }));
+      assert.equal(next, first, `serialization changed at cycle ${i}`);
+      previous = next;
+    }
+  });
+}
+
+test("upstream mdast serializer preserves bold punctuation with a character reference", () => {
+  const tree = { type: "root", children: [{ type: "paragraph", children: [
+    { type: "text", value: "uncertainty" },
+    { type: "strong", children: [{ type: "text", value: "." }] },
+  ] }] };
+  const output = toMarkdown(tree, { strong: "*" });
+  assert.equal(output, "uncertaint&#x79;**.**\n");
+  const parsed = fromMarkdown(output);
+  assert.equal(parsed.children[0].children[1].type, "strong");
+  assert.equal(toMarkdown(parsed, { strong: "*" }), output);
+});
+
+after(() => {
+  console.table(summary);
+  console.log(`Golden candidates and private outputs are temporary only: ${outputRoot}`);
+  console.log("Evidence: source bytes checked; identical YAML implies parsed deep-equality; real Jekyll HTML NOT evaluated.");
+  dom.window.close();
+});

@@ -1,0 +1,26 @@
+:root { font-family: system-ui, sans-serif; color: #202823; background: #f5f6f1; color-scheme: light; }
+body { margin: 0; }
+main { max-width: 1500px; margin: auto; padding: 2rem; }
+h1 { font-size: clamp(1.8rem, 4vw, 3rem); margin: .5rem 0; }
+h2 { font-size: 1.1rem; }
+.eyebrow { letter-spacing: .15em; font-size: .75rem; font-weight: 700; }
+.controls { display: flex; flex-wrap: wrap; align-items: end; gap: 1rem; }
+label { display: grid; gap: .4rem; font-size: .9rem; }
+button, select, input { font: inherit; }
+button, select { border: 1px solid #77887b; border-radius: .4rem; padding: .6rem; background: white; }
+button { cursor: pointer; }
+button:disabled { cursor: wait; }
+:focus-visible { outline: 3px solid #267344; outline-offset: 3px; }
+section { min-width: 0; }
+pre { white-space: pre-wrap; overflow-wrap: anywhere; font: .85rem/1.6 ui-monospace, monospace; }
+#frontmatter, #output { background: #fff; border: 1px solid #cbd3ca; border-radius: .5rem; padding: 1rem; }
+.columns { display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; }
+#editor { background: white; border: 1px solid #cbd3ca; border-radius: .5rem; min-height: 25rem; }
+#editor .milkdown { --crepe-font-default: system-ui, sans-serif; }
+#editor .milkdown .ProseMirror { padding: 2rem 3.5rem; }
+.badge { display: inline-block; border: 1px solid #957334; background: #fff5dc; padding: .5rem .75rem; border-radius: .4rem; font-weight: 600; }
+.badge[data-identical="true"] { background: #e8f5e9; border-color: #42714c; }
+#differences { padding-left: 2.5rem; max-height: 30rem; overflow: auto; }
+#differences li { border-bottom: 1px solid #cbd3ca; }
+footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid #cbd3ca; }
+@media (max-width: 850px) { main { padding: 1rem; } .columns { grid-template-columns: 1fr; } }

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
-import { EditorState, Compartment, type Extension } from "@codemirror/state";
-import { EditorView } from "@codemirror/view";
+import { Annotation, EditorState, Compartment, Transaction, type Extension, type TransactionSpec } from "@codemirror/state";
+import { EditorView, type ViewUpdate } from "@codemirror/view";
+import { isolateHistory } from "@codemirror/commands";
 import { basicSetup } from "codemirror";
 import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
 import { languages } from "@codemirror/language-data";
@@ -134,7 +135,9 @@ export function createEditor(
         // Soft wrap off by default (CodeMirror's default); toggled via setWrap.
         wrapCompartment.of([]),
         EditorView.updateListener.of(update => {
-          if (update.docChanged) onChange(update.state.doc.toString());
+          if (update.docChanged && !isProgrammaticUpdate(update)) {
+            onChange(update.state.doc.toString());
+          }
         }),
       ],
     }),
@@ -191,27 +194,35 @@ export function setWrap(view: EditorView, enabled: boolean): void {
   });
 }
 
-/// Set true while a programmatic dispatch is replacing buffer content
-/// (e.g., tab switch, file load, external-change reload). CodeMirror's
-/// updateListener fires synchronously during dispatch; consumers can
-/// read this flag in their onChange handler to distinguish a user edit
-/// from a programmatic load and skip the autosave it would otherwise
-/// schedule. See `fix/0.2.1-tab-reload-and-mcp-open` for the bug this
-/// guards against (issue: autosave on programmatic load opens a
-/// self-write window that swallows the next external edit).
-let suppressAutosave = false;
+/// Marks buffer replacements that must not be treated as user edits.
+export const Programmatic = Annotation.define<boolean>();
 
-export function shouldSuppressAutosave(): boolean {
-  return suppressAutosave;
+export function isProgrammaticUpdate(update: Pick<ViewUpdate, "transactions">): boolean {
+  return update.transactions.some(transaction => transaction.annotation(Programmatic) !== undefined);
 }
 
+/// Replace the full buffer without letting undo restore another tab's text.
+export function swapDocumentSpec(docLength: number, content: string): TransactionSpec {
+  return {
+    changes: { from: 0, to: docLength, insert: content },
+    annotations: [Programmatic.of(true), Transaction.addToHistory.of(false)],
+  };
+}
+
+/// Show a different document without adding an undo step.
 export function swapDocument(view: EditorView, content: string): void {
-  suppressAutosave = true;
-  try {
-    view.dispatch({
-      changes: { from: 0, to: view.state.doc.length, insert: content },
-    });
-  } finally {
-    suppressAutosave = false;
-  }
+  view.dispatch(swapDocumentSpec(view.state.doc.length, content));
+}
+
+/// Keep an agent's full-buffer edit separate from adjacent user edits.
+export function replaceDocumentSpec(docLength: number, content: string): TransactionSpec {
+  return {
+    changes: { from: 0, to: docLength, insert: content },
+    annotations: [Programmatic.of(true), isolateHistory.of("full")],
+  };
+}
+
+/// Apply an agent change to the same document as one undoable step.
+export function replaceDocument(view: EditorView, content: string): void {
+  view.dispatch(replaceDocumentSpec(view.state.doc.length, content));
 }

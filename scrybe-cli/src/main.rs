@@ -7,9 +7,12 @@ mod shell_command;
 
 use clap::{Parser, Subcommand};
 use scrybe_core::{ContentAddressable, Document};
-use scrybe_render::{render_html, Theme};
+use scrybe_render::{render_html_with, Theme};
 
-use scrybe_cli::{active_features, lint_document, rpc_client, version_string, wrap_full_html};
+use scrybe_cli::{
+    active_features, lint_document, render_settings, rpc_client, select_render_output,
+    version_string, CliRenderProfile,
+};
 
 #[derive(Parser)]
 #[command(
@@ -129,6 +132,14 @@ enum Command {
         /// Theme to apply: default, dark, or solarized.
         #[arg(long, default_value = "default", value_name = "THEME")]
         theme: String,
+
+        /// Markdown dialect: app compatibility or site (smart punctuation, literal math).
+        #[arg(long, value_enum, default_value_t = CliRenderProfile::App)]
+        profile: CliRenderProfile,
+
+        /// Write only the rendered body, without theme CSS or a document wrapper.
+        #[arg(long, conflicts_with = "full_html")]
+        body_only: bool,
 
         /// Wrap output in a complete <!DOCTYPE html> document with CDN tags.
         #[arg(long)]
@@ -568,6 +579,8 @@ fn main() -> anyhow::Result<()> {
             input,
             output,
             theme,
+            profile,
+            body_only,
             full_html,
             title,
             watch,
@@ -591,20 +604,20 @@ fn main() -> anyhow::Result<()> {
                 _ => Theme::Default,
             };
 
-            let rendered = render_html(&doc, theme_val);
-
-            let html = if full_html {
-                let doc_title = title.unwrap_or_else(|| {
-                    path.as_ref()
-                        .and_then(|p| p.file_stem())
-                        .and_then(|s| s.to_str())
-                        .map(String::from)
-                        .unwrap_or_else(|| "Untitled".to_string())
-                });
-                wrap_full_html(&rendered, &doc_title)
-            } else {
-                rendered.html.clone()
-            };
+            let (profile, body_only) = render_settings(profile, body_only);
+            let rendered = render_html_with(&doc, theme_val, profile);
+            let doc_title = title.unwrap_or_else(|| {
+                path.as_ref()
+                    .and_then(|p| p.file_stem())
+                    .and_then(|s| s.to_str())
+                    .map(String::from)
+                    .unwrap_or_else(|| "Untitled".to_string())
+            });
+            let html = select_render_output(
+                &rendered,
+                body_only,
+                full_html.then_some(doc_title.as_str()),
+            );
 
             write_output(output, &html)?;
         }

@@ -19,6 +19,7 @@ pub mod change;
 pub mod content;
 pub mod document;
 pub mod error;
+pub mod frontmatter;
 pub mod plugin;
 pub mod workspace;
 
