@@ -29,6 +29,7 @@ export interface Stash {
     value: string;
     key?: string;
     note?: string;
+    at?: number;
 }
 export function stashRead(storage: Pick<Storage, 'getItem'>, path: string): Stash | null {
     try {
@@ -51,6 +52,23 @@ export function stashClear(storage: Pick<Storage, 'removeItem'>, path: string): 
     storage.removeItem('scrybe-edit:' + path);
 }
 catch { /* Storage may be disabled. */ } }
+export const MAX_RECOVERY_SLOTS = 5;
+/** Next free recovery slot for a path: path, path#v2, path#v2:2, ... Past the cap the oldest stash (by `at`,
+ *  unstamped counts as oldest) is evicted and its slot reused, so reopening never grows storage without bound. */
+export function freshRecoverySlot(storage: Pick<Storage, 'getItem' | 'removeItem'>, path: string, max = MAX_RECOVERY_SLOTS): string {
+    const slot = (i: number) => i === 0 ? path : path + '#v2' + (i === 1 ? '' : ':' + i);
+    let oldest = 0, oldestAt = Infinity;
+    try {
+        for (let i = 0; i < max; i++) {
+            const raw = storage.getItem('scrybe-edit:' + slot(i));
+            if (raw === null) return slot(i);
+            const at = stashRead(storage, slot(i))?.at ?? 0;
+            if (at < oldestAt) { oldest = i; oldestAt = at; }
+        }
+        storage.removeItem('scrybe-edit:' + slot(oldest));
+    } catch { /* Storage may be unavailable; stashWrite is also best effort. */ }
+    return slot(oldest);
+}
 export interface SaveState {
     kind: 'idle' | 'saving' | 'busy' | 'saved' | 'stale' | 'outdated' | 'invalid' | 'signin' | 'reload' | 'rate' | 'unknown' | 'admin' | 'error';
     message?: string;

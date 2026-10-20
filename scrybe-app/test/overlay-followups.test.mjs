@@ -35,3 +35,19 @@ test('Enter in a '+S[0]+' list adds an item without a consent prompt',async()=>w
   const t=trackSource(e,S);select(v,pos(v,'b'));press(v,'Enter');type(v,'c');
   const r=t.prepare();assert.equal(r.status,'ok',r.reason);assert.equal(r.value,S.replace('\n\nEnd','\n'+S[0]+' c\n\nEnd'));
 }));
+test('recovery slots are capped and the oldest stash is evicted',async()=>{
+  // Bug: every reopen with an occupied slot minted another #v2:N slot, so session storage grew without bound.
+  const {freshRecoverySlot,stashWrite,stashRead,MAX_RECOVERY_SLOTS}=await import('../overlay/state.ts');
+  const m=new Map(),storage={getItem:k=>m.has(k)?m.get(k):null,setItem:(k,v)=>void m.set(k,v),removeItem:k=>void m.delete(k)};
+  const stamp=(slot,at)=>stashWrite(storage,slot,{baseSha:'a',value:slot,at});
+  const slots=[];
+  for(let i=0;i<MAX_RECOVERY_SLOTS;i++){const s=freshRecoverySlot(storage,'p.md');assert.ok(!slots.includes(s));slots.push(s);stamp(s,100+i);}
+  assert.deepEqual(slots.slice(0,3),['p.md','p.md#v2','p.md#v2:2']);
+  // Make the middle slot the oldest; it, not the highest index, must be reused.
+  stamp(slots[2],1);
+  const reused=freshRecoverySlot(storage,'p.md');
+  assert.equal(reused,slots[2]);assert.equal(stashRead(storage,reused),null);
+  stamp(reused,999);
+  for(let i=0;i<20;i++){const s=freshRecoverySlot(storage,'p.md');stamp(s,1000+i);}
+  assert.equal(m.size,MAX_RECOVERY_SLOTS);
+});
