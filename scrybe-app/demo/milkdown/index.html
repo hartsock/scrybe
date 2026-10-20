@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Scrybe · Milkdown round-trip demo</title>
+</head>
+<body>
+  <main id="demo">
+    <header>
+      <p class="eyebrow">SCRYBE / PHASE 1</p>
+      <h1>Markdown, through Milkdown</h1>
+      <p>Edit the body and inspect exactly what comes back.</p>
+      <div class="controls">
+        <label>Document <select id="sample"><option value="sample">Course session</option><option value="probe">Syntax probe</option></select></label>
+        <label>Local Markdown <input id="file" type="file" accept=".md,.markdown,text/markdown,text/plain"></label>
+        <button id="roundtrip" type="button" disabled>Round-trip x10</button>
+      </div>
+      <p id="status" role="status">Loading editor…</p>
+      <p id="cycles" role="status"></p>
+    </header>
+    <section aria-labelledby="frontmatter-title">
+      <h2 id="frontmatter-title">Front matter</h2>
+      <p>Kept outside the editor and re-prepended verbatim.</p>
+      <pre id="frontmatter" aria-label="Read-only front matter"></pre>
+    </section>
+    <div class="columns">
+      <section aria-labelledby="editor-title"><h2 id="editor-title">Edit body</h2><div id="editor"></div></section>
+      <section aria-labelledby="output-title">
+        <h2 id="output-title">Live Markdown output</h2>
+        <p id="badge" class="badge" role="status">Comparing…</p>
+        <pre id="output" tabindex="0"></pre>
+        <h3>Differing lines</h3>
+        <p>Quoted text exposes spaces and line endings; ∅ means no line.</p>
+        <ol id="differences"></ol>
+      </section>
+    </div>
+    <footer>Demo only. Not wired into the Scrybe app (Phase 2, #254).</footer>
+  </main>
+  <div id="cycle-editor" hidden aria-hidden="true"></div>
+  <script type="module" src="./main.ts"></script>
+</body>
+</html>

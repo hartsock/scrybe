@@ -15,7 +15,7 @@ import { ask, message, save as saveDialog } from "@tauri-apps/plugin-dialog";
 import { showToast } from "./toast";
 import { AppState } from "./state";
 import { renderTabBar } from "./tabs";
-import { createEditor, swapDocument, shouldSuppressAutosave, setEditorTheme, setVim, setWrap, setEditorLanguage, classifyFile } from "./editor";
+import { createEditor, swapDocument, replaceDocument, setEditorTheme, setVim, setWrap, setEditorLanguage, classifyFile } from "./editor";
 import { PreviewPane, SAVE_MERMAID_PNG_EVENT } from "./preview";
 import type { MermaidPngExportDetail, MermaidPreviewDocument } from "./mermaid_png";
 import { documentStem, mermaidPngFilename, rasterizeMermaidSvg } from "./mermaid_png";
@@ -26,6 +26,7 @@ import { Sidebar } from "./sidebar";
 import { PluginManager } from "./plugins";
 import { McpPanel } from "./mcp_panel";
 import { VcsPanel } from "./vcs_panel";
+import { findHeadings } from "./sections";
 
 // Keep recent console output in an in-memory ring so the socket `logs`
 // method can surface errors to agents without DevTools open. Replaces the
@@ -452,43 +453,16 @@ window.addEventListener("keydown", (e) => {
 
 let saveTimer: ReturnType<typeof setTimeout> | null = null;
 
-const view = createEditor(editorEl, WELCOME, async (content) => {
-  // Invalidate earlier edit/plugin requests before the first await. This is
-  // separate from PreviewPane's render generation because plugin processing
-  // happens before a request reaches that class.
-  const previewGeneration = ++previewRequestGeneration;
-  // Snapshot the flag synchronously — `shouldSuppressAutosave()` returns
-  // true only while CodeMirror is mid-dispatch from `swapDocument`. By
-  // the time we hit our first `await` below, the flag will have been
-  // reset, so capture it now.
-  const isProgrammaticLoad = shouldSuppressAutosave();
-
+const view = createEditor(editorEl, WELCOME, (content) => {
   if (state.activeTabId) {
     state.updateContent(state.activeTabId, content);
-    // A programmatic load (file open, tab switch, external-change reload)
-    // is not a user edit. Setting isDirty=true would (a) show a misleading
-    // dirty badge, and (b) chain into the autosave path below. Mark the
-    // tab clean to undo the dirty-flip that `updateContent` always sets.
-    if (isProgrammaticLoad) state.markClean(state.activeTabId);
     redrawTabs();
   }
-  // Capture tab BEFORE any awaits — prevents a race where onChange(WELCOME)
-  // completes after onChange(file) and re-schedules a save with stale content.
   const tab = state.activeTab();
   const savePath = tab?.path ?? null;
   const saveId   = tab?.id   ?? null;
-  const previewDocument = tab ? { id: tab.id, path: tab.path } : null;
 
-  const processed = await pluginManager.runAll(content);
-  if (previewGeneration === previewRequestGeneration && previewDocument) {
-    renderPreview(processed || content, previewDocument, previewGeneration);
-  }
-
-  // Programmatic loads must not schedule an autosave: doing so would
-  // immediately call `note_autosave()` and open a 2 s self-write window
-  // in the OS file watcher, swallowing any genuine external edit that
-  // lands inside that window. See `editor.ts::swapDocument`.
-  if (isProgrammaticLoad) return;
+  void renderPreview(content);
 
   // Autosave: 1 s debounce, writes to the `<path>.scrybe-buffer` sidecar
   // (not the real file). At fire time, re-read content from state so the
@@ -539,19 +513,15 @@ function beginPreviewRequest(id: string, path: string | null): {
   };
 }
 
-function renderPreview(
-  content: string,
-  expectedDocument?: MermaidPreviewDocument,
-  generation?: number,
-): void {
+async function renderPreview(content: string): Promise<void> {
   const tab = state.activeTab();
   if (tab?.kind === "markdown") {
-    const request = expectedDocument && generation !== undefined
-      ? { document: expectedDocument, generation }
-      : beginPreviewRequest(tab.id, tab.path);
+    const request = beginPreviewRequest(tab.id, tab.path);
+    const processed = await pluginManager.runAll(content);
+    // A newer render or tab switch must not publish stale plugin output.
     if (request.generation !== previewRequestGeneration ||
-        request.document.id !== tab.id) return;
-    void preview.render(content, request.document);
+        request.document.id !== state.activeTabId) return;
+    await preview.render(processed || content, request.document);
   }
 }
 
@@ -1223,22 +1193,10 @@ listen<{ id: number; data: { path: string; heading: string } }>(
     }
 
     const lines = tab.content.split("\n");
-    const headingRe = /^(#{1,6})\s+(.*)$/;
+    const headings = findHeadings(tab.content);
     const needle = data.heading.toLowerCase();
-
-    let startIdx = -1;
-    let level = 0;
-    let actualHeading = "";
-    for (let i = 0; i < lines.length; i++) {
-      const m = headingRe.exec(lines[i]);
-      if (m && m[2].toLowerCase().includes(needle)) {
-        startIdx = i;
-        level = m[1].length;
-        actualHeading = m[2];
-        break;
-      }
-    }
-    if (startIdx === -1) {
+    const match = headings.find(heading => heading.text.toLowerCase().includes(needle));
+    if (!match) {
       await reply(id, {
         error: {
           code: ERR_SECTION_NOT_FOUND,
@@ -1247,14 +1205,11 @@ listen<{ id: number; data: { path: string; heading: string } }>(
       });
       return;
     }
-    let endIdx = lines.length;
-    for (let i = startIdx + 1; i < lines.length; i++) {
-      const m = headingRe.exec(lines[i]);
-      if (m && m[1].length <= level) {
-        endIdx = i;
-        break;
-      }
-    }
+    const startIdx = match.line - 1;
+    const level = match.level;
+    const actualHeading = match.text;
+    const next = headings.find(heading => heading.line > match.line && heading.level <= level);
+    const endIdx = next ? next.line - 1 : lines.length;
     const sectionContent = lines.slice(startIdx, endIdx).join("\n");
     await reply(id, {
       result: { heading: actualHeading, level, content: sectionContent },
@@ -1293,13 +1248,8 @@ listen<{ id: number; data: { path: string; start_line: number; end_line: number;
 
     state.updateContent(tab.id, merged);
     if (state.activeTabId === tab.id) {
-      swapDocument(view, merged);
+      replaceDocument(view, merged);
       renderPreview(merged);
-      // swapDocument fires onChange with the programmatic-load suppress flag
-      // up, whose handler marks the active tab clean — right for file loads
-      // (open/reload), wrong here: this buffer now differs from disk. The
-      // markClean runs synchronously inside the dispatch, so re-assert.
-      state.markDirty(tab.id);
     }
     redrawTabs();
     await reply(id, { result: { applied: true, size_after: merged.length, is_dirty: true } });

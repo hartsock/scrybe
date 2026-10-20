@@ -26,7 +26,7 @@ also the launcher for the Tauri GUI app: `scrybe file.md` locates the
 
 | Command | Description |
 |---------|-------------|
-| `scrybe render [FILE]` | Render Markdown to HTML (stdin → stdout by default); `--theme`, `--full-html`, `--output` |
+| `scrybe render [FILE]` | Render Markdown to HTML (stdin → stdout by default); `--theme`, `--profile app\|site` (default `app`), `--body-only`, `--full-html`, `--output` |
 | `scrybe view FILE` | View a Markdown file in the terminal (single-pane TUI): j/k scroll, g/G top/bottom, q quits; requires a TTY (exits 2 in a pipe) |
 | `scrybe lint FILE` | Word count, headings, code blocks, broken links; `--json` for machine output; exits 1 if broken links found |
 | `scrybe mermaid embed PNG SOURCE` | Embed Mermaid source into PNG iTXt chunk |
@@ -60,3 +60,13 @@ pip install target/wheels/scrybe_cli-*.whl
 # Run tests
 cargo test -p scrybe-cli
 ```
+
+### Site HTML fragments
+
+Use `scrybe render --profile site --body-only` with Markdown on stdin to write a
+body-only HTML fragment on stdout for a site converter. The site profile enables
+smart punctuation and keeps math delimiters literal. `--body-only` omits the theme
+`<style>` block and conflicts with `--full-html`. Site uses unhighlighted,
+production-shaped code blocks, ordinary Mermaid fences, automatic heading IDs,
+and namespaced footnote IDs. HTML remains escaped. Without the new flags, output is
+unchanged: the app dialect with theme CSS prepended. Unknown profiles are rejected.
