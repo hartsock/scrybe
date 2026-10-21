@@ -36,6 +36,19 @@ export function hygiene(text: string): string {
     return line.replace(/[ \t]+$/, '');
   }).join('\n');
 }
+/** The serializer always writes "- " bullets. A line it adds to a list spelled with "*" or "+" must reuse that
+ *  marker: a different marker starts a new list, the merge fails verification and the save asks for consent. */
+function keepBulletMarkers(merged: string, source: string): string {
+  const old = new Set(source.split('\n')), markers = new Map<string, string>();
+  for (const line of old) { const m = line.match(/^(\s*)([*+])(?:[ \t]|$)/); if (m) markers.set(m[1], m[2]); }
+  return merged.split('\n').map(line => {
+    const m = line.match(/^(\s*)([-*+])([ \t].*|)$/);
+    if (!m) return line;
+    if (old.has(line)) return line;
+    const marker = markers.get(m[1]);
+    return m[2] === '-' && marker ? m[1] + marker + m[3] : line;
+  }).join('\n');
+}
 /** Strip indentation only on root headings, never list continuation lines. */
 function headingHygiene(tools: Tools, text: string): string {
   const kids=(tools.remark.parse(text) as MdNode).children??[];
@@ -324,7 +337,7 @@ export function splice(tools: Tools, base: Base, doc: PMNode,
       if (!options.dependencies) for (const engine of ['token', 'line'] as const) {
         const merged = rebase(s, c0, c1, engine);
         if (!merged) continue;
-        const candidate = headingHygiene(tools,hygieneChanged(merged.text, s));
+        const candidate = headingHygiene(tools,hygieneChanged(keepBulletMarkers(merged.text, s), s));
         // Table line insertion must not mix outer-pipe styles in kramdown.
         const tableStyleChanged = after.some(n => n.type.name === 'table') &&
           s.split('\n').some(l => l.includes('|') && !/^\s*\|/.test(l)) &&

@@ -17,6 +17,10 @@ const literalEscapes=$remark('publicationLiteralEscapes',()=>function(this: {dat
     type Extension={enter?:Record<string,unknown>;transforms?:unknown[]};
     const clean=(items:(Extension|Extension[])[]):void=>{for(const x of items??[]){if(Array.isArray(x))clean(x);else if(x.enter?.literalAutolink)x.transforms=[];}};
     clean(this.data('fromMarkdownExtensions') as (Extension|Extension[])[]);
+    // The scheme escape matches only lower-case [ps]:, so a typed HTTP:// stayed bare and re-parsed as a link (refused).
+    type Walk={unsafe?:{character?:string;before?:string}[];extensions?:Walk[]};
+    const widen=(items:(Walk|Walk[])[]):void=>{for(const x of items??[]){if(Array.isArray(x))widen(x);else{for(const u of x.unsafe??[])if(u.character===':'&&u.before==='[ps]')u.before='[PpSs]';widen(x.extensions??[]);}}};
+    widen(this.data('toMarkdownExtensions') as Walk[]);
 });
 export async function mountEditor(root: HTMLElement, value: string) {
     const crepe = new CrepeBuilder({ root, defaultValue: value })
