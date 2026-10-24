@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import type { DocKind } from "./editor";
+import type { DocKind } from "./kinds";
 
 export type ViewMode = "both" | "edit" | "preview";
 const VIEW_CYCLE: ViewMode[] = ["both", "edit", "preview"];
