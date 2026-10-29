@@ -16,7 +16,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { homeDir } from "@tauri-apps/api/path";
 import { ask, save as saveDialog } from "@tauri-apps/plugin-dialog";
 import { open as openExternal } from "@tauri-apps/plugin-shell";
-import { asMarkdown, isImagePath, type DocKind } from "./editor";
+import { asMarkdown, isImagePath, type DocKind } from "./kinds";
 import { showToast } from "./toast";
 
 // Mirrors of scrybe_gdocs::types (serde snake_case).

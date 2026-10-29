@@ -29,6 +29,7 @@ export interface Stash {
     value: string;
     key?: string;
     note?: string;
+    at?: number;
 }
 export function stashRead(storage: Pick<Storage, 'getItem'>, path: string): Stash | null {
     try {
@@ -51,6 +52,23 @@ export function stashClear(storage: Pick<Storage, 'removeItem'>, path: string): 
     storage.removeItem('scrybe-edit:' + path);
 }
 catch { /* Storage may be disabled. */ } }
+export const MAX_RECOVERY_SLOTS = 5;
+/** Next free recovery slot for a path: path, path#v2, path#v2:2, ... Past the cap the oldest stash (by `at`,
+ *  unstamped counts as oldest) is evicted and its slot reused, so reopening never grows storage without bound. */
+export function freshRecoverySlot(storage: Pick<Storage, 'getItem' | 'removeItem'>, path: string, max = MAX_RECOVERY_SLOTS): string {
+    const slot = (i: number) => i === 0 ? path : path + '#v2' + (i === 1 ? '' : ':' + i);
+    let oldest = 0, oldestAt = Infinity;
+    try {
+        for (let i = 0; i < max; i++) {
+            const raw = storage.getItem('scrybe-edit:' + slot(i));
+            if (raw === null) return slot(i);
+            const at = stashRead(storage, slot(i))?.at ?? 0;
+            if (at < oldestAt) { oldest = i; oldestAt = at; }
+        }
+        storage.removeItem('scrybe-edit:' + slot(oldest));
+    } catch { /* Storage may be unavailable; stashWrite is also best effort. */ }
+    return slot(oldest);
+}
 export interface SaveState {
     kind: 'idle' | 'saving' | 'busy' | 'saved' | 'stale' | 'outdated' | 'invalid' | 'signin' | 'reload' | 'rate' | 'unknown' | 'admin' | 'error';
     message?: string;
@@ -58,6 +76,9 @@ export interface SaveState {
     retryAt?: number;
 }
 const flights = new Set<string>();
+export const SAVE_TIMEOUT_MS = 30000;
+export type Schedule = (fn: () => void, ms: number) => () => void;
+const realSchedule: Schedule = (fn, ms) => { const t = setTimeout(fn, ms); return () => clearTimeout(t); };
 export class SaveController {
     path: string;
     sha: string;
@@ -70,7 +91,8 @@ export class SaveController {
     pending?: SaveRequest;
     requiresRead = false;
     onChange: (state: SaveState) => void = () => { };
-    constructor(path: string, sha: string, fetcher: typeof fetch, origin: string, build: string) { this.path = path; this.sha = sha; this.fetcher = fetcher; this.origin = origin; this.build = build; }
+    schedule: Schedule;
+    constructor(path: string, sha: string, fetcher: typeof fetch, origin: string, build: string, schedule: Schedule = realSchedule) { this.path = path; this.sha = sha; this.fetcher = fetcher; this.origin = origin; this.build = build; this.schedule = schedule; }
     set(state: SaveState) { this.state = state; this.onChange(state); }
     async save(value: string, key?: string, note?: string): Promise<void> {
         // Web Locks coordinate same-origin frames and tabs; the local set also
@@ -103,6 +125,10 @@ export class SaveController {
         this.value = value;
         flights.add(lock);
         this.set({ kind: 'saving' });
+        // A hung PUT would hold the save open and block Close/Reload; abort it instead.
+        const abort = new AbortController();
+        let timedOut = false;
+        const cancelTimer = this.schedule(() => { timedOut = true; abort.abort(); }, SAVE_TIMEOUT_MS);
         try {
             if (this.requiresRead) {
                 const current = await this.fetcher(apiURL(this.origin, 'file', { path: this.path }), { cache: 'no-store', credentials: 'same-origin' });
@@ -115,7 +141,7 @@ export class SaveController {
             }
             let response: Response | undefined;
             for (let attempt = 0; attempt < 2; attempt++) {
-                response = await this.fetcher(apiURL(this.origin, 'file'), { method: 'PUT', credentials: 'same-origin', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': this.csrf, 'X-Scrybe-Editor': this.build }, body: JSON.stringify(this.pending) });
+                response = await this.fetcher(apiURL(this.origin, 'file'), { method: 'PUT', credentials: 'same-origin', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': this.csrf, 'X-Scrybe-Editor': this.build }, body: JSON.stringify(this.pending), signal: abort.signal });
                 if (response.status !== 403 || attempt === 1)
                     break;
                 const session = await this.fetcher(apiURL(this.origin, 'session'), { cache: 'no-store', credentials: 'same-origin' });
@@ -152,9 +178,10 @@ export class SaveController {
             this.set({ kind, message: kind === 'admin' ? 'Editor needs admin attention' : message, ...(kind === 'rate' ? { retryAt } : {}) });
         }
         catch {
-            this.set({ kind: 'error', message: 'Connection lost. Your text is kept; retry this save.' });
+            this.set({ kind: 'error', message: timedOut ? 'Save timed out. Your text is kept; retry this save.' : 'Connection lost. Your text is kept; retry this save.' });
         }
         finally {
+            cancelTimer();
             flights.delete(lock);
         }
     }

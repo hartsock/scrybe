@@ -16,7 +16,9 @@ import { ask, message, save as saveDialog } from "@tauri-apps/plugin-dialog";
 import { showToast } from "./toast";
 import { AppState } from "./state";
 import { renderTabBar } from "./tabs";
-import { createEditor, swapDocument, replaceDocument, setEditorTheme, setVim, setWrap, setEditorLanguage, classifyFile, isImagePath, asMarkdown } from "./editor";
+import { createCodeMirrorSurface } from "./codemirror-surface";
+import type { SurfaceFactory } from "./surface";
+import { isImagePath, asMarkdown } from "./kinds";
 import { PreviewPane, SAVE_MERMAID_PNG_EVENT } from "./preview";
 import type { MermaidPngExportDetail, MermaidPreviewDocument } from "./mermaid_png";
 import { documentStem, mermaidPngFilename, rasterizeMermaidSvg } from "./mermaid_png";
@@ -306,7 +308,7 @@ async function printActiveTab(): Promise<void> {
 function applyTheme(theme: Theme): void {
   currentTheme = theme;
   preview.setTheme(theme);
-  setEditorTheme(view, theme);
+  surface.setTheme(theme);
   setToolbarTheme(toolbarEl, theme);
   const tab = state.activeTab();
   if (tab) renderPreview(tab.content);
@@ -347,7 +349,7 @@ function setViewMode(mode: string): void {
 /// MCP. Shared by the toolbar toggle and the MCP `set_vim` poller.
 function setVimEnabled(on: boolean): void {
   vimEnabled = on;
-  setVim(view, on);
+  surface.setVim(on);
   setToolbarVim(toolbarEl, on);
   publishState();
 }
@@ -356,7 +358,7 @@ function setVimEnabled(on: boolean): void {
 /// mirror to MCP. Shared by the toolbar toggle and the MCP `set_wrap` poller.
 function setWrapEnabled(on: boolean): void {
   wrapEnabled = on;
-  setWrap(view, on);
+  surface.setWrap(on);
   setToolbarWrap(toolbarEl, on);
   publishState();
 }
@@ -467,7 +469,9 @@ window.addEventListener("keydown", (e) => {
 
 let saveTimer: ReturnType<typeof setTimeout> | null = null;
 
-const view = createEditor(editorEl, WELCOME, (content) => {
+// The one place the concrete editor is named; swap this factory to change surfaces.
+const createSurface: SurfaceFactory = createCodeMirrorSurface;
+const surface = createSurface(editorEl, WELCOME, ({ content }) => {
   if (state.activeTabId) {
     state.updateContent(state.activeTabId, content);
     redrawTabs();
@@ -553,10 +557,10 @@ function selectTab(id: string): void {
   state.activeTabId = id;
   const tab = state.activeTab();
   if (tab) {
-    swapDocument(view, tab.content);
+    surface.setContent(tab.content);
     // Re-highlight for this tab's language (code vs Markdown) and restore its
     // view mode; only Markdown tabs get a rendered preview.
-    void setEditorLanguage(view, tab.path);
+    void surface.setLanguage(tab.path);
     renderPreview(tab.content);
     applyViewMode(tab.viewMode);
   }
@@ -565,8 +569,8 @@ function selectTab(id: string): void {
 
 function newTab(content = WELCOME): void {
   state.addTab(null, content); // untitled → Markdown
-  swapDocument(view, content);
-  void setEditorLanguage(view, null);
+  surface.setContent(content);
+  void surface.setLanguage(null);
   renderPreview(content);
   redrawTabs();
 }
@@ -630,9 +634,9 @@ function doCloseTab(id: string): void {
   state.closeTab(id);
   const active = state.activeTab();
   const content = active?.content ?? "";
-  swapDocument(view, content);
+  surface.setContent(content);
   // The newly-active tab may be a different language/kind than the closed one.
-  void setEditorLanguage(view, active?.path ?? null);
+  void surface.setLanguage(active?.path ?? null);
   applyViewMode(active?.viewMode ?? "both");
   renderPreview(content);
   redrawTabs();
@@ -685,7 +689,7 @@ async function openFileByPath(path: string): Promise<void> {
         return;
       }
       state.addTab(path, "");
-      swapDocument(view, "");
+      surface.setContent("");
       preview.renderImage(convertFileSrc(path));
       redrawTabs();
       return;
@@ -694,8 +698,8 @@ async function openFileByPath(path: string): Promise<void> {
     const existing = state.tabs.find(t => t.path === path);
     if (existing) {
       state.activeTabId = existing.id;
-      swapDocument(view, existing.content);
-      void setEditorLanguage(view, existing.path);
+      surface.setContent(existing.content);
+      void surface.setLanguage(existing.path);
       applyViewMode(existing.viewMode);
       renderPreview(asMarkdown(path, existing.content));
       redrawTabs();
@@ -735,12 +739,12 @@ async function openFileByPath(path: string): Promise<void> {
       }
     }
 
-    const { kind } = classifyFile(path);
+    const kind = surface.classify(path);
     const newTabId = state.addTab(path, useContent, kind);
     invoke("watch_file", { path }).catch(() => {});
-    swapDocument(view, useContent);
+    surface.setContent(useContent);
     // Highlight for the file's language and open code/text edit-only.
-    void setEditorLanguage(view, path);
+    void surface.setLanguage(path);
     applyViewMode(state.activeTab()?.viewMode ?? "both");
     renderPreview(asMarkdown(path, useContent));
     // Restored buffer differs from disk → flag the tab dirty so the user
@@ -775,7 +779,7 @@ setToolbarTheme(toolbarEl, currentTheme);
 setToolbarVim(toolbarEl, vimEnabled);
 // Word wrap defaults on — apply it to the editor (not just the toolbar), so
 // long lines wrap to the pane instead of scrolling off-screen out of the box.
-setWrap(view, wrapEnabled);
+surface.setWrap(wrapEnabled);
 setToolbarWrap(toolbarEl, wrapEnabled);
 invoke<string | null>("get_initial_directory").then(dir =>
   dir ? sidebar.loadDirectory(dir) : homeDir().then(home => sidebar.loadDirectory(home))
@@ -906,7 +910,7 @@ async function reloadTabFromDisk(path: string): Promise<void> {
     state.updateContent(tab.id, content);
     state.markClean(tab.id);
     if (state.activeTabId === tab.id) {
-      swapDocument(view, content);
+      surface.setContent(content);
       renderPreview(content);
     }
     redrawTabs();
@@ -949,7 +953,7 @@ function applyConflictDisk(): void {
   state.updateContent(tab.id, content);
   state.markClean(tab.id);
   if (state.activeTabId === tab.id) {
-    swapDocument(view, content);
+    surface.setContent(content);
     renderPreview(content);
   }
   redrawTabs();
@@ -1114,7 +1118,7 @@ listen<{ id: number; data: { path: string; force: boolean } }>("scrybe://cli-rel
     state.updateContent(tab.id, content);
     state.markClean(tab.id);
     if (state.activeTabId === tab.id) {
-      swapDocument(view, content);
+      surface.setContent(content);
       renderPreview(content);
     }
     redrawTabs();
@@ -1260,7 +1264,7 @@ listen<{ id: number; data: { path: string; start_line: number; end_line: number;
 
     state.updateContent(tab.id, merged);
     if (state.activeTabId === tab.id) {
-      replaceDocument(view, merged);
+      surface.replaceContent(merged);
       renderPreview(merged);
     }
     redrawTabs();

@@ -2,7 +2,7 @@
 import { apiURL, loadFile, LoadError } from './api.ts';
 import type { FileResult, Session, Saved } from './api.ts';
 import { validateField, trimOffer, scalarDisplay } from './field.ts';
-import { byteGate, splitParity, SaveController, stashRead, stashWrite, stashClear, pollLive } from './state.ts';
+import { byteGate, splitParity, SaveController, freshRecoverySlot, stashRead, stashWrite, stashClear, pollLive } from './state.ts';
 import type { SourceTracker } from './editor.ts';
 import './frame.css';
 const BUILD_ID = import.meta.env.VITE_BUILD_ID || 'dev';
@@ -38,14 +38,7 @@ function recoverySlots(path: string) {
             .sort().map(k => k.slice('scrybe-edit:'.length))];
     } catch { return [path]; }
 }
-function freshRecoveryPath(path: string) {
-    let slot = path, i = 0;
-    try {
-        while (storage.getItem('scrybe-edit:' + slot) !== null)
-            slot = path + '#v2' + (++i === 1 ? '' : ':' + i);
-    } catch { /* Storage may be unavailable; stashWrite is also best effort. */ }
-    return slot;
-}
+const freshRecoveryPath = (path: string) => freshRecoverySlot(storage, path);
 let stashTimer: ReturnType<typeof setTimeout> | undefined;
 let csrf = meta('csrf'), dirty = false, live = false, waiting = false, closed = false;
 let controller: SaveController | undefined, current: FileResult | undefined, key: string | undefined;
@@ -89,7 +82,7 @@ function stash() {
     clearTimeout(stashTimer); stashTimer=undefined;
     if (!current || !dirty || discarded) return;
     const recovered = tracker?.recovery() ?? {value:getValue(),verified:true};
-    stashWrite(storage, recoveryPath, {v:2,build:BUILD_ID,verified:recovered.verified,
+    stashWrite(storage, recoveryPath, {v:2,at:Date.now(),build:BUILD_ID,verified:recovered.verified,
         baseSha:controller?.pending?.baseSha ?? controller?.sha ?? current.sha,value:recovered.value,
         ...(key ? {key} : {}), ...(note?.value ? {note:note.value} : {})});
 }
