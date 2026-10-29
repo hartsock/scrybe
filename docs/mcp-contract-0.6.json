@@ -1616,6 +1616,381 @@
         ],
         "type": "object"
       }
+    },
+    {
+      "annotations": {
+        "readOnlyHint": false
+      },
+      "description": "Manage the Google sign-in that `gdoc_list`, `gdoc_export` and `gdoc_import` use. `action` is one of: `status` — report the cached-token state WITHOUT contacting Google (safe to call any time); `login` — OPENS A BROWSER ON THE HOST for Google's consent screen and caches the token (blocks until the user approves, denies, or the flow times out — only call it when a human is present); `logout` — revoke and forget the cached token. Scrybe asks for the `drive.file` scope only. Requires a bring-your-own OAuth client (docs/google-docs.md); `not_configured` means none is set up yet. Human equivalent: File ▸ Google Docs ▸ Sign in / Sign out. Returns `{ status: logged_in|logged_out|not_configured, expires_at (RFC 3339 or null), config_dir }`.",
+      "inputSchema": {
+        "properties": {
+          "action": {
+            "description": "`status` (offline check), `login` (opens a browser on the host), or `logout`.",
+            "enum": [
+              "login",
+              "logout",
+              "status"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "action"
+        ],
+        "type": "object"
+      },
+      "name": "gdoc_auth",
+      "outputSchema": {
+        "properties": {
+          "config_dir": {
+            "description": "Directory holding client.json / token.json.",
+            "type": "string"
+          },
+          "expires_at": {
+            "description": "RFC 3339 expiry of the cached access token (refreshed automatically); null unless logged_in.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "kind": {
+            "const": "gdoc_auth",
+            "description": "Payload discriminator — the tool name."
+          },
+          "status": {
+            "description": "Sign-in state after the action.",
+            "enum": [
+              "logged_in",
+              "logged_out",
+              "not_configured"
+            ],
+            "type": "string"
+          },
+          "tool_error": {
+            "description": "Business failure — the tool ran and said \"no\". Absent on success. (At the MCP boundary a business failure surfaces as an isError:true result instead of riding inside a success payload.)",
+            "properties": {
+              "code": {
+                "description": "Stable machine code, e.g. no_live_app.",
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "code",
+              "message"
+            ],
+            "type": "object"
+          },
+          "v": {
+            "const": 1,
+            "description": "Payload schema version."
+          }
+        },
+        "required": [
+          "v",
+          "kind",
+          "status",
+          "expires_at",
+          "config_dir"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "annotations": {
+        "readOnlyHint": true
+      },
+      "description": "List the Google Docs Scrybe created, newest first — the candidates for `gdoc_import`. The `drive.file` scope sees only docs Scrybe made, never the rest of the user's Drive. Requires a signed-in session (`gdoc_auth`); contacts Google. No input. Human equivalent: the File ▸ Import from Google Docs… picker list. Returns `{ count, docs: [{ id, name, url, modified_time }] }`.",
+      "inputSchema": {
+        "properties": {},
+        "type": "object"
+      },
+      "name": "gdoc_list",
+      "outputSchema": {
+        "properties": {
+          "count": {
+            "type": "integer"
+          },
+          "docs": {
+            "description": "Newest first.",
+            "items": {
+              "properties": {
+                "id": {
+                  "description": "Drive file id — pass to `gdoc_import`.",
+                  "type": "string"
+                },
+                "modified_time": {
+                  "description": "RFC 3339, when Drive reports it.",
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "name": {
+                  "type": "string"
+                },
+                "url": {
+                  "description": "Opens the doc in a browser.",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id",
+                "name",
+                "url",
+                "modified_time"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "kind": {
+            "const": "gdoc_list",
+            "description": "Payload discriminator — the tool name."
+          },
+          "tool_error": {
+            "description": "Business failure — the tool ran and said \"no\". Absent on success. (At the MCP boundary a business failure surfaces as an isError:true result instead of riding inside a success payload.)",
+            "properties": {
+              "code": {
+                "description": "Stable machine code, e.g. no_live_app.",
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "code",
+              "message"
+            ],
+            "type": "object"
+          },
+          "v": {
+            "const": 1,
+            "description": "Payload schema version."
+          }
+        },
+        "required": [
+          "v",
+          "kind",
+          "count",
+          "docs"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "annotations": {
+        "readOnlyHint": false
+      },
+      "description": "Export a Markdown file ON DISK to a native Google Doc in the Scrybe folder of the user's Drive. Mermaid fences become PNG figures that carry their source (iTXt metadata + alt text), so `gdoc_import` restores them. The first export of a file creates the doc and writes a sidecar `<stem>.gdoc.json` beside it; later exports UPDATE THAT SAME DOC IN PLACE (its URL and sharing survive; delete the sidecar to force a fresh doc). Reads the file from disk like `export` — unsaved editor buffers are not seen, so `save` first. Input: `path` (a Markdown file: .md, .markdown, .mdown, .mkd, .mkdn, .mdx, or a bare-Mermaid .mmd, which exports as a one-figure doc); optional `title` overrides the doc name (default: the first H1, then the file stem). Local images are embedded only when they are files under the document's own directory; others are left as written (Google shows them broken) and listed in `images_skipped`. Requires a signed-in session (`gdoc_auth`); contacts Google. Human equivalent: the ☁️ Google Docs toolbar button / File ▸ Export to Google Docs…. Returns `{ path, doc_id, url, folder_id, action: created|updated, figures, images_skipped }`.",
+      "inputSchema": {
+        "properties": {
+          "path": {
+            "description": "Path to the Markdown file on disk to export (.md, .markdown, .mdown, .mkd, .mkdn, .mdx, or a bare-Mermaid .mmd).",
+            "type": "string"
+          },
+          "title": {
+            "description": "Doc name override (default: first H1, then the file stem).",
+            "type": "string"
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "type": "object"
+      },
+      "name": "gdoc_export",
+      "outputSchema": {
+        "properties": {
+          "action": {
+            "description": "`updated` when the sidecar's doc still existed and was rewritten in place.",
+            "enum": [
+              "created",
+              "updated"
+            ],
+            "type": "string"
+          },
+          "doc_id": {
+            "description": "Drive file id of the Google Doc.",
+            "type": "string"
+          },
+          "figures": {
+            "description": "Mermaid diagrams rendered to PNG.",
+            "type": "integer"
+          },
+          "folder_id": {
+            "description": "The Scrybe folder in Drive that holds the doc.",
+            "type": "string"
+          },
+          "images_skipped": {
+            "description": "Local images left as written because they could not be embedded (outside the document's directory, absolute, missing, or not an image); Google shows them as broken images.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "kind": {
+            "const": "gdoc_export",
+            "description": "Payload discriminator — the tool name."
+          },
+          "path": {
+            "description": "The Markdown file that was exported.",
+            "type": "string"
+          },
+          "tool_error": {
+            "description": "Business failure — the tool ran and said \"no\". Absent on success. (At the MCP boundary a business failure surfaces as an isError:true result instead of riding inside a success payload.)",
+            "properties": {
+              "code": {
+                "description": "Stable machine code, e.g. no_live_app.",
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "code",
+              "message"
+            ],
+            "type": "object"
+          },
+          "url": {
+            "description": "Opens the doc in a browser.",
+            "type": "string"
+          },
+          "v": {
+            "const": 1,
+            "description": "Payload schema version."
+          }
+        },
+        "required": [
+          "v",
+          "kind",
+          "path",
+          "doc_id",
+          "url",
+          "folder_id",
+          "action",
+          "figures",
+          "images_skipped"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "annotations": {
+        "readOnlyHint": false
+      },
+      "description": "Import a Google Doc as Markdown. Input: `doc` (a doc id, or a docs.google.com / drive.google.com URL) and `output` (the .md/.markdown path to write; its directory must already exist; an existing file is overwritten). Mermaid PNGs that carry their source become ```mermaid fences again (`figures[].verification` says which carrier vouched for each: `verified` iTXt + matching sha256, `unverified` iTXt without a digest, `alt-text`, or the sidecar `manifest`); other images are written beside the output as `<stem>_img_NN.<ext>`. A sidecar `<stem>.gdoc.json` links the file to the doc so a later `gdoc_export` updates it in place. Requires a signed-in session (`gdoc_auth`); contacts Google; with `drive.file` only docs Scrybe created are visible (`gdoc_list`). Human equivalent: File ▸ Import from Google Docs…. Returns `{ path, doc_id, diagrams, images, figures: [{ index, verification }], image_paths }`.",
+      "inputSchema": {
+        "properties": {
+          "doc": {
+            "description": "Google Doc id, or a docs.google.com / drive.google.com URL.",
+            "type": "string"
+          },
+          "output": {
+            "description": "Markdown path to write (.md or .markdown); its directory must exist.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "doc",
+          "output"
+        ],
+        "type": "object"
+      },
+      "name": "gdoc_import",
+      "outputSchema": {
+        "properties": {
+          "diagrams": {
+            "description": "Mermaid fences restored.",
+            "type": "integer"
+          },
+          "doc_id": {
+            "type": "string"
+          },
+          "figures": {
+            "items": {
+              "properties": {
+                "index": {
+                  "description": "0-based position among the doc's images.",
+                  "type": "integer"
+                },
+                "verification": {
+                  "description": "Which carrier the Mermaid source was recovered from.",
+                  "enum": [
+                    "verified",
+                    "unverified",
+                    "alt-text",
+                    "manifest"
+                  ],
+                  "type": "string"
+                }
+              },
+              "required": [
+                "index",
+                "verification"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "image_paths": {
+            "description": "Sibling image files written beside the output.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "images": {
+            "description": "Non-Mermaid images written as sibling files.",
+            "type": "integer"
+          },
+          "kind": {
+            "const": "gdoc_import",
+            "description": "Payload discriminator — the tool name."
+          },
+          "path": {
+            "description": "The Markdown file that was written.",
+            "type": "string"
+          },
+          "tool_error": {
+            "description": "Business failure — the tool ran and said \"no\". Absent on success. (At the MCP boundary a business failure surfaces as an isError:true result instead of riding inside a success payload.)",
+            "properties": {
+              "code": {
+                "description": "Stable machine code, e.g. no_live_app.",
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "code",
+              "message"
+            ],
+            "type": "object"
+          },
+          "v": {
+            "const": 1,
+            "description": "Payload schema version."
+          }
+        },
+        "required": [
+          "v",
+          "kind",
+          "path",
+          "doc_id",
+          "diagrams",
+          "images",
+          "figures",
+          "image_paths"
+        ],
+        "type": "object"
+      }
     }
   ]
 }

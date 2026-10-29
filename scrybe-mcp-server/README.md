@@ -23,7 +23,11 @@ over the shared `scrybe-tools` registry, the ONE tool registry (handlers,
 schemas, dispatch) it shares with the CLI, so the two surfaces match by
 construction. Stateful tools drive the *running app* over `~/.scrybe/sock`;
 in-process tools (`render`, `lint`, `embed`, `extract`, `export`,
-`mermaid_to_png`, `export_figures`) work headless. Agents connect via:
+`mermaid_to_png`, `export_figures`) work headless. The Google Docs tools
+(`gdoc_auth`, `gdoc_list`, `gdoc_export`, `gdoc_import`) are in-process too,
+but need the user's Google sign-in — a bring-your-own OAuth client and a
+cached token (`docs/google-docs.md`); `gdoc_auth` `login` opens a browser on
+the host. Agents connect via:
 
 ```sh
 claude mcp add scrybe -- scrybe-mcp-server stdio
@@ -35,7 +39,12 @@ The authoritative list is `scrybe-mcp-server tools` (or MCP `tools/list`):
 `open`, `read`, `section`, `edit`, `save`, `find`, `render`, `embed`,
 `extract`, `lint`, `list_tabs`, `mermaid_to_png`, `export_figures`, `export`,
 `logs`, `reload`, `close_tab`, `quit`, `state`, `set_theme`, `view_mode`,
-`set_vim`. See `AGENTS.md` (repo root) for the full per-tool reference.
+`set_vim`, `gdoc_auth`, `gdoc_list`, `gdoc_export`, `gdoc_import`. See
+`AGENTS.md` (repo root) for the full per-tool reference. Business failures
+from the `gdoc_*` tools are `isError: true` results whose
+`structuredContent.code` is one of `not_configured`, `not_logged_in`,
+`auth_failed`, `doc_not_found`, `api_error`, `http_error`, `render_failed`,
+`invalid_argument`, `io_error`.
 
 ## Key public types
 

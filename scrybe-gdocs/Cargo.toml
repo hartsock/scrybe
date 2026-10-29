@@ -1,0 +1,38 @@
+[package]
+name = "scrybe-gdocs"
+version.workspace = true
+edition = "2021"
+description = "Scrybe Google Docs integration — OAuth 2.0 (PKCE), Drive upload/export, Markdown ⇄ Google Doc with Mermaid PNG provenance"
+license = "Apache-2.0"
+repository = "https://github.com/hartsock/scrybe"
+homepage = "https://github.com/hartsock/scrybe"
+readme = "README.md"
+keywords = ["google-docs", "google-drive", "markdown", "mermaid", "scrybe"]
+categories = ["text-processing"]
+
+[dependencies]
+scrybe-core.workspace = true
+scrybe-render.workspace = true
+scrybe-mermaid.workspace = true
+scrybe-mermaid-render.workspace = true
+anyhow.workspace = true
+thiserror.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+hex.workspace = true
+base64.workspace = true
+uuid.workspace = true
+chrono.workspace = true
+url = "2"
+pulldown-cmark.workspace = true
+rand.workspace = true
+dirs.workspace = true
+open.workspace = true
+reqwest.workspace = true
+
+[dev-dependencies]
+tempfile = "3"
+
+[lints]
+workspace = true

@@ -11,10 +11,13 @@ export type { DocKind } from "./kinds";
 import type { DocKind } from "./kinds";
 
 /// Extensions that Scrybe treats as its native Markdown surface. `.mmd` rides
-/// here too: it keeps a rendered (diagram) preview, wrapped in a fence at the
-/// open site — so it stays a preview-capable tab rather than edit-only code.
+/// here too: it keeps a rendered (diagram) preview, wrapped in a fence by
+/// `asMarkdown` (kinds.ts) — so it stays a preview-capable tab rather than
+/// edit-only code.
 const MARKDOWN_EXTS = new Set(["md", "markdown", "mdown", "mkd", "mkdn", "mdx", "mmd"]);
 
+// Kept local rather than imported from kinds.ts: test/editor.test.mjs loads
+// this module on its own, so it may only take type imports from siblings.
 function fileName(path: string): string {
   return path.split("/").pop() ?? path;
 }
