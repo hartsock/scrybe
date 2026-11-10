@@ -16,6 +16,7 @@ import { showToast } from "./toast";
 import { AppState } from "./state";
 import { renderTabBar } from "./tabs";
 import { createCodeMirrorSurface } from "./codemirror-surface";
+import { createMilkdownSurface } from "./milkdown-surface";
 import type { SurfaceFactory } from "./surface";
 import { PreviewPane, SAVE_MERMAID_PNG_EVENT } from "./preview";
 import type { MermaidPngExportDetail, MermaidPreviewDocument } from "./mermaid_png";
@@ -455,7 +456,11 @@ window.addEventListener("keydown", (e) => {
 let saveTimer: ReturnType<typeof setTimeout> | null = null;
 
 // The one place the concrete editor is named; swap this factory to change surfaces.
-const createSurface: SurfaceFactory = createCodeMirrorSurface;
+// Milkdown is opt-in: build with VITE_SCRYBE_SURFACE=milkdown. Default is CodeMirror.
+const createSurface: SurfaceFactory =
+  import.meta.env.VITE_SCRYBE_SURFACE === "milkdown"
+    ? createMilkdownSurface
+    : createCodeMirrorSurface;
 const surface = createSurface(editorEl, WELCOME, ({ content }) => {
   if (state.activeTabId) {
     state.updateContent(state.activeTabId, content);
