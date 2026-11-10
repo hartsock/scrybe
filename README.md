@@ -53,8 +53,8 @@ Every document and editor control has an agent equivalent and vice versa.
 Host installation controls are intentionally local-only: changing `PATH` is
 machine administration, not document editing. The full MCP tool surface —
 names, schemas, semantics — is frozen per release in
-[`docs/mcp-contract-0.6.json`](docs/mcp-contract-0.6.json); the CLI↔GUI socket
-contract lives in [`docs/rpc-contract-0.6.md`](docs/rpc-contract-0.6.md).
+[`docs/mcp-contract-0.7.json`](docs/mcp-contract-0.7.json); the CLI↔GUI socket
+contract lives in [`docs/rpc-contract-0.7.md`](docs/rpc-contract-0.7.md).
 Agent workflow guide: [`AGENTS.md`](AGENTS.md).
 
 ## Development

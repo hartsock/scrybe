@@ -24,7 +24,7 @@ the MCP boundary a business `tool_error` (incl. `no_live_app`) is now an
 malformed `tools/call` params are JSON-RPC `-32602` protocol errors, not tool
 results. The domain taxonomy (`ToolOutcome`/`tool_error` vs `EngineFault`) is
 unchanged; only the `server.rs` adapter mapping changed. The full surface is
-frozen as `docs/mcp-contract-0.6.json`, pinned by the golden fixtures in
+frozen as `docs/mcp-contract-0.7.json`, pinned by the golden fixtures in
 `scrybe-mcp-server/tests/mcp_contract.rs`. The mapping table lives in the
 `server.rs` module docs.
 **Supersedes:** the hand-rolled `scrybe-mcp-server/src/server.rs` + `src/tools.rs`.
@@ -237,10 +237,10 @@ comes back, the existing `dispatch_with_reply` correlation.
 
 | New method | Kind | Params | Result | Replaces |
 |---|---|---|---|---|
-| `list_tabs` | reply | `{}` | `ListTabsResult { tabs: Vec<TabInfo> }` where `TabInfo { path, title, is_dirty, view_mode, active }` | **#46** (nothing today) |
+| `list_tabs` | reply | `{}` | `ListTabsResult { tabs: Vec<TabInfo> }` where `TabInfo { path, title, is_dirty, view_mode, doc_kind, active }` | **#46** (nothing today) |
 | `state` | reply | `{}` | `StateResult { active: Option<TabInfo>, theme, vim_enabled }` | `/tmp/scrybe-state.json` (`tools.rs:684`) |
 | `set_theme` | fire | `{ theme }` (`default\|dark\|solarized`) | `AckResult { applied }` | `/tmp/scrybe-set-theme.txt` (`tools.rs:700`) |
-| `view_mode` | fire | `{ mode }` (`both\|edit\|preview\|cycle`) | `ViewModeResult { mode }` (resolved after cycle) | `/tmp/scrybe-view-mode.txt` (`tools.rs:713`) |
+| `view_mode` | fire | `{ mode }` (`both\|edit\|preview\|wysiwyg\|cycle`) | `ViewModeResult { mode }` (resolved after cycle) | `/tmp/scrybe-view-mode.txt` (`tools.rs:713`) |
 | `set_vim` | fire | `{ enabled }` | `AckResult { applied }` | `/tmp/scrybe-set-vim.txt` (`tools.rs:726`) |
 | `close_tab` | fire | `{ path?: String }` (omit = active) | `AckResult { applied }` | `/tmp/scrybe-close-tab.txt` (`tools.rs:599`) |
 | `reload` | reply | `{ path, force?: bool }` | `ReloadResult { path, bytes, was_dirty }` | `/tmp/scrybe-reload-tab.txt` (`tools.rs:627`) — **#15/#28** |

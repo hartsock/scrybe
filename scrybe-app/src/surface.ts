@@ -36,6 +36,10 @@ export interface Surface {
   classify(path: string | null): DocKind;
   focus(): void;
   destroy(): void;
+  /// True while the document is untouched but the surface would write it back
+  /// in a different form (so the first edit reformats more than was typed).
+  /// Surfaces that edit the source text directly leave this out.
+  reformatPending?(): boolean;
 }
 
 export type SurfaceFactory = (

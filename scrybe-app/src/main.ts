@@ -13,15 +13,15 @@ import { basename, dirname, homeDir, join } from "@tauri-apps/api/path";
 import { open as openExternal } from "@tauri-apps/plugin-shell";
 import { ask, message, save as saveDialog } from "@tauri-apps/plugin-dialog";
 import { showToast } from "./toast";
-import { AppState } from "./state";
+import { AppState, isViewMode } from "./state";
 import { renderTabBar } from "./tabs";
 import { createCodeMirrorSurface } from "./codemirror-surface";
-import { createMilkdownSurface } from "./milkdown-surface";
-import type { SurfaceFactory } from "./surface";
+import { LazySurface, WYSIWYG_CAPABILITIES } from "./surfaces";
+import type { Surface, SurfaceChange } from "./surface";
 import { PreviewPane, SAVE_MERMAID_PNG_EVENT } from "./preview";
 import type { MermaidPngExportDetail, MermaidPreviewDocument } from "./mermaid_png";
 import { documentStem, mermaidPngFilename, rasterizeMermaidSvg } from "./mermaid_png";
-import { buildToolbar, setToolbarViewMode, setToolbarTheme, setToolbarVim, setToolbarWrap } from "./toolbar";
+import { buildToolbar, setToolbarViewMode, setToolbarTheme, setToolbarVim, setToolbarWrap, setToolbarSurfaceControls } from "./toolbar";
 import type { Theme } from "./toolbar";
 import { renderPathBar } from "./pathbar";
 import { Sidebar } from "./sidebar";
@@ -70,7 +70,7 @@ graph LR
 - **Open a file** — click in the sidebar, or run \`scrybe path/to/file.md\`
 - **Links navigate** — relative links open in a new tab; directories load in the sidebar
 - **Autosave** — edits save automatically; the original is preserved as \`.bak\`
-- **View modes** — click \`◧◨\` on any tab to toggle editor / preview / both
+- **View modes** — click \`◧◨\` on any tab to cycle both / editor / preview / WYSIWYG
 
 ## Connect an AI agent
 
@@ -88,6 +88,7 @@ const state = new AppState();
 const tabBarEl = document.getElementById("tab-bar")!;
 const pathBarEl = document.getElementById("path-bar")!;
 const editorEl = document.getElementById("editor")!;
+const wysiwygEl = document.getElementById("editor-wysiwyg")!;
 const previewEl = document.getElementById("preview")!;
 const toolbarEl = document.getElementById("toolbar")!;
 const sidebarEl = document.getElementById("sidebar")!;
@@ -258,8 +259,8 @@ buildToolbar(toolbarEl, {
   onReload: () => { void reloadActiveTabNow(); },
   onExport: () => { void exportActiveTabToWord(); },
   onPrint: () => { void printActiveTab(); },
-  onToggleVim: () => setVimEnabled(!vimEnabled),
-  onToggleWrap: () => setWrapEnabled(!wrapEnabled),
+  onToggleVim: () => toggleVim(),
+  onToggleWrap: () => toggleWrap(),
 });
 
 /// Print the active tab. Render its current buffer into the preview first — so
@@ -294,14 +295,15 @@ async function printActiveTab(): Promise<void> {
 function applyTheme(theme: Theme): void {
   currentTheme = theme;
   preview.setTheme(theme);
-  surface.setTheme(theme);
+  source.setTheme(theme);
+  wysiwyg.setTheme(theme);
   setToolbarTheme(toolbarEl, theme);
   const tab = state.activeTab();
   if (tab) renderPreview(tab.content);
   publishState();
 }
 
-/// Cycle the active tab's view mode (both → edit → preview → both). Shared
+/// Cycle the active tab's view mode (both → edit → preview → wysiwyg → both). Shared
 /// by the toolbar View button and the MCP `view_mode` poller.
 function cyclePreviewMode(): void {
   const id = state.activeTabId;
@@ -324,7 +326,7 @@ function setViewMode(mode: string): void {
     redrawTabs();
     return;
   }
-  if (mode === "both" || mode === "edit" || mode === "preview") {
+  if (isViewMode(mode)) {
     tab.viewMode = mode;
     applyViewMode(mode);
     redrawTabs();
@@ -335,17 +337,53 @@ function setViewMode(mode: string): void {
 /// MCP. Shared by the toolbar toggle and the MCP `set_vim` poller.
 function setVimEnabled(on: boolean): void {
   vimEnabled = on;
-  surface.setVim(on);
-  setToolbarVim(toolbarEl, on);
+  source.setVim(on);
+  setToolbarVim(toolbarEl, vimApplied());
   publishState();
+}
+
+/// Vim and wrap are app-wide preferences, but only some surfaces honour them.
+/// These are the values actually in effect for the active tab — what the
+/// toolbar, the native menu, and the MCP `state` / `set_vim` replies report.
+function vimApplied(): boolean {
+  return vimEnabled && surface.capabilities.vim;
+}
+function wrapApplied(): boolean {
+  return wrapEnabled && surface.capabilities.wrap;
+}
+
+/// Human toggles (toolbar + menu). The preference cannot be changed while the
+/// active surface does not support it, so a hidden change never surprises the
+/// user when they return to the source editor.
+function toggleVim(): void {
+  if (!surface.capabilities.vim) {
+    showToast("Vim keybindings are not available in WYSIWYG view", "info");
+    return;
+  }
+  setVimEnabled(!vimEnabled);
+}
+function toggleWrap(): void {
+  if (!surface.capabilities.wrap) {
+    showToast("Word wrap is always on in WYSIWYG view", "info");
+    return;
+  }
+  setWrapEnabled(!wrapEnabled);
+}
+
+/// Re-point the Vim/Wrap controls at the active surface: disabled when it
+/// does not support them, and showing the value actually in effect.
+function syncSurfaceControls(): void {
+  setToolbarSurfaceControls(toolbarEl, surface.capabilities);
+  setToolbarVim(toolbarEl, vimApplied());
+  setToolbarWrap(toolbarEl, wrapApplied());
 }
 
 /// Enable/disable soft word-wrap in the editor, update the toolbar button,
 /// mirror to MCP. Shared by the toolbar toggle and the MCP `set_wrap` poller.
 function setWrapEnabled(on: boolean): void {
   wrapEnabled = on;
-  surface.setWrap(on);
-  setToolbarWrap(toolbarEl, on);
+  source.setWrap(on);
+  setToolbarWrap(toolbarEl, wrapApplied());
   publishState();
 }
 
@@ -359,9 +397,10 @@ function uiStateSnapshot(): Record<string, unknown> {
     active_title: tab?.title ?? null,
     is_dirty: tab?.isDirty ?? false,
     view_mode: tab?.viewMode ?? "both",
+    doc_kind: tab?.kind ?? "markdown",
     theme: currentTheme,
-    vim: vimEnabled,
-    wrap: wrapEnabled,
+    vim: vimApplied(),
+    wrap: wrapApplied(),
     open_paths: state.tabs.map(t => t.path).filter((p): p is string => !!p),
   };
 }
@@ -371,10 +410,12 @@ function uiStateSnapshot(): Record<string, unknown> {
 /// (via redrawTabs), so skip the IPC unless one of the three values changed.
 let lastMenuSync = "";
 function publishState(): void {
-  const menuState = `${currentTheme}|${vimEnabled}|${wrapEnabled}`;
+  const vim = vimApplied();
+  const wrap = wrapApplied();
+  const menuState = `${currentTheme}|${vim}|${wrap}`;
   if (menuState !== lastMenuSync) {
     lastMenuSync = menuState;
-    invoke("menu_sync", { theme: currentTheme, vim: vimEnabled, wrap: wrapEnabled })
+    invoke("menu_sync", { theme: currentTheme, vim, wrap })
       .catch(() => { /* menu mirror is best-effort */ });
   }
 }
@@ -384,7 +425,15 @@ function publishState(): void {
 /// switches in real time (not just theme/view/vim changes). Called from
 /// `redrawTabs`, which fires on every tab mutation.
 function updatePathBar(): void {
-  renderPathBar(pathBarEl, state.activeTab());
+  const badge = surface.reformatPending?.()
+    ? {
+        text: "Reformat pending",
+        title: "This document's Markdown is not in Scrybe's house style. " +
+          "Your first edit in WYSIWYG view will also rewrite its formatting " +
+          "(list markers, spacing, escapes). Nothing changes until you edit.",
+      }
+    : undefined;
+  renderPathBar(pathBarEl, state.activeTab(), badge);
   publishState();
 }
 
@@ -455,13 +504,13 @@ window.addEventListener("keydown", (e) => {
 
 let saveTimer: ReturnType<typeof setTimeout> | null = null;
 
-// The one place the concrete editor is named; swap this factory to change surfaces.
-// Milkdown is opt-in: build with VITE_SCRYBE_SURFACE=milkdown. Default is CodeMirror.
-const createSurface: SurfaceFactory =
-  import.meta.env.VITE_SCRYBE_SURFACE === "milkdown"
-    ? createMilkdownSurface
-    : createCodeMirrorSurface;
-const surface = createSurface(editorEl, WELCOME, ({ content }) => {
+// The one place the concrete editors are named. `source` (CodeMirror) backs
+// the both / edit / preview view modes and every code or text tab; `wysiwyg`
+// (Milkdown) backs the wysiwyg view mode and is fetched on first use.
+// `surface` is whichever of the two the active tab is showing.
+const onSurfaceChange = (owner: () => Surface) => ({ content }: SurfaceChange): void => {
+  // Only the surface on screen speaks for the active tab.
+  if (surface !== owner()) return;
   if (state.activeTabId) {
     state.updateContent(state.activeTabId, content);
     redrawTabs();
@@ -496,15 +545,60 @@ const surface = createSurface(editorEl, WELCOME, ({ content }) => {
       }
     }, 1000);
   }
-});
+};
+const source: Surface = createCodeMirrorSurface(editorEl, WELCOME, onSurfaceChange(() => source));
+const wysiwyg: LazySurface = new LazySurface(
+  wysiwygEl,
+  () => import("./wysiwyg-surface").then(m => m.createMilkdownSurface),
+  onSurfaceChange(() => wysiwyg),
+  WYSIWYG_CAPABILITIES,
+  path => source.classify(path),
+);
+let surface: Surface = source;
 
 const editorAndPreview = document.getElementById("editor-and-preview")!;
 
-function applyViewMode(mode: string): void {
-  editorAndPreview.classList.remove("mode-both", "mode-edit", "mode-preview");
+/// Lay out the panes for `mode` and make the matching surface the active one.
+/// When that swaps surfaces on the SAME tab (a view-mode change), the incoming
+/// surface is loaded with the tab's buffer. Callers that are switching tabs
+/// pass `loadOnSwitch = false` and set the content themselves right after.
+function applyViewMode(mode: string, loadOnSwitch = true): void {
+  editorAndPreview.classList.remove("mode-both", "mode-edit", "mode-preview", "mode-wysiwyg");
   editorAndPreview.classList.add(`mode-${mode}`);
+  activateSurface(mode === "wysiwyg" ? wysiwyg : source, loadOnSwitch);
   setToolbarViewMode(toolbarEl, mode);
+  syncSurfaceControls();
   publishState();
+}
+
+function activateSurface(next: Surface, loadContent: boolean): void {
+  if (next === surface) return;
+  surface = next;
+  if (loadContent) {
+    // `tab.content` is always current: every user edit in either surface
+    // reaches it synchronously through `onSurfaceChange`.
+    const tab = state.activeTab();
+    surface.setContent(tab?.content ?? "");
+    void surface.setLanguage(tab?.path ?? null);
+  }
+  if (next !== wysiwyg) return;
+  wysiwyg.ensure().then(
+    () => {
+      if (surface !== wysiwyg) return;
+      updatePathBar(); // the "Reformat pending" badge is known only once mounted
+      wysiwyg.focus();
+    },
+    (err: unknown) => {
+      console.error("WYSIWYG editor failed to load:", err);
+      showToast("Could not load the WYSIWYG editor");
+      const tab = state.activeTab();
+      if (tab?.viewMode === "wysiwyg") {
+        tab.viewMode = "edit";
+        applyViewMode("edit");
+        redrawTabs();
+      }
+    },
+  );
 }
 
 /// Render `content` into the preview pane — but ONLY for Markdown documents.
@@ -538,7 +632,12 @@ function redrawTabs(): void {
     id => selectTab(id),
     id => closeTab(id),
     () => newTab(),
-    id => { applyViewMode(state.cycleViewMode(id)); redrawTabs(); },
+    id => {
+      // The mode icon works on any tab, but only the active tab is on screen.
+      const mode = state.cycleViewMode(id);
+      if (id === state.activeTabId) applyViewMode(mode);
+      redrawTabs();
+    },
   );
   updatePathBar();
 }
@@ -547,18 +646,20 @@ function selectTab(id: string): void {
   state.activeTabId = id;
   const tab = state.activeTab();
   if (tab) {
+    // Restore the tab's view mode first: it decides which surface is active.
+    applyViewMode(tab.viewMode, false);
     surface.setContent(tab.content);
-    // Re-highlight for this tab's language (code vs Markdown) and restore its
-    // view mode; only Markdown tabs get a rendered preview.
+    // Re-highlight for this tab's language (code vs Markdown); only Markdown
+    // tabs get a rendered preview.
     void surface.setLanguage(tab.path);
     renderPreview(tab.content);
-    applyViewMode(tab.viewMode);
   }
   redrawTabs();
 }
 
 function newTab(content = WELCOME): void {
   state.addTab(null, content); // untitled → Markdown
+  applyViewMode(state.activeTab()?.viewMode ?? "both", false);
   surface.setContent(content);
   void surface.setLanguage(null);
   renderPreview(content);
@@ -624,10 +725,10 @@ function doCloseTab(id: string): void {
   state.closeTab(id);
   const active = state.activeTab();
   const content = active?.content ?? "";
+  applyViewMode(active?.viewMode ?? "both", false);
   surface.setContent(content);
   // The newly-active tab may be a different language/kind than the closed one.
   void surface.setLanguage(active?.path ?? null);
-  applyViewMode(active?.viewMode ?? "both");
   renderPreview(content);
   redrawTabs();
 }
@@ -680,11 +781,13 @@ async function openFileByPath(path: string): Promise<void> {
       const existing = state.tabs.find(t => t.path === path);
       if (existing) {
         state.activeTabId = existing.id;
+        applyViewMode(existing.viewMode);
         preview.renderImage(convertFileSrc(path));
         redrawTabs();
         return;
       }
       state.addTab(path, "");
+      applyViewMode(state.activeTab()?.viewMode ?? "both", false);
       surface.setContent("");
       preview.renderImage(convertFileSrc(path));
       redrawTabs();
@@ -694,9 +797,9 @@ async function openFileByPath(path: string): Promise<void> {
     const existing = state.tabs.find(t => t.path === path);
     if (existing) {
       state.activeTabId = existing.id;
+      applyViewMode(existing.viewMode, false);
       surface.setContent(existing.content);
       void surface.setLanguage(existing.path);
-      applyViewMode(existing.viewMode);
       renderPreview(ext === "mmd" ? "```mermaid\n" + existing.content + "\n```" : existing.content);
       redrawTabs();
       return;
@@ -735,13 +838,13 @@ async function openFileByPath(path: string): Promise<void> {
       }
     }
 
-    const kind = surface.classify(path);
+    const kind = source.classify(path);
     const newTabId = state.addTab(path, useContent, kind);
     invoke("watch_file", { path }).catch(() => {});
+    applyViewMode(state.activeTab()?.viewMode ?? "both", false);
     surface.setContent(useContent);
     // Highlight for the file's language and open code/text edit-only.
     void surface.setLanguage(path);
-    applyViewMode(state.activeTab()?.viewMode ?? "both");
     renderPreview(ext === "mmd" ? "```mermaid\n" + useContent + "\n```" : useContent);
     // Restored buffer differs from disk → flag the tab dirty so the user
     // gets the dirty indicator and the save-on-close prompt next time.
@@ -772,11 +875,10 @@ newTab();
 // Sync the toolbar widgets + MCP state mirror with the initial defaults.
 applyViewMode(state.activeTab()?.viewMode ?? "both");
 setToolbarTheme(toolbarEl, currentTheme);
-setToolbarVim(toolbarEl, vimEnabled);
 // Word wrap defaults on — apply it to the editor (not just the toolbar), so
 // long lines wrap to the pane instead of scrolling off-screen out of the box.
-surface.setWrap(wrapEnabled);
-setToolbarWrap(toolbarEl, wrapEnabled);
+source.setWrap(wrapEnabled);
+syncSurfaceControls();
 invoke<string | null>("get_initial_directory").then(dir =>
   dir ? sidebar.loadDirectory(dir) : homeDir().then(home => sidebar.loadDirectory(home))
 ).catch(console.error);
@@ -853,11 +955,12 @@ listen<string>("scrybe://menu", event => {
       }
       break;
     case "cycle_view":  cyclePreviewMode(); break;
+    case "view_wysiwyg": setViewMode("wysiwyg"); break;
     case "theme_default":   applyTheme("default"); break;
     case "theme_dark":      applyTheme("dark"); break;
     case "theme_solarized": applyTheme("solarized"); break;
-    case "toggle_vim":  setVimEnabled(!vimEnabled); break;
-    case "toggle_wrap": setWrapEnabled(!wrapEnabled); break;
+    case "toggle_vim":  toggleVim(); break;
+    case "toggle_wrap": toggleWrap(); break;
     case "install_shell_command":
       void installOrRepairShellCommand();
       break;
@@ -1086,6 +1189,7 @@ listen<{ id: number; data: unknown }>("scrybe://cli-list-tabs", async event => {
     title: t.title,
     is_dirty: t.isDirty,
     view_mode: t.viewMode,
+    doc_kind: t.kind,
     active: t.id === state.activeTabId,
   }));
   await reply(id, { result: { tabs } });
@@ -1299,7 +1403,7 @@ listen<{ id: number; data: { mode: string } }>("scrybe://cli-view-mode", async e
   const m = data.mode;
   if (m === "cycle") {
     cyclePreviewMode();
-  } else if (m === "both" || m === "edit" || m === "preview") {
+  } else if (isViewMode(m)) {
     setViewMode(m);
   } else {
     await reply(id, { error: { code: -32602, message: `unknown mode: ${m}` } });
@@ -1308,11 +1412,13 @@ listen<{ id: number; data: { mode: string } }>("scrybe://cli-view-mode", async e
   await reply(id, { result: { mode: state.activeTab()?.viewMode ?? "both" } });
 }).catch(console.error);
 
-// `set_vim` — same entry point as the toolbar toggle.
+// `set_vim` — same entry point as the toolbar toggle. Replies with the value
+// actually APPLIED: the WYSIWYG surface has no Vim mode, so on a WYSIWYG tab
+// the request changes nothing and the reply is `enabled: false`.
 listen<{ id: number; data: { enabled: boolean } }>("scrybe://cli-set-vim", async event => {
   const { id, data } = event.payload;
-  setVimEnabled(data.enabled === true);
-  await reply(id, { result: { enabled: data.enabled === true } });
+  if (surface.capabilities.vim) setVimEnabled(data.enabled === true);
+  await reply(id, { result: { enabled: vimApplied() } });
 }).catch(console.error);
 
 // `logs` — newest-last tail of the in-memory console ring.

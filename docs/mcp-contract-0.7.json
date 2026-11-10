@@ -576,7 +576,7 @@
       "annotations": {
         "readOnlyHint": true
       },
-      "description": "List the tabs currently open in the running Scrybe editor — each with its path, title, dirty flag, view mode, and whether it is the active tab. Requires a live app; with none running it reports `no_live_app`. Read the `data.tabs` array.",
+      "description": "List the tabs currently open in the running Scrybe editor — each with its path, title, dirty flag, view mode, document kind (`markdown`, `code` or `text`), and whether it is the active tab. Requires a live app; with none running it reports `no_live_app`. Read the `data.tabs` array.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {},
@@ -598,6 +598,14 @@
                 "active": {
                   "type": "boolean"
                 },
+                "doc_kind": {
+                  "enum": [
+                    "markdown",
+                    "code",
+                    "text"
+                  ],
+                  "type": "string"
+                },
                 "is_dirty": {
                   "type": "boolean"
                 },
@@ -616,6 +624,7 @@
                 "title",
                 "is_dirty",
                 "view_mode",
+                "doc_kind",
                 "active"
               ],
               "type": "object"
@@ -1166,7 +1175,7 @@
       "annotations": {
         "readOnlyHint": true
       },
-      "description": "Report the running Scrybe app's current UI state: the active tab's path/title/dirty flag, view mode, theme, Vim and wrap toggles, and every open path. Served live from the frontend — the human equivalents are the path bar, tab mode icon, theme dropdown, and Vim toggle.",
+      "description": "Report the running Scrybe app's current UI state: the active tab's path/title/dirty flag, view mode, document kind, theme, Vim and wrap toggles, and every open path. `vim` and `wrap` are the values in effect for the active tab (both false on a `wysiwyg` tab, whose editor supports neither). Served live from the frontend — the human equivalents are the path bar, tab mode icon, theme dropdown, and Vim toggle.",
       "inputSchema": {
         "properties": {},
         "type": "object"
@@ -1186,6 +1195,15 @@
               "string",
               "null"
             ]
+          },
+          "doc_kind": {
+            "description": "How the active tab's document is treated: Markdown (preview + WYSIWYG available), a recognized source-code language, or plain text (both edit-only).",
+            "enum": [
+              "markdown",
+              "code",
+              "text"
+            ],
+            "type": "string"
           },
           "is_dirty": {
             "type": "boolean"
@@ -1228,7 +1246,8 @@
             "enum": [
               "both",
               "edit",
-              "preview"
+              "preview",
+              "wysiwyg"
             ],
             "type": "string"
           },
@@ -1246,6 +1265,7 @@
           "active_title",
           "is_dirty",
           "view_mode",
+          "doc_kind",
           "theme",
           "vim",
           "wrap",
@@ -1325,7 +1345,7 @@
       "annotations": {
         "readOnlyHint": false
       },
-      "description": "Set the active tab's view mode in the running Scrybe app — `both`, `edit`, `preview`, or `cycle` to advance both→edit→preview (same entry point as the toolbar View button). Returns the CONCRETE mode now active (a code/text tab pins to `edit`).",
+      "description": "Set the active tab's view mode in the running Scrybe app — `both` (source editor + preview), `edit`, `preview`, `wysiwyg` (one rich-text editing surface for Markdown; no Vim or wrap toggle), or `cycle` to advance both→edit→preview→wysiwyg (same entry point as the toolbar View button). Returns the CONCRETE mode now active (a code/text tab pins to `edit`).",
       "inputSchema": {
         "properties": {
           "mode": {
@@ -1333,6 +1353,7 @@
               "both",
               "edit",
               "preview",
+              "wysiwyg",
               "cycle"
             ],
             "type": "string"
@@ -1355,7 +1376,8 @@
             "enum": [
               "both",
               "edit",
-              "preview"
+              "preview",
+              "wysiwyg"
             ],
             "type": "string"
           },
@@ -1393,7 +1415,7 @@
       "annotations": {
         "readOnlyHint": false
       },
-      "description": "Enable or disable Vim keybindings in the running Scrybe editor (same entry point as the toolbar Vim toggle). Returns the applied setting.",
+      "description": "Enable or disable Vim keybindings in the running Scrybe editor (same entry point as the toolbar Vim toggle). Returns the setting actually in effect: on a `wysiwyg` tab, which has no Vim mode, nothing changes and `enabled` is false.",
       "inputSchema": {
         "properties": {
           "enabled": {
@@ -1409,7 +1431,7 @@
       "outputSchema": {
         "properties": {
           "enabled": {
-            "description": "The setting now applied.",
+            "description": "The setting now in effect for the active tab.",
             "type": "boolean"
           },
           "kind": {

@@ -12,6 +12,20 @@ lock-step version (`[workspace.package] version`).
 ## [Unreleased]
 
 ### Added
+- **WYSIWYG view mode** (#251): `wysiwyg` is a fourth per-tab view mode for
+  Markdown, after both / editor / preview. It swaps the source editor and
+  preview pane for one rich-text editing surface (Milkdown), loaded on first
+  use. Reach it from the tab mode icon, the toolbar View button, View ▸
+  WYSIWYG View, or the `view_mode` tool. Front matter is kept byte-for-byte
+  and a file is never rewritten by opening it; a "Reformat pending" badge in
+  the path bar warns when the first edit will also restyle the document's
+  Markdown. Vim and the wrap toggle do not apply in this view. Code and text
+  tabs stay edit-only.
+- **Contract 0.7**: `view_mode` accepts and returns `wysiwyg`; `state` and
+  `list_tabs` report each tab's `doc_kind` (`markdown` / `code` / `text`);
+  `set_vim` and `state` report the Vim and wrap values actually in effect.
+  The artifacts are now `docs/mcp-contract-0.7.json` and
+  `docs/rpc-contract-0.7.md`.
 - **Idempotent shell-command lifecycle**: `just install` and the macOS app now
   install or repair a managed `~/.local/bin/scrybe` link. Repeated installs
   are no-ops; broken and recognized stale links repair atomically; unrelated

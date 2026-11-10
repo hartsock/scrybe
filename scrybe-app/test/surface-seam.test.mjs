@@ -29,6 +29,8 @@ test("app modules reach the editor only through surface/kinds", async () => {
     const src = await read(name);
     assert.doesNotMatch(src, /from\s+["']\.\/editor["']/, `${name} must not import ./editor`);
     assert.doesNotMatch(src, /from\s+["'](?:@codemirror\/[^"']+|codemirror)["']/, `${name} must not import CodeMirror`);
+    assert.doesNotMatch(src, /from\s+["']@milkdown\/[^"']+["']/, `${name} must not import Milkdown`);
+    assert.doesNotMatch(src, /from\s+["']\.\/(?:milkdown-surface|wysiwyg-surface)["']/, `${name} must not statically import the WYSIWYG surface`);
   }
   assert.doesNotMatch(await read("main.ts"), /\bEditorView\b/);
 });

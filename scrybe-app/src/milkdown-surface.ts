@@ -43,6 +43,8 @@ export class MilkdownSurface implements Surface {
   private quiet = false;
   /// Last payload emitted; dedupes the trailing-paragraph plugin's append.
   private lastEmitted: string | null = null;
+  /// Whether serializing the untouched document differs from its source.
+  private reformat = false;
   private readonly root: HTMLElement;
   private readonly onChange: (change: SurfaceChange) => void;
 
@@ -73,6 +75,7 @@ export class MilkdownSurface implements Surface {
       const q = this.queued;
       this.queued = null;
       if (q) q.replace ? this.replaceNow(q.text) : this.setNow(q.text);
+      else this.measure();
     });
   }
 
@@ -108,6 +111,11 @@ export class MilkdownSurface implements Surface {
 
   setTheme(theme: string): void {
     this.root.classList.toggle("scrybe-milkdown-dark", theme === "dark");
+    this.root.classList.toggle("scrybe-milkdown-solarized", theme === "solarized");
+  }
+
+  reformatPending(): boolean {
+    return this.cached !== null && this.reformat;
   }
 
   setVim(_enabled: boolean): void {}
@@ -131,6 +139,11 @@ export class MilkdownSurface implements Surface {
     // Not ready yet: the create() continuation destroys it.
   }
 
+  /// Record whether the untouched document would be written back differently.
+  private measure(): void {
+    this.reformat = this.cached !== null && this.raw + this.crepe.getMarkdown() !== this.cached;
+  }
+
   private userChanged(): void {
     this.cached = null;
     const content = this.flush();
@@ -151,6 +164,7 @@ export class MilkdownSurface implements Surface {
     } finally {
       this.quiet = false;
     }
+    this.measure();
   }
 
   /// One ordinary history transaction, closed on both sides so it is
@@ -171,6 +185,7 @@ export class MilkdownSurface implements Surface {
     } finally {
       this.quiet = false;
     }
+    this.measure();
   }
 }
 
