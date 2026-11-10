@@ -39,6 +39,7 @@ pub const MENU_IDS: &[&str] = &[
     "print",
     "close_tab",
     "cycle_view",
+    "view_wysiwyg",
     "theme_default",
     "theme_dark",
     "theme_solarized",
@@ -139,6 +140,7 @@ pub fn build(app: &AppHandle<Wry>) -> tauri::Result<Menu<Wry>> {
     // No accelerator: ⇧⌘V is macOS "Paste and Match Style" muscle memory,
     // and the toolbar View button never had a shortcut either.
     let cycle_view = MenuItem::with_id(app, "cycle_view", "Cycle View Mode", true, None::<&str>)?;
+    let view_wysiwyg = MenuItem::with_id(app, "view_wysiwyg", "WYSIWYG View", true, None::<&str>)?;
     let theme_default = CheckMenuItem::with_id(
         app,
         "theme_default",
@@ -176,6 +178,7 @@ pub fn build(app: &AppHandle<Wry>) -> tauri::Result<Menu<Wry>> {
         true,
         &[
             &cycle_view,
+            &view_wysiwyg,
             &PredefinedMenuItem::separator(app)?,
             &theme_default,
             &theme_dark,

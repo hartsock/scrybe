@@ -47,8 +47,10 @@ fn state_spec() -> ToolSpec {
     ToolSpec {
         name: "state",
         description: "Report the running Scrybe app's current UI state: the \
-            active tab's path/title/dirty flag, view mode, theme, Vim and wrap \
-            toggles, and every open path. Served live from the frontend — the \
+            active tab's path/title/dirty flag, view mode, document kind, theme, \
+            Vim and wrap toggles, and every open path. `vim` and `wrap` are the \
+            values in effect for the active tab (both false on a `wysiwyg` tab, \
+            whose editor supports neither). Served live from the frontend — the \
             human equivalents are the path bar, tab mode icon, theme dropdown, \
             and Vim toggle.",
         input_schema: || json!({ "type": "object", "properties": {} }),
@@ -62,7 +64,8 @@ fn state_spec() -> ToolSpec {
                         "active_path": { "type": ["string", "null"], "description": "Canonical path of the active tab (null on the welcome screen)." },
                         "active_title": { "type": ["string", "null"] },
                         "is_dirty": { "type": "boolean" },
-                        "view_mode": { "type": "string", "enum": ["both", "edit", "preview"] },
+                        "view_mode": { "type": "string", "enum": ["both", "edit", "preview", "wysiwyg"] },
+                        "doc_kind": { "type": "string", "enum": ["markdown", "code", "text"], "description": "How the active tab's document is treated: Markdown (preview + WYSIWYG available), a recognized source-code language, or plain text (both edit-only)." },
                         "theme": { "type": "string" },
                         "vim": { "type": "boolean" },
                         "wrap": { "type": "boolean" },
@@ -73,6 +76,7 @@ fn state_spec() -> ToolSpec {
                         "active_title",
                         "is_dirty",
                         "view_mode",
+                        "doc_kind",
                         "theme",
                         "vim",
                         "wrap",
@@ -140,14 +144,16 @@ fn view_mode_spec() -> ToolSpec {
     ToolSpec {
         name: "view_mode",
         description: "Set the active tab's view mode in the running Scrybe app \
-            — `both`, `edit`, `preview`, or `cycle` to advance both→edit→preview \
-            (same entry point as the toolbar View button). Returns the CONCRETE \
-            mode now active (a code/text tab pins to `edit`).",
+            — `both` (source editor + preview), `edit`, `preview`, `wysiwyg` \
+            (one rich-text editing surface for Markdown; no Vim or wrap toggle), \
+            or `cycle` to advance both→edit→preview→wysiwyg (same entry point as \
+            the toolbar View button). Returns the CONCRETE mode now active (a \
+            code/text tab pins to `edit`).",
         input_schema: || {
             json!({
                 "type": "object",
                 "properties": {
-                    "mode": { "type": "string", "enum": ["both", "edit", "preview", "cycle"] }
+                    "mode": { "type": "string", "enum": ["both", "edit", "preview", "wysiwyg", "cycle"] }
                 },
                 "required": ["mode"]
             })
@@ -161,7 +167,7 @@ fn view_mode_spec() -> ToolSpec {
                     json!({
                         "mode": {
                             "type": "string",
-                            "enum": ["both", "edit", "preview"],
+                            "enum": ["both", "edit", "preview", "wysiwyg"],
                             "description": "The CONCRETE mode now active (never `cycle`)."
                         }
                     }),
@@ -189,7 +195,8 @@ fn set_vim_spec() -> ToolSpec {
         name: "set_vim",
         description: "Enable or disable Vim keybindings in the running Scrybe \
             editor (same entry point as the toolbar Vim toggle). Returns the \
-            applied setting.",
+            setting actually in effect: on a `wysiwyg` tab, which has no Vim \
+            mode, nothing changes and `enabled` is false.",
         input_schema: || {
             json!({
                 "type": "object",
@@ -204,7 +211,7 @@ fn set_vim_spec() -> ToolSpec {
                     "set_vim",
                     DATA_VERSION,
                     json!({
-                        "enabled": { "type": "boolean", "description": "The setting now applied." }
+                        "enabled": { "type": "boolean", "description": "The setting now in effect for the active tab." }
                     }),
                     &["enabled"],
                 )
@@ -394,6 +401,46 @@ mod tests {
         let (method, params) = spy.seen.lock().unwrap().clone().unwrap();
         assert_eq!(method, "set_theme");
         assert_eq!(params["theme"], "dark");
+    }
+
+    #[test]
+    fn view_mode_offers_wysiwyg_and_forwards_it() {
+        let reg = Registry::default();
+        let spec = reg.get("view_mode").unwrap();
+        let input = (spec.input_schema)();
+        let modes = input["properties"]["mode"]["enum"].as_array().unwrap();
+        assert!(modes.contains(&json!("wysiwyg")), "input enum: {modes:?}");
+        let output = (spec.data_schema.schema)();
+        assert!(
+            output.to_string().contains("wysiwyg"),
+            "the reply schema must admit the wysiwyg mode"
+        );
+
+        let spy = std::sync::Arc::new(Spy {
+            reply: json!({ "mode": "wysiwyg" }),
+            seen: std::sync::Mutex::new(None),
+        });
+        struct Fwd(std::sync::Arc<Spy>);
+        impl Transport for Fwd {
+            fn call(&self, m: &str, p: Value) -> Result<Value, TransportError> {
+                self.0.call(m, p)
+            }
+            fn is_live(&self) -> bool {
+                true
+            }
+        }
+        let out = reg
+            .call(
+                "view_mode",
+                &Ctx::with_transport(Box::new(Fwd(spy.clone()))),
+                &json!({ "mode": "wysiwyg" }),
+            )
+            .unwrap();
+        assert!(out.is_ok());
+        assert_eq!(out.data["mode"], "wysiwyg");
+        let (method, params) = spy.seen.lock().unwrap().clone().unwrap();
+        assert_eq!(method, "view_mode");
+        assert_eq!(params["mode"], "wysiwyg");
     }
 
     #[test]

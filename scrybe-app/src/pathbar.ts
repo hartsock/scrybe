@@ -6,7 +6,11 @@ import type { TabEntry } from "./state";
 /// selectable text, plus a copy button. Lets the user select/copy the
 /// filename of whatever they're looking at — the human-side equivalent of
 /// the MCP `state` tool, which reports the same active path to an agent.
-export function renderPathBar(container: HTMLElement, tab: TabEntry | undefined): void {
+export function renderPathBar(
+  container: HTMLElement,
+  tab: TabEntry | undefined,
+  badge?: { text: string; title: string },
+): void {
   container.innerHTML = "";
 
   const text = document.createElement("span");
@@ -16,6 +20,15 @@ export function renderPathBar(container: HTMLElement, tab: TabEntry | undefined)
   text.title = path ?? "This tab has no file on disk yet";
   if (!path) text.classList.add("pb-empty");
   container.appendChild(text);
+
+  // A status badge is always words, never colour alone.
+  if (badge) {
+    const b = document.createElement("span");
+    b.className = "pb-badge";
+    b.textContent = badge.text;
+    b.title = badge.title;
+    container.appendChild(b);
+  }
 
   const copy = document.createElement("button");
   copy.className = "pb-copy";

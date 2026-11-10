@@ -1,8 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
 import type { DocKind } from "./kinds";
 
-export type ViewMode = "both" | "edit" | "preview";
-const VIEW_CYCLE: ViewMode[] = ["both", "edit", "preview"];
+/// `wysiwyg` swaps the source editor and preview pane for one rich-text
+/// editing surface. Markdown tabs only; code/text tabs stay `edit`.
+export type ViewMode = "both" | "edit" | "preview" | "wysiwyg";
+export const VIEW_MODES: readonly ViewMode[] = ["both", "edit", "preview", "wysiwyg"];
+const VIEW_CYCLE: readonly ViewMode[] = VIEW_MODES;
+
+export function isViewMode(mode: string): mode is ViewMode {
+  return (VIEW_MODES as readonly string[]).includes(mode);
+}
 
 export interface TabEntry {
   id: string;

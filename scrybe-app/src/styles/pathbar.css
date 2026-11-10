@@ -47,3 +47,16 @@
 
 #path-bar .pb-copy:hover:not(:disabled) { background: #3a3a3a; }
 #path-bar .pb-copy:disabled { opacity: 0.4; cursor: default; }
+
+#path-bar .pb-badge {
+  flex-shrink: 0;
+  padding: 0 6px;
+  border: 1px solid #a05000;
+  border-radius: 3px;
+  color: #ffd;
+  background: #3d2000;
+  font-size: 10px;
+  line-height: 16px;
+  white-space: nowrap;
+  cursor: help;
+}

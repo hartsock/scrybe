@@ -30,6 +30,11 @@
       #editor-and-preview.mode-edit #preview { display: none; }
       #editor-and-preview.mode-edit #editor { border-right: none; }
       #editor-and-preview.mode-preview #editor { display: none; }
+      /* WYSIWYG replaces both the source editor and the preview pane. */
+      #editor-wysiwyg { flex: 1; min-width: 0; overflow: auto; display: none; }
+      #editor-and-preview.mode-wysiwyg #editor,
+      #editor-and-preview.mode-wysiwyg #preview { display: none; }
+      #editor-and-preview.mode-wysiwyg #editor-wysiwyg { display: block; }
       /* #preview styles are in src/styles/preview.css */
       .cm-editor { flex: 1; overflow: hidden; }
       .cm-scroller { height: 100%; overflow: auto; }
@@ -76,6 +81,7 @@
           <div id="path-bar"></div>
           <div id="editor-and-preview">
             <div id="editor"></div>
+            <div id="editor-wysiwyg"></div>
             <div id="preview"></div>
           </div>
         </div>

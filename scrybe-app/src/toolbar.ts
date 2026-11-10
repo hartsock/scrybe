@@ -7,7 +7,7 @@ export type Theme = "default" | "dark" | "solarized";
 
 export interface ToolbarHandlers {
   onThemeChange: (theme: Theme) => void;
-  /// Cycle the active tab's view mode (both → edit → preview → both),
+  /// Cycle the active tab's view mode (both → edit → preview → wysiwyg → both),
   /// mirroring the per-tab mode icon in the tab bar.
   onCyclePreview: () => void;
   onOpenFile: (path: string) => void;
@@ -47,7 +47,7 @@ export function buildToolbar(container: HTMLElement, handlers: ToolbarHandlers):
       </select>
       <button id="toggle-vim" title="Toggle Vim keybindings" aria-pressed="false" style="${btn}">Vim: off</button>
       <button id="toggle-wrap" title="Toggle soft word wrap" aria-pressed="false" style="${btn}">Wrap: off</button>
-      <button id="toggle-preview" title="Cycle view: both / editor / preview" style="${btn}">View: ◧◨</button>
+      <button id="toggle-preview" title="Cycle view: both / editor / preview / WYSIWYG" style="${btn}">View: ◧◨</button>
       <button id="toggle-devtools" title="Toggle DevTools inspector" style="background:transparent;border:1px solid #555;color:#888;padding:2px 6px;border-radius:3px;font-size:13px;cursor:pointer;line-height:1;">🐞</button>
     </div>
   `;
@@ -92,7 +92,7 @@ export function buildToolbar(container: HTMLElement, handlers: ToolbarHandlers):
     .addEventListener("click", () => invoke("toggle_devtools").catch(console.error));
 }
 
-const MODE_GLYPH: Record<string, string> = { both: "◧◨", edit: "◧", preview: "◨" };
+const MODE_GLYPH: Record<string, string> = { both: "◧◨", edit: "◧", preview: "◨", wysiwyg: "✎" };
 
 /// Reflect the active tab's view mode on the toolbar's View button so the
 /// label matches what the per-tab mode icon shows.
@@ -127,4 +127,19 @@ export function setToolbarWrap(container: HTMLElement, enabled: boolean): void {
     b.style.borderColor = enabled ? "#1577c4" : "#666";
     b.style.color = enabled ? "#fff" : "#ccc";
   }
+}
+
+/// Grey out the Vim and Wrap toggles when the active editing surface does not
+/// support them (the WYSIWYG surface supports neither).
+export function setToolbarSurfaceControls(container: HTMLElement, supported: { vim: boolean; wrap: boolean }): void {
+  const set = (id: string, ok: boolean, on: string, off: string) => {
+    const b = container.querySelector<HTMLButtonElement>(id);
+    if (!b) return;
+    b.disabled = !ok;
+    b.style.opacity = ok ? "1" : "0.45";
+    b.style.cursor = ok ? "pointer" : "not-allowed";
+    b.title = ok ? on : off;
+  };
+  set("#toggle-vim", supported.vim, "Toggle Vim keybindings", "Vim keybindings are not available in WYSIWYG view");
+  set("#toggle-wrap", supported.wrap, "Toggle soft word wrap", "Word wrap is always on in WYSIWYG view");
 }

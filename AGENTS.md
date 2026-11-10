@@ -37,10 +37,10 @@ addressed by canonical `path`.
 | `reload` | Re-read an open tab from disk into its live buffer | `path`, `force?` |
 | `close_tab` | Close a tab by its canonical path | `path` |
 | `quit` | Gracefully close the Scrybe GUI window | `force?` |
-| `state` | Report the GUI's active path, view mode, theme, and Vim state | — |
+| `state` | Report the GUI's active path, view mode, document kind, theme, and Vim state | — |
 | `set_theme` | Set editor + preview theme (human: theme dropdown) | `theme` |
-| `view_mode` | Set active tab view mode (human: View button) | `mode` |
-| `set_vim` | Toggle Vim keybindings (human: Vim toggle) | `enabled` |
+| `view_mode` | Set active tab view mode: `both`, `edit`, `preview`, `wysiwyg`, or `cycle` (human: View button; View ▸ WYSIWYG View) | `mode` |
+| `set_vim` | Toggle Vim keybindings (human: Vim toggle); no effect on a `wysiwyg` tab | `enabled` |
 | `export` | Export Markdown to Word (.docx) with Mermaid PNGs | `path`, `output?`, `no_diagrams?` |
 | `export_figures` | Export every Mermaid diagram in a document to sibling `<stem>_fig_NN.png` files (each embeds its source) | `path` |
 
@@ -75,7 +75,7 @@ Since 0.6.0 (workstream A4) the MCP boundary is honest per the MCP spec:
   the content text is the human-readable message.
 - **Unknown tool / malformed `tools/call` params**: a top-level JSON-RPC
   `-32602` protocol error, not a tool result.
-- The full frozen surface lives in `docs/mcp-contract-0.6.json`.
+- The full frozen surface lives in `docs/mcp-contract-0.7.json`.
 
 **Breaking change:** before 0.6.0 a business failure was returned as a
 *success* (`isError: false`) with `tool_error` tucked inside the `data`

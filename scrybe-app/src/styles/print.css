@@ -15,6 +15,7 @@
   #tab-bar,
   #path-bar,
   #editor,
+  #editor-wysiwyg,
   .cm-editor,
   #mcp-panel,
   #vcs-panel,
@@ -44,6 +45,7 @@
      on-screen editor-only view (mode-edit) and any dark/solarized theme. */
   #editor-and-preview.mode-edit #preview,
   #editor-and-preview.mode-preview #preview,
+  #editor-and-preview.mode-wysiwyg #preview,
   #preview {
     display: block !important;
     width: 100% !important;

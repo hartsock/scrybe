@@ -156,9 +156,28 @@ test("capabilities, classify and inert settings", async () => {
   });
 });
 
-test("main.ts defaults to the CodeMirror factory", async () => {
+test("main.ts loads the WYSIWYG surface lazily, never statically", async () => {
   const src = await readFile(new URL("../src/main.ts", import.meta.url), "utf8");
-  const m = src.match(/const createSurface: SurfaceFactory =([^;]*);/);
-  assert.ok(m, "createSurface declaration");
-  assert.match(m[1], /VITE_SCRYBE_SURFACE === "milkdown"\s*\?\s*createMilkdownSurface\s*:\s*createCodeMirrorSurface/);
+  assert.match(src, /import\("\.\/wysiwyg-surface"\)/, "dynamic import of the WYSIWYG bundle");
+  assert.doesNotMatch(src, /VITE_SCRYBE_SURFACE/, "the build-time switch is gone");
+});
+
+test("capabilities match what the app assumes before the surface loads", async () => {
+  const { WYSIWYG_CAPABILITIES } = await import("../src/surfaces.ts");
+  await withSurface("", async s => assert.deepEqual(s.capabilities, WYSIWYG_CAPABILITIES));
+});
+
+test("reformatPending: false for house-style text, true for other text until the first edit", async () => {
+  await withSurface(SOURCE, async (s, view) => {
+    assert.equal(s.reformatPending(), false, "house-style source needs no reformat");
+    const starred = SOURCE.replace("- one\n- two", "* one\n* two");
+    s.setContent(starred);
+    assert.equal(s.getContent(), starred, "opening never rewrites");
+    assert.equal(s.reformatPending(), true, "star bullets would be rewritten");
+    const at = textPos(view, "brown");
+    view.dispatch(view.state.tr.insertText("red", at, at + 5));
+    assert.equal(s.reformatPending(), false, "after an edit the reformat is in the buffer, not pending");
+    s.setContent(SOURCE);
+    assert.equal(s.reformatPending(), false);
+  });
 });
