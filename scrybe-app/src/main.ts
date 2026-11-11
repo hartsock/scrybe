@@ -23,7 +23,7 @@ import type { Surface, SurfaceChange } from "./surface";
 import { PreviewPane, SAVE_MERMAID_PNG_EVENT } from "./preview";
 import type { MermaidPngExportDetail, MermaidPreviewDocument } from "./mermaid_png";
 import { documentStem, mermaidPngFilename, rasterizeMermaidSvg } from "./mermaid_png";
-import { buildToolbar, setToolbarViewMode, setToolbarTheme, setToolbarVim, setToolbarWrap, setToolbarSurfaceControls } from "./toolbar";
+import { buildToolbar, setToolbarViewMode, setToolbarTheme, setToolbarVim, setToolbarWrap, setToolbarSurfaceControls, setToolbarExplorer } from "./toolbar";
 import type { Theme } from "./toolbar";
 import { renderPathBar } from "./pathbar";
 import { Sidebar } from "./sidebar";
@@ -94,6 +94,8 @@ const wysiwygEl = document.getElementById("editor-wysiwyg")!;
 const previewEl = document.getElementById("preview")!;
 const toolbarEl = document.getElementById("toolbar")!;
 const sidebarEl = document.getElementById("sidebar")!;
+const contentEl = document.getElementById("content")!;
+const editorColEl = document.getElementById("editor-col")!;
 
 const preview = new PreviewPane(previewEl);
 let previewRequestGeneration = 0;
@@ -146,7 +148,28 @@ let currentTheme: Theme = "default";
 let vimEnabled = false;
 let wrapEnabled = true;
 
+// Whether the Explorer sidebar is showing. App-wide, remembered across
+// launches on this machine (a viewing convenience, so local storage is
+// enough; it falls back to showing when storage is unavailable).
+const EXPLORER_PREF = "scrybe.explorerVisible";
+let explorerVisible = (() => {
+  try { return localStorage.getItem(EXPLORER_PREF) !== "false"; } catch { return true; }
+})();
+
+/// Show or hide the Explorer sidebar. The single entry point for the toolbar
+/// ☰ button, the header « button, View ▸ Show Explorer (⇧⌘E), and the MCP
+/// `set_explorer` tool.
+function setExplorerVisible(on: boolean): void {
+  explorerVisible = on;
+  contentEl.classList.toggle("explorer-hidden", !on);
+  setToolbarExplorer(toolbarEl, on);
+  try { localStorage.setItem(EXPLORER_PREF, String(on)); } catch { /* not remembered */ }
+  publishState();
+}
+
 function flashSidebar(dir: string): void {
+  // Navigating to a folder shows it, so reveal a hidden Explorer.
+  if (!explorerVisible) setExplorerVisible(true);
   sidebar.loadDirectory(dir);
   sidebarEl.classList.add("sidebar-folder-flash");
   sidebarEl.addEventListener("animationend",
@@ -256,14 +279,18 @@ buildToolbar(toolbarEl, {
   onThemeChange: (theme) => applyTheme(theme),
   onCyclePreview: () => cyclePreviewMode(),
   onOpenFile: openFileByPath,
-  onOpenFolder: (path) => sidebar.loadDirectory(path),
+  onOpenFolder: (path) => flashSidebar(path),
   onSave: () => { void saveActiveTabNow(); },
   onReload: () => { void reloadActiveTabNow(); },
   onExport: () => { void exportActiveTabToWord(); },
   onPrint: () => { void printActiveTab(); },
   onToggleVim: () => toggleVim(),
   onToggleWrap: () => toggleWrap(),
+  onToggleExplorer: () => setExplorerVisible(!explorerVisible),
 });
+document.getElementById("explorer-hide")!.addEventListener("click", () => setExplorerVisible(false));
+document.getElementById("empty-new")!.addEventListener("click", () => newTab());
+document.getElementById("empty-open")!.addEventListener("click", () => document.getElementById("open-file")?.click());
 
 /// Print the active tab. Render its current buffer into the preview first — so
 /// printing works even from editor-only view and always reflects unsaved edits —
@@ -404,21 +431,22 @@ function uiStateSnapshot(): Record<string, unknown> {
     theme: currentTheme,
     vim: vimApplied(),
     wrap: wrapApplied(),
+    explorer: explorerVisible,
     open_paths: state.tabs.map(t => t.path).filter((p): p is string => !!p),
   };
 }
 
 /// Keep the native menu's check items (theme radio, Vim, Wrap) in sync so
 /// menu, toolbar, and agents can never disagree for long. Fires per keystroke
-/// (via redrawTabs), so skip the IPC unless one of the three values changed.
+/// (via redrawTabs), so skip the IPC unless one of the values changed.
 let lastMenuSync = "";
 function publishState(): void {
   const vim = vimApplied();
   const wrap = wrapApplied();
-  const menuState = `${currentTheme}|${vim}|${wrap}`;
+  const menuState = `${currentTheme}|${vim}|${wrap}|${explorerVisible}`;
   if (menuState !== lastMenuSync) {
     lastMenuSync = menuState;
-    invoke("menu_sync", { theme: currentTheme, vim, wrap })
+    invoke("menu_sync", { theme: currentTheme, vim, wrap, explorer: explorerVisible })
       .catch(() => { /* menu mirror is best-effort */ });
   }
 }
@@ -670,7 +698,11 @@ function previewSource(tab: TabEntry, content: string): string {
 
 async function renderPreview(content: string): Promise<void> {
   const tab = state.activeTab();
-  if (tab?.kind === "markdown") {
+  if (!tab) {
+    preview.clear();
+    return;
+  }
+  if (tab.kind === "markdown") {
     const request = beginPreviewRequest(tab.id, tab.path);
     const markdown = previewSource(tab, content);
     const processed = await pluginManager.runAll(markdown);
@@ -721,6 +753,9 @@ function showActiveTab(): void {
 }
 
 function redrawTabs(): void {
+  // With no tab, show the empty screen: an editor with no tab behind it
+  // would take typing and then lose it. Every tab change passes through here.
+  editorColEl.classList.toggle("no-tabs", state.tabs.length === 0);
   renderTabBar(tabBarEl, state,
     id => selectTab(id),
     id => closeTab(id),
@@ -945,6 +980,7 @@ setToolbarTheme(toolbarEl, currentTheme);
 // long lines wrap to the pane instead of scrolling off-screen out of the box.
 source.setWrap(wrapEnabled);
 syncSurfaceControls();
+setExplorerVisible(explorerVisible);
 invoke<string | null>("get_initial_directory").then(dir =>
   dir ? sidebar.loadDirectory(dir) : homeDir().then(home => sidebar.loadDirectory(home))
 ).catch(console.error);
@@ -1027,6 +1063,7 @@ listen<string>("scrybe://menu", event => {
     case "theme_solarized": applyTheme("solarized"); break;
     case "toggle_vim":  toggleVim(); break;
     case "toggle_wrap": toggleWrap(); break;
+    case "toggle_explorer": setExplorerVisible(!explorerVisible); break;
     case "install_shell_command":
       void installOrRepairShellCommand();
       break;
@@ -1509,6 +1546,14 @@ listen<{ id: number; data: { language: string } }>("scrybe://cli-set-language", 
       auto: state.activeTab()?.languageOverride === null,
     },
   });
+}).catch(console.error);
+
+// `set_explorer` — same entry point as the toolbar ☰ button. Replies with
+// whether the Explorer is now showing.
+listen<{ id: number; data: { visible: boolean } }>("scrybe://cli-set-explorer", async event => {
+  const { id, data } = event.payload;
+  setExplorerVisible(data.visible === true);
+  await reply(id, { result: { visible: explorerVisible } });
 }).catch(console.error);
 
 // `logs` — newest-last tail of the in-memory console ring.

@@ -35,6 +35,14 @@ export class PreviewPane {
     this.container.dataset.theme = theme;
   }
 
+  /// Show nothing (no tab is open). Bumps the render generation so a render
+  /// still in flight cannot repaint the old document afterwards.
+  clear(): void {
+    this.renderGeneration++;
+    this.renderedDocument = null;
+    this.container.innerHTML = "";
+  }
+
   renderImage(src: string): void {
     this.renderGeneration += 1;
     this.renderedDocument = null;

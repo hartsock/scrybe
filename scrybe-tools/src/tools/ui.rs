@@ -2,7 +2,7 @@
 // Copyright 2026 Shawn Hartsock and contributors
 
 //! UI-parity + app-control tools — `state`, `set_theme`, `view_mode`,
-//! `set_vim`, `set_language`, `logs`, `quit`, `close_tab` — dispatched to the live app over
+//! `set_vim`, `set_language`, `set_explorer`, `logs`, `quit`, `close_tab` — dispatched to the live app over
 //! typed socket methods (workstream A2). These replace the legacy MCP
 //! handlers' `/tmp` signal files and `pkill` fallback: every control now
 //! drives the same code path as the human toolbar and reports what actually
@@ -24,6 +24,7 @@ pub(crate) fn specs() -> Vec<ToolSpec> {
         view_mode_spec(),
         set_vim_spec(),
         set_language_spec(),
+        set_explorer_spec(),
         logs_spec(),
         quit_spec(),
         close_tab_spec(),
@@ -50,7 +51,8 @@ fn state_spec() -> ToolSpec {
         description: "Report the running Scrybe app's current UI state: the \
             active tab's path/title/dirty flag, view mode, document kind and \
             language, theme, \
-            Vim and wrap toggles, and every open path. `vim` and `wrap` are the \
+            Vim and wrap toggles, whether the Explorer sidebar is showing, and \
+            every open path. `vim` and `wrap` are the \
             values in effect for the active tab (both false on a `wysiwyg` tab, \
             whose editor supports neither). Served live from the frontend — the \
             human equivalents are the path bar, tab mode icon, theme dropdown, \
@@ -72,6 +74,7 @@ fn state_spec() -> ToolSpec {
                         "theme": { "type": "string" },
                         "vim": { "type": "boolean" },
                         "wrap": { "type": "boolean" },
+                        "explorer": { "type": "boolean", "description": "The Explorer sidebar is showing." },
                         "open_paths": { "type": "array", "items": { "type": "string" } }
                     }),
                     &[
@@ -84,6 +87,7 @@ fn state_spec() -> ToolSpec {
                         "theme",
                         "vim",
                         "wrap",
+                        "explorer",
                         "open_paths",
                     ],
                 )
@@ -283,6 +287,49 @@ fn set_language_spec() -> ToolSpec {
     }
 }
 
+// ── set_explorer ─────────────────────────────────────────────────────────────
+
+fn set_explorer_spec() -> ToolSpec {
+    ToolSpec {
+        name: "set_explorer",
+        description: "Show or hide the Explorer sidebar (file browser, agents \
+            and version-control panels) in the running Scrybe app — same entry \
+            point as the toolbar ☰ button and View ▸ Show Explorer. Returns \
+            whether it is now showing.",
+        input_schema: || {
+            json!({
+                "type": "object",
+                "properties": { "visible": { "type": "boolean" } },
+                "required": ["visible"]
+            })
+        },
+        data_schema: DataSchema {
+            version: DATA_VERSION,
+            schema: || {
+                crate::schema::envelope(
+                    "set_explorer",
+                    DATA_VERSION,
+                    json!({
+                        "visible": { "type": "boolean", "description": "The Explorer is now showing." }
+                    }),
+                    &["visible"],
+                )
+            },
+        },
+        mutates: true,
+        facet: Facet::UiParity,
+        handler: |ctx, args| {
+            let visible = args.get("visible").and_then(Value::as_bool).unwrap_or(true);
+            dispatch(
+                ctx,
+                "set_explorer",
+                "set_explorer",
+                json!({ "visible": visible }),
+            )
+        },
+    }
+}
+
 // ── logs ─────────────────────────────────────────────────────────────────────
 
 fn logs_spec() -> ToolSpec {
@@ -416,6 +463,7 @@ mod tests {
             "view_mode",
             "set_vim",
             "set_language",
+            "set_explorer",
             "logs",
             "quit",
             "close_tab",
@@ -532,6 +580,36 @@ mod tests {
     }
 
     #[test]
+    fn set_explorer_forwards_visibility_and_wraps_reply() {
+        let spy = std::sync::Arc::new(Spy {
+            reply: json!({ "visible": false }),
+            seen: std::sync::Mutex::new(None),
+        });
+        struct Fwd(std::sync::Arc<Spy>);
+        impl Transport for Fwd {
+            fn call(&self, m: &str, p: Value) -> Result<Value, TransportError> {
+                self.0.call(m, p)
+            }
+            fn is_live(&self) -> bool {
+                true
+            }
+        }
+        let out = Registry::default()
+            .call(
+                "set_explorer",
+                &Ctx::with_transport(Box::new(Fwd(spy.clone()))),
+                &json!({ "visible": false }),
+            )
+            .unwrap();
+        assert!(out.is_ok());
+        assert_eq!(out.data["kind"], "set_explorer");
+        assert_eq!(out.data["visible"], false);
+        let (method, params) = spy.seen.lock().unwrap().clone().unwrap();
+        assert_eq!(method, "set_explorer");
+        assert_eq!(params["visible"], false);
+    }
+
+    #[test]
     fn set_language_unknown_name_is_a_business_failure() {
         struct Refuse;
         impl Transport for Refuse {
@@ -598,6 +676,7 @@ mod tests {
             ("view_mode", true),
             ("set_vim", true),
             ("set_language", true),
+            ("set_explorer", true),
             ("quit", true),
             ("close_tab", true),
         ] {

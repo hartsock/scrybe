@@ -31,6 +31,11 @@ lock-step version (`[workspace.package] version`).
   selection and scroll position across tab switches. The Open dialog no
   longer hides source files. `state` and `list_tabs` report each tab's
   `language`.
+- **Hide the Explorer**: the toolbar ☰ button, a « button in the Explorer
+  header, and View ▸ Show Explorer (⇧⌘E) hide or show the sidebar so the
+  editor gets the full width. The choice is remembered across launches.
+  Opening a folder shows it again. Agents use the new `set_explorer` tool;
+  `state` reports `explorer`.
 - **Contract 0.7**: `view_mode` accepts and returns `wysiwyg`; `state` and
   `list_tabs` report each tab's `doc_kind` (`markdown` / `code` / `text`);
   `set_vim` and `state` report the Vim and wrap values actually in effect.
