@@ -186,6 +186,10 @@ pub struct TabInfo {
     pub active: bool,
 }
 
+fn default_true() -> bool {
+    true
+}
+
 fn default_doc_kind() -> String {
     "markdown".to_string()
 }
@@ -241,6 +245,10 @@ pub struct StateResult {
     pub vim: bool,
     /// Soft wrap toggle in effect for the active tab (false on a `wysiwyg` tab).
     pub wrap: bool,
+    /// The Explorer sidebar is showing. Added in contract 0.7; an older app
+    /// omits it, which reads as showing.
+    #[serde(default = "default_true")]
+    pub explorer: bool,
     pub open_paths: Vec<String>,
 }
 
@@ -302,6 +310,18 @@ pub struct SetLanguageResult {
     pub doc_kind: String,
     /// True when the language is detected rather than set by hand.
     pub auto: bool,
+}
+
+/// Params for `set_explorer`: show or hide the Explorer sidebar.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct SetExplorerParams {
+    pub visible: bool,
+}
+
+/// Result of `set_explorer`: whether the Explorer is now showing.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct SetExplorerResult {
+    pub visible: bool,
 }
 
 /// Params for `logs`: recent console output from the running app.

@@ -1181,7 +1181,7 @@
       "annotations": {
         "readOnlyHint": true
       },
-      "description": "Report the running Scrybe app's current UI state: the active tab's path/title/dirty flag, view mode, document kind and language, theme, Vim and wrap toggles, and every open path. `vim` and `wrap` are the values in effect for the active tab (both false on a `wysiwyg` tab, whose editor supports neither). Served live from the frontend — the human equivalents are the path bar, tab mode icon, theme dropdown, and Vim toggle.",
+      "description": "Report the running Scrybe app's current UI state: the active tab's path/title/dirty flag, view mode, document kind and language, theme, Vim and wrap toggles, whether the Explorer sidebar is showing, and every open path. `vim` and `wrap` are the values in effect for the active tab (both false on a `wysiwyg` tab, whose editor supports neither). Served live from the frontend — the human equivalents are the path bar, tab mode icon, theme dropdown, and Vim toggle.",
       "inputSchema": {
         "properties": {},
         "type": "object"
@@ -1210,6 +1210,10 @@
               "text"
             ],
             "type": "string"
+          },
+          "explorer": {
+            "description": "The Explorer sidebar is showing.",
+            "type": "boolean"
           },
           "is_dirty": {
             "type": "boolean"
@@ -1283,6 +1287,7 @@
           "theme",
           "vim",
           "wrap",
+          "explorer",
           "open_paths"
         ],
         "type": "object"
@@ -1553,6 +1558,63 @@
           "language",
           "doc_kind",
           "auto"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "annotations": {
+        "readOnlyHint": false
+      },
+      "description": "Show or hide the Explorer sidebar (file browser, agents and version-control panels) in the running Scrybe app — same entry point as the toolbar ☰ button and View ▸ Show Explorer. Returns whether it is now showing.",
+      "inputSchema": {
+        "properties": {
+          "visible": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "visible"
+        ],
+        "type": "object"
+      },
+      "name": "set_explorer",
+      "outputSchema": {
+        "properties": {
+          "kind": {
+            "const": "set_explorer",
+            "description": "Payload discriminator — the tool name."
+          },
+          "tool_error": {
+            "description": "Business failure — the tool ran and said \"no\". Absent on success. (At the MCP boundary a business failure surfaces as an isError:true result instead of riding inside a success payload.)",
+            "properties": {
+              "code": {
+                "description": "Stable machine code, e.g. no_live_app.",
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "code",
+              "message"
+            ],
+            "type": "object"
+          },
+          "v": {
+            "const": 1,
+            "description": "Payload schema version."
+          },
+          "visible": {
+            "description": "The Explorer is now showing.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "v",
+          "kind",
+          "visible"
         ],
         "type": "object"
       }

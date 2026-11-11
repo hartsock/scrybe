@@ -27,11 +27,14 @@ export interface ToolbarHandlers {
   onToggleVim: () => void;
   /// Toggle soft word-wrap in the editor on/off.
   onToggleWrap: () => void;
+  /// Show or hide the Explorer sidebar.
+  onToggleExplorer: () => void;
 }
 
 export function buildToolbar(container: HTMLElement, handlers: ToolbarHandlers): void {
   const btn = "background:transparent;border:1px solid #666;color:#ccc;padding:2px 8px;border-radius:3px;font-size:12px;cursor:pointer;";
   container.innerHTML = `
+    <button id="toggle-explorer" title="Hide Explorer (⇧⌘E)" aria-pressed="true" style="${btn}margin-right:10px;">☰</button>
     <span style="font-weight:600;letter-spacing:0.5px;">Scrybe</span>
     <div style="margin-left:auto;display:flex;align-items:center;gap:8px;">
       <button id="tb-save" title="Save active tab (⌘S / Ctrl+S)" style="${btn}">💾 Save</button>
@@ -81,6 +84,8 @@ export function buildToolbar(container: HTMLElement, handlers: ToolbarHandlers):
     .addEventListener("click", () => handlers.onToggleVim());
   container.querySelector<HTMLButtonElement>("#toggle-wrap")!
     .addEventListener("click", () => handlers.onToggleWrap());
+  container.querySelector<HTMLButtonElement>("#toggle-explorer")!
+    .addEventListener("click", () => handlers.onToggleExplorer());
   container.querySelector<HTMLButtonElement>("#toggle-preview")!
     .addEventListener("click", () => handlers.onCyclePreview());
   container.querySelector<HTMLButtonElement>("#toggle-devtools")!
@@ -121,6 +126,17 @@ export function setToolbarWrap(container: HTMLElement, enabled: boolean): void {
     b.setAttribute("aria-pressed", String(enabled));
     b.style.borderColor = enabled ? "#1577c4" : "#666";
     b.style.color = enabled ? "#fff" : "#ccc";
+  }
+}
+
+/// Reflect whether the Explorer sidebar is showing on its toolbar toggle.
+export function setToolbarExplorer(container: HTMLElement, visible: boolean): void {
+  const b = container.querySelector<HTMLButtonElement>("#toggle-explorer");
+  if (b) {
+    b.setAttribute("aria-pressed", String(visible));
+    b.title = `${visible ? "Hide" : "Show"} Explorer (⇧⌘E)`;
+    b.style.borderColor = visible ? "#1577c4" : "#666";
+    b.style.color = visible ? "#fff" : "#ccc";
   }
 }
 

@@ -80,11 +80,12 @@ them except `close`/`quit` — `ERR_REPLY_TIMEOUT`.
 | `reload` | `{path, force?}` | `{path, bytes, was_dirty}` | `ERR_TAB_NOT_OPEN`, `ERR_DIRTY_RELOAD_REFUSED` |
 | `close` | `{path}` | `{applied}` (fire-and-forget ack; not-open collapses to `applied: false` frontend-side) | — |
 | `quit` | `{force?}` | `{applied}` (fire-and-forget ack) | `ERR_DIRTY_QUIT_REFUSED` |
-| `state` | `{}` | `{active_path, active_title, is_dirty, view_mode, doc_kind, language, theme, vim, wrap, open_paths}` | — |
+| `state` | `{}` | `{active_path, active_title, is_dirty, view_mode, doc_kind, language, theme, vim, wrap, explorer, open_paths}` | — |
 | `set_theme` | `{theme}` | `{theme}` (applied) | — |
 | `view_mode` | `{mode}` (`both`\|`edit`\|`preview`\|`wysiwyg`\|`cycle`) | `{mode}` (the CONCRETE mode now active) | — |
 | `set_vim` | `{enabled}` | `{enabled}` (the value in effect; always `false` on a `wysiwyg` tab) | — |
 | `set_language` | `{language}` (a name or alias, or `auto`) | `{language, doc_kind, auto}` (what is now in effect for the active tab) | `ERR_TAB_NOT_OPEN` (no active tab); `-32602` for an unknown language |
+| `set_explorer` | `{visible}` | `{visible}` (whether the Explorer sidebar is now showing) | — |
 | `logs` | `{tail?}` | `{lines}` (newest-last, from the app's in-memory ring) | — |
 
 Notes:
@@ -120,6 +121,8 @@ Notes:
 - `set_vim` replies with the value in effect rather than echoing the request.
 - New method `set_language`. `state` and each `list_tabs` entry gain
   `language`; a 0.7 client reading an app without it treats it as null.
+- New method `set_explorer`. `state` gains `explorer`; a 0.7 client reading
+  an app without it treats it as `true` (showing).
 
 ## Stable error codes
 
