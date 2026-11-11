@@ -62,16 +62,11 @@ export function buildToolbar(container: HTMLElement, handlers: ToolbarHandlers):
   container.querySelector<HTMLButtonElement>("#open-file")!
     .addEventListener("click", async () => {
       const home = await homeDir();
-      const result = await open({
-        multiple: false,
-        defaultPath: home,
-        filters: [
-          { name: "All supported", extensions: ["md", "markdown", "txt", "mmd", "png", "jpg", "jpeg", "gif", "webp"] },
-          { name: "Markdown", extensions: ["md", "markdown", "txt"] },
-          { name: "Mermaid", extensions: ["mmd"] },
-          { name: "Images", extensions: ["png", "jpg", "jpeg", "gif", "webp"] },
-        ],
-      });
+      // No extension filters: Scrybe opens Markdown, images and any source
+      // or text file, including ones with no extension (Makefile, scripts).
+      // macOS merges every filter into one allow-list, so even an "All files"
+      // entry would leave those unselectable.
+      const result = await open({ multiple: false, defaultPath: home });
       if (result) handlers.onOpenFile(result as string);
     });
   container.querySelector<HTMLButtonElement>("#open-folder")!

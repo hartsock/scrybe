@@ -35,7 +35,7 @@ The authoritative list is `scrybe-mcp-server tools` (or MCP `tools/list`):
 `open`, `read`, `section`, `edit`, `save`, `find`, `render`, `embed`,
 `extract`, `lint`, `list_tabs`, `mermaid_to_png`, `export_figures`, `export`,
 `logs`, `reload`, `close_tab`, `quit`, `state`, `set_theme`, `view_mode`,
-`set_vim`. See `AGENTS.md` (repo root) for the full per-tool reference.
+`set_vim`, `set_language`. See `AGENTS.md` (repo root) for the full per-tool reference.
 
 ## Key public types
 

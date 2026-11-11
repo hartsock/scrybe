@@ -37,18 +37,19 @@ addressed by canonical `path`.
 | `reload` | Re-read an open tab from disk into its live buffer | `path`, `force?` |
 | `close_tab` | Close a tab by its canonical path | `path` |
 | `quit` | Gracefully close the Scrybe GUI window | `force?` |
-| `state` | Report the GUI's active path, view mode, document kind, theme, and Vim state | — |
+| `state` | Report the GUI's active path, view mode, document kind and language, theme, and Vim state | — |
 | `set_theme` | Set editor + preview theme (human: theme dropdown) | `theme` |
 | `view_mode` | Set active tab view mode: `both`, `edit`, `preview`, `wysiwyg`, or `cycle` (human: View button; View ▸ WYSIWYG View) | `mode` |
 | `set_vim` | Toggle Vim keybindings (human: Vim toggle); no effect on a `wysiwyg` tab | `enabled` |
+| `set_language` | Set the active tab's language by name or alias (`Rust`, `py`, `cpp`, `markdown`, `text`), or `auto` to detect again (human: language chip in the path bar) | `language` |
 | `export` | Export Markdown to Word (.docx) with Mermaid PNGs | `path`, `output?`, `no_diagrams?` |
 | `export_figures` | Export every Mermaid diagram in a document to sibling `<stem>_fig_NN.png` files (each embeds its source) | `path` |
 
 > **Parity rule:** every human control in scrybe-app has an MCP equivalent
-> and vice versa. The `state`/`set_theme`/`view_mode`/`set_vim`/`export`/
-> `export_figures` tools mirror the path bar, theme dropdown, View button,
-> Vim toggle, the Export button, and the "Export Diagrams…" menu item
-> respectively. `mermaid_to_png` mirrors right-clicking a rendered Mermaid
+> and vice versa. The `state`/`set_theme`/`view_mode`/`set_vim`/`set_language`/
+> `export`/`export_figures` tools mirror the path bar, theme dropdown, View
+> button, Vim toggle, the path bar's language chip, the Export button, and the
+> "Export Diagrams…" menu item respectively. `mermaid_to_png` mirrors right-clicking a rendered Mermaid
 > diagram to open the PNG save dialog; the GUI snapshots Mermaid.js
 > pixels while the headless tool renders independently, and both embed the
 > same source/UUID/SHA-256 provenance.

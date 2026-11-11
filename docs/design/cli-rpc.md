@@ -21,7 +21,7 @@ JSON-RPC 2.0, newline-delimited, one line per request and one per response. Unix
 ### Methods
 
 `open`, `save`, `read`, `find`, `section`, `edit`, `list_tabs`, `reload`,
-`close`, `quit`, `state`, `set_theme`, `view_mode`, `set_vim`, `logs` — see
+`close`, `quit`, `state`, `set_theme`, `view_mode`, `set_vim`, `set_language`, `logs` — see
 the fixture for shapes and per-method errors. `close`/`quit` are
 fire-and-forget acks; everything else is request-with-reply.
 

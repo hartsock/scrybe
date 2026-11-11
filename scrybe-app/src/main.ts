@@ -14,8 +14,10 @@ import { open as openExternal } from "@tauri-apps/plugin-shell";
 import { ask, message, save as saveDialog } from "@tauri-apps/plugin-dialog";
 import { showToast } from "./toast";
 import { AppState, isViewMode } from "./state";
+import type { TabEntry } from "./state";
+import type { DocInfo, LanguageHint } from "./kinds";
 import { renderTabBar } from "./tabs";
-import { createCodeMirrorSurface } from "./codemirror-surface";
+import { createCodeMirrorSurface, knownLanguage, languageNames } from "./codemirror-surface";
 import { LazySurface, WYSIWYG_CAPABILITIES } from "./surfaces";
 import type { Surface, SurfaceChange } from "./surface";
 import { PreviewPane, SAVE_MERMAID_PNG_EVENT } from "./preview";
@@ -277,7 +279,7 @@ async function printActiveTab(): Promise<void> {
     return;
   }
   const request = beginPreviewRequest(tab.id, tab.path);
-  await preview.render(tab.content, request.document);
+  await preview.render(previewSource(tab, tab.content), request.document);
   // KaTeX/Mermaid post-processing is async; give it a beat before the snapshot.
   await new Promise((r) => setTimeout(r, 250));
   // WKWebView ignores JS window.print(); route to the native print dialog.
@@ -398,6 +400,7 @@ function uiStateSnapshot(): Record<string, unknown> {
     is_dirty: tab?.isDirty ?? false,
     view_mode: tab?.viewMode ?? "both",
     doc_kind: tab?.kind ?? "markdown",
+    language: tab?.language ?? null,
     theme: currentTheme,
     vim: vimApplied(),
     wrap: wrapApplied(),
@@ -433,8 +436,55 @@ function updatePathBar(): void {
           "(list markers, spacing, escapes). Nothing changes until you edit.",
       }
     : undefined;
-  renderPathBar(pathBarEl, state.activeTab(), badge);
+  const tab = state.activeTab();
+  const language = tab && {
+    label: tab.language ?? "Plain Text",
+    auto: tab.languageOverride === null,
+    names: LANGUAGE_NAMES,
+    onPick: (choice: string) => {
+      if (!setActiveLanguage(choice)) showToast(`Unknown language: ${choice}`);
+    },
+  };
+  renderPathBar(pathBarEl, tab, badge, language);
   publishState();
+}
+
+const LANGUAGE_NAMES = languageNames();
+
+/// What a tab's language is detected from, beyond its file name.
+function languageHint(tab: TabEntry): LanguageHint {
+  return { firstLine: firstLineOf(tab.content), override: tab.languageOverride };
+}
+
+function firstLineOf(content: string): string {
+  const end = content.indexOf("\n");
+  return end === -1 ? content : content.slice(0, end);
+}
+
+/// Set the active tab's language by name, or `auto` to return to detection.
+/// The single entry point for the path-bar language chip and the MCP
+/// `set_language` tool. Returns null (and changes nothing) for an unknown
+/// language name.
+function setActiveLanguage(choice: string): DocInfo | null {
+  const tab = state.activeTab();
+  if (!tab) return null;
+  let override: string | null = null;
+  if (choice.trim().toLowerCase() !== "auto") {
+    const known = knownLanguage(choice);
+    if (!known) return null;
+    override = known.name;
+  }
+  tab.languageOverride = override;
+  const info = source.classify(tab.path, languageHint(tab));
+  tab.kind = info.kind;
+  tab.language = info.language;
+  // Only Markdown has a preview or a WYSIWYG view.
+  if (tab.kind !== "markdown") tab.viewMode = "edit";
+  applyViewMode(tab.viewMode);
+  void surface.setLanguage(tab.path, languageHint(tab));
+  void renderPreview(tab.content);
+  redrawTabs();
+  return info;
 }
 
 /// Export the active tab's current buffer to a Word (.docx) file. Prompts
@@ -552,7 +602,7 @@ const wysiwyg: LazySurface = new LazySurface(
   () => import("./wysiwyg-surface").then(m => m.createMilkdownSurface),
   onSurfaceChange(() => wysiwyg),
   WYSIWYG_CAPABILITIES,
-  path => source.classify(path),
+  (path, hint) => source.classify(path, hint),
 );
 let surface: Surface = source;
 
@@ -573,14 +623,11 @@ function applyViewMode(mode: string, loadOnSwitch = true): void {
 
 function activateSurface(next: Surface, loadContent: boolean): void {
   if (next === surface) return;
+  // `tab.content` is always current: every user edit in either surface
+  // reaches it synchronously through `onSurfaceChange`.
+  if (loadContent) stashEditor();
   surface = next;
-  if (loadContent) {
-    // `tab.content` is always current: every user edit in either surface
-    // reaches it synchronously through `onSurfaceChange`.
-    const tab = state.activeTab();
-    surface.setContent(tab?.content ?? "");
-    void surface.setLanguage(tab?.path ?? null);
-  }
+  if (loadContent) loadEditor(state.activeTab());
   if (next !== wysiwyg) return;
   wysiwyg.ensure().then(
     () => {
@@ -615,16 +662,62 @@ function beginPreviewRequest(id: string, path: string | null): {
   };
 }
 
+/// The Markdown to render for a tab's buffer. A `.mmd` file is bare Mermaid
+/// source, shown as one diagram.
+function previewSource(tab: TabEntry, content: string): string {
+  return tab.path && extOf(tab.path) === "mmd" ? "```mermaid\n" + content + "\n```" : content;
+}
+
 async function renderPreview(content: string): Promise<void> {
   const tab = state.activeTab();
   if (tab?.kind === "markdown") {
     const request = beginPreviewRequest(tab.id, tab.path);
-    const processed = await pluginManager.runAll(content);
+    const markdown = previewSource(tab, content);
+    const processed = await pluginManager.runAll(markdown);
     // A newer render or tab switch must not publish stale plugin output.
     if (request.generation !== previewRequestGeneration ||
         request.document.id !== state.activeTabId) return;
-    await preview.render(processed || content, request.document);
+    await preview.render(processed || markdown, request.document);
   }
+}
+
+// Each tab keeps its own editing session in the source editor (undo history,
+// cursor, selection, scroll), set aside while another tab is showing. A
+// session is only put back if the tab's text is still what it was when the
+// session was set aside — an agent edit or a reload in the meantime drops it.
+const editorSessions = new Map<string, { content: string; saved: unknown }>();
+
+/// Set aside the active tab's editing session. Call BEFORE the active tab
+/// changes or the source editor is swapped for another surface.
+function stashEditor(): void {
+  const tab = state.activeTab();
+  if (tab && surface === source && source.saveState) {
+    editorSessions.set(tab.id, { content: tab.content, saved: source.saveState() });
+  }
+}
+
+/// Put `tab`'s buffer on the active surface, with its editing session when
+/// one is still valid, and highlight it for its language.
+function loadEditor(tab: TabEntry | undefined): void {
+  const content = tab?.content ?? "";
+  const session = tab && editorSessions.get(tab.id);
+  if (session && session.content === content && surface === source && source.restoreState) {
+    source.restoreState(session.saved);
+  } else {
+    surface.setContent(content);
+  }
+  void surface.setLanguage(tab?.path ?? null, tab && languageHint(tab));
+}
+
+/// Show the active tab: its view mode decides which surface is on screen,
+/// then the buffer, language, preview and tab bar follow. Callers that are
+/// leaving another tab call `stashEditor()` first.
+function showActiveTab(): void {
+  const tab = state.activeTab();
+  applyViewMode(tab?.viewMode ?? "both", false);
+  loadEditor(tab);
+  void renderPreview(tab?.content ?? "");
+  redrawTabs();
 }
 
 function redrawTabs(): void {
@@ -643,27 +736,15 @@ function redrawTabs(): void {
 }
 
 function selectTab(id: string): void {
+  stashEditor();
   state.activeTabId = id;
-  const tab = state.activeTab();
-  if (tab) {
-    // Restore the tab's view mode first: it decides which surface is active.
-    applyViewMode(tab.viewMode, false);
-    surface.setContent(tab.content);
-    // Re-highlight for this tab's language (code vs Markdown); only Markdown
-    // tabs get a rendered preview.
-    void surface.setLanguage(tab.path);
-    renderPreview(tab.content);
-  }
-  redrawTabs();
+  showActiveTab();
 }
 
 function newTab(content = WELCOME): void {
+  stashEditor();
   state.addTab(null, content); // untitled → Markdown
-  applyViewMode(state.activeTab()?.viewMode ?? "both", false);
-  surface.setContent(content);
-  void surface.setLanguage(null);
-  renderPreview(content);
-  redrawTabs();
+  showActiveTab();
 }
 
 /// 3-button modal: returns "primary" | "secondary" | "cancel".
@@ -722,15 +803,12 @@ function doCloseTab(id: string): void {
     invoke("remove_backup", { path: tab.path }).catch(() => {});
     invoke("unwatch_file", { path: tab.path }).catch(() => {});
   }
+  // Closing a background tab leaves the active one on screen; keep its
+  // session current so re-showing it below loses nothing.
+  if (id !== state.activeTabId) stashEditor();
+  editorSessions.delete(id);
   state.closeTab(id);
-  const active = state.activeTab();
-  const content = active?.content ?? "";
-  applyViewMode(active?.viewMode ?? "both", false);
-  surface.setContent(content);
-  // The newly-active tab may be a different language/kind than the closed one.
-  void surface.setLanguage(active?.path ?? null);
-  renderPreview(content);
-  redrawTabs();
+  showActiveTab();
 }
 
 function closeTab(id: string): void {
@@ -778,17 +856,12 @@ async function openFileByPath(path: string): Promise<void> {
 
     // PNG — binary file, render as image directly
     if (ext === "png" || ext === "jpg" || ext === "jpeg" || ext === "gif" || ext === "webp") {
-      const existing = state.tabs.find(t => t.path === path);
-      if (existing) {
-        state.activeTabId = existing.id;
-        applyViewMode(existing.viewMode);
-        preview.renderImage(convertFileSrc(path));
-        redrawTabs();
-        return;
-      }
+      // An image tab has an empty buffer; addTab re-activates one already open.
+      stashEditor();
       state.addTab(path, "");
-      applyViewMode(state.activeTab()?.viewMode ?? "both", false);
-      surface.setContent("");
+      const tab = state.activeTab();
+      applyViewMode(tab?.viewMode ?? "both", false);
+      loadEditor(tab);
       preview.renderImage(convertFileSrc(path));
       redrawTabs();
       return;
@@ -796,12 +869,7 @@ async function openFileByPath(path: string): Promise<void> {
 
     const existing = state.tabs.find(t => t.path === path);
     if (existing) {
-      state.activeTabId = existing.id;
-      applyViewMode(existing.viewMode, false);
-      surface.setContent(existing.content);
-      void surface.setLanguage(existing.path);
-      renderPreview(ext === "mmd" ? "```mermaid\n" + existing.content + "\n```" : existing.content);
-      redrawTabs();
+      selectTab(existing.id);
       return;
     }
 
@@ -838,18 +906,16 @@ async function openFileByPath(path: string): Promise<void> {
       }
     }
 
-    const kind = source.classify(path);
-    const newTabId = state.addTab(path, useContent, kind);
+    // Kind and language come from the file name, else a `#!` first line.
+    // Code/text open edit-only.
+    const { kind, language } = source.classify(path, { firstLine: firstLineOf(useContent) });
+    stashEditor();
+    const newTabId = state.addTab(path, useContent, kind, language);
     invoke("watch_file", { path }).catch(() => {});
-    applyViewMode(state.activeTab()?.viewMode ?? "both", false);
-    surface.setContent(useContent);
-    // Highlight for the file's language and open code/text edit-only.
-    void surface.setLanguage(path);
-    renderPreview(ext === "mmd" ? "```mermaid\n" + useContent + "\n```" : useContent);
     // Restored buffer differs from disk → flag the tab dirty so the user
     // gets the dirty indicator and the save-on-close prompt next time.
     if (restoredFromBuffer) state.markDirty(newTabId);
-    redrawTabs();
+    showActiveTab();
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     const label = path.split("/").pop() ?? path;
@@ -1076,9 +1142,9 @@ listen<{ id: number; data: string }>("scrybe://cli-open", async event => {
     const existing = state.tabs.find(t => t.path === path);
     let reloaded = false;
     if (existing) {
-      state.activeTabId = existing.id;
+      // Bring the tab to the front (editor included), then refresh it.
+      selectTab(existing.id);
       await reloadTabFromDisk(path);
-      redrawTabs();
       reloaded = true;
     } else {
       await openFileByPath(path);
@@ -1190,6 +1256,7 @@ listen<{ id: number; data: unknown }>("scrybe://cli-list-tabs", async event => {
     is_dirty: t.isDirty,
     view_mode: t.viewMode,
     doc_kind: t.kind,
+    language: t.language,
     active: t.id === state.activeTabId,
   }));
   await reply(id, { result: { tabs } });
@@ -1419,6 +1486,29 @@ listen<{ id: number; data: { enabled: boolean } }>("scrybe://cli-set-vim", async
   const { id, data } = event.payload;
   if (surface.capabilities.vim) setVimEnabled(data.enabled === true);
   await reply(id, { result: { enabled: vimApplied() } });
+}).catch(console.error);
+
+// `set_language` — same entry point as the path-bar language chip. Sets the
+// ACTIVE tab's language by name (`auto` returns to detection) and replies
+// with what is now in effect.
+listen<{ id: number; data: { language: string } }>("scrybe://cli-set-language", async event => {
+  const { id, data } = event.payload;
+  if (!state.activeTab()) {
+    await reply(id, { error: { code: ERR_TAB_NOT_OPEN, message: "no active tab" } });
+    return;
+  }
+  const info = setActiveLanguage(String(data.language ?? ""));
+  if (!info) {
+    await reply(id, { error: { code: -32602, message: `unknown language: ${data.language}` } });
+    return;
+  }
+  await reply(id, {
+    result: {
+      language: info.language,
+      doc_kind: info.kind,
+      auto: state.activeTab()?.languageOverride === null,
+    },
+  });
 }).catch(console.error);
 
 // `logs` — newest-last tail of the in-memory console ring.

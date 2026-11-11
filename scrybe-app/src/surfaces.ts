@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import type { DocKind } from "./kinds";
+import type { DocInfo, LanguageHint } from "./kinds";
 import type { Surface, SurfaceCapabilities, SurfaceChange, SurfaceFactory } from "./surface";
 
 /// What the WYSIWYG surface can do, known before its code is loaded. Must
@@ -20,7 +20,7 @@ export class LazySurface implements Surface {
   private readonly parent: HTMLElement;
   private readonly load: () => Promise<SurfaceFactory>;
   private readonly onChange: (change: SurfaceChange) => void;
-  private readonly classifyPath: (path: string | null) => DocKind;
+  private readonly classifyPath: (path: string | null, hint?: LanguageHint) => DocInfo;
   private inner: Surface | null = null;
   private loading: Promise<void> | null = null;
   private text: string;
@@ -32,7 +32,7 @@ export class LazySurface implements Surface {
     load: () => Promise<SurfaceFactory>,
     onChange: (change: SurfaceChange) => void,
     capabilities: SurfaceCapabilities,
-    classifyPath: (path: string | null) => DocKind,
+    classifyPath: (path: string | null, hint?: LanguageHint) => DocInfo,
     initialContent = "",
   ) {
     this.parent = parent;
@@ -90,12 +90,12 @@ export class LazySurface implements Surface {
     this.inner?.setWrap(enabled);
   }
 
-  async setLanguage(path: string | null): Promise<DocKind> {
-    return this.inner ? this.inner.setLanguage(path) : this.classifyPath(path);
+  async setLanguage(path: string | null, hint?: LanguageHint): Promise<DocInfo> {
+    return this.inner ? this.inner.setLanguage(path, hint) : this.classifyPath(path, hint);
   }
 
-  classify(path: string | null): DocKind {
-    return this.classifyPath(path);
+  classify(path: string | null, hint?: LanguageHint): DocInfo {
+    return this.classifyPath(path, hint);
   }
 
   focus(): void {

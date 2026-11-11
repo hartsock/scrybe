@@ -187,7 +187,7 @@ fn with_remote_error_app<T>(f: impl FnOnce() -> T) -> T {
 // ── (a) tools/list — the complete advertised surface ────────────────────────
 
 #[test]
-fn tools_list_serves_22_tools_each_with_schemas_and_annotations() {
+fn tools_list_serves_23_tools_each_with_schemas_and_annotations() {
     let resp = handle(&tools_list_request());
     assert_eq!(resp["jsonrpc"], "2.0");
     assert_eq!(resp["id"], 41);
@@ -216,6 +216,7 @@ fn tools_list_serves_22_tools_each_with_schemas_and_annotations() {
             "render",
             "save",
             "section",
+            "set_language",
             "set_theme",
             "set_vim",
             "state",
