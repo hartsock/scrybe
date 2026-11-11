@@ -178,6 +178,10 @@ pub struct TabInfo {
     /// contract 0.7; an older app omits it, which reads as `markdown`.
     #[serde(default = "default_doc_kind")]
     pub doc_kind: String,
+    /// The language in effect (`Markdown`, a source language such as `Rust`,
+    /// or null for plain text). Added in contract 0.7; absent from older apps.
+    #[serde(default)]
+    pub language: Option<String>,
     /// True for the currently focused tab.
     pub active: bool,
 }
@@ -228,6 +232,10 @@ pub struct StateResult {
     /// contract 0.7; an older app omits it, which reads as `markdown`.
     #[serde(default = "default_doc_kind")]
     pub doc_kind: String,
+    /// The active tab's language (`Markdown`, e.g. `Rust`, or null for plain
+    /// text). Added in contract 0.7; absent from older apps.
+    #[serde(default)]
+    pub language: Option<String>,
     pub theme: String,
     /// Vim keybindings in effect for the active tab (false on a `wysiwyg` tab).
     pub vim: bool,
@@ -274,6 +282,26 @@ pub struct SetVimParams {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct SetVimResult {
     pub enabled: bool,
+}
+
+/// Params for `set_language`: a language name for the ACTIVE tab, or `auto`
+/// to return to detection from the file name and `#!` line.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct SetLanguageParams {
+    /// A language name or alias (`Rust`, `python`, `cpp`, `rs`, `markdown`,
+    /// `text`), or `auto`.
+    pub language: String,
+}
+
+/// Result of `set_language`: what is now in effect for the active tab.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct SetLanguageResult {
+    /// Canonical language name, or null for plain text.
+    pub language: Option<String>,
+    /// `markdown` | `code` | `text`.
+    pub doc_kind: String,
+    /// True when the language is detected rather than set by hand.
+    pub auto: bool,
 }
 
 /// Params for `logs`: recent console output from the running app.

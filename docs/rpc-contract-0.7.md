@@ -76,14 +76,15 @@ them except `close`/`quit` — `ERR_REPLY_TIMEOUT`.
 | `find` | `{pattern, paths?, literal?, case_sensitive?}` | `{hits: [{path, line, column, text}]}` | — |
 | `section` | `{path, heading}` | `{heading, level, content}` | `ERR_TAB_NOT_OPEN`, `ERR_SECTION_NOT_FOUND` |
 | `edit` | `{path, start_line, end_line, content}` | `{applied, size_after, is_dirty}` | `ERR_TAB_NOT_OPEN` |
-| `list_tabs` | `{}` | `{tabs: [{path, title, is_dirty, view_mode, doc_kind, active}]}` | — |
+| `list_tabs` | `{}` | `{tabs: [{path, title, is_dirty, view_mode, doc_kind, language, active}]}` | — |
 | `reload` | `{path, force?}` | `{path, bytes, was_dirty}` | `ERR_TAB_NOT_OPEN`, `ERR_DIRTY_RELOAD_REFUSED` |
 | `close` | `{path}` | `{applied}` (fire-and-forget ack; not-open collapses to `applied: false` frontend-side) | — |
 | `quit` | `{force?}` | `{applied}` (fire-and-forget ack) | `ERR_DIRTY_QUIT_REFUSED` |
-| `state` | `{}` | `{active_path, active_title, is_dirty, view_mode, doc_kind, theme, vim, wrap, open_paths}` | — |
+| `state` | `{}` | `{active_path, active_title, is_dirty, view_mode, doc_kind, language, theme, vim, wrap, open_paths}` | — |
 | `set_theme` | `{theme}` | `{theme}` (applied) | — |
 | `view_mode` | `{mode}` (`both`\|`edit`\|`preview`\|`wysiwyg`\|`cycle`) | `{mode}` (the CONCRETE mode now active) | — |
 | `set_vim` | `{enabled}` | `{enabled}` (the value in effect; always `false` on a `wysiwyg` tab) | — |
+| `set_language` | `{language}` (a name or alias, or `auto`) | `{language, doc_kind, auto}` (what is now in effect for the active tab) | `ERR_TAB_NOT_OPEN` (no active tab); `-32602` for an unknown language |
 | `logs` | `{tail?}` | `{lines}` (newest-last, from the app's in-memory ring) | — |
 
 Notes:
@@ -103,6 +104,12 @@ Notes:
   for the active tab. The WYSIWYG surface supports neither, so both are
   `false` there and `set_vim` changes nothing.
 
+- `language` is the language in effect: `Markdown`, a source language name
+  such as `Rust`, `Python`, `C++` or `Go`, or null for plain text. It is
+  detected from the file name, then from a `#!` first line, unless set by
+  hand with `set_language`. Setting a language can change `doc_kind`; a tab
+  that stops being Markdown pins to `edit`.
+
 ## Changes from 0.6
 
 - `view_mode` accepts and returns `wysiwyg`; `cycle` advances
@@ -111,6 +118,8 @@ Notes:
 - `state` and each `list_tabs` entry gain `doc_kind` (`markdown`\|`code`\|`text`).
   A 0.7 client reading a 0.6 app treats a missing `doc_kind` as `markdown`.
 - `set_vim` replies with the value in effect rather than echoing the request.
+- New method `set_language`. `state` and each `list_tabs` entry gain
+  `language`; a 0.7 client reading an app without it treats it as null.
 
 ## Stable error codes
 

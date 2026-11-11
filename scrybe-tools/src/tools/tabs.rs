@@ -21,7 +21,8 @@ pub(crate) fn spec() -> ToolSpec {
         name: "list_tabs",
         description: "List the tabs currently open in the running Scrybe editor — \
             each with its path, title, dirty flag, view mode, document kind \
-            (`markdown`, `code` or `text`), and whether it is the \
+            (`markdown`, `code` or `text`), language (e.g. `Rust`; null for \
+            plain text), and whether it is the \
             active tab. Requires a live app; with none running it reports \
             `no_live_app`. Read the `data.tabs` array.",
         input_schema,
@@ -54,6 +55,7 @@ fn data_schema() -> Value {
                         "is_dirty": { "type": "boolean" },
                         "view_mode": { "type": "string" },
                         "doc_kind": { "type": "string", "enum": ["markdown", "code", "text"] },
+                        "language": { "type": ["string", "null"] },
                         "active": { "type": "boolean" }
                     },
                     "required": ["path", "title", "is_dirty", "view_mode", "doc_kind", "active"]
@@ -138,12 +140,14 @@ mod tests {
     fn passes_through_each_tabs_kind_and_wysiwyg_mode() {
         let reply = json!({ "tabs": [
             { "path": "/a.md", "title": "a.md", "is_dirty": false, "view_mode": "wysiwyg", "doc_kind": "markdown", "active": true  },
-            { "path": "/m.rs", "title": "m.rs", "is_dirty": false, "view_mode": "edit",    "doc_kind": "code",     "active": false }
+            { "path": "/m.rs", "title": "m.rs", "is_dirty": false, "view_mode": "edit",    "doc_kind": "code", "language": "Rust", "active": false }
         ]});
         let out = call_with(Box::new(MockTabs(reply)));
         assert!(out.is_ok());
         assert_eq!(out.data["tabs"][0]["view_mode"], "wysiwyg");
         assert_eq!(out.data["tabs"][1]["doc_kind"], "code");
+        assert_eq!(out.data["tabs"][1]["language"], "Rust");
+        assert_eq!(out.data["tabs"][0]["language"], Value::Null);
     }
 
     #[test]

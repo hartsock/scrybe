@@ -355,6 +355,7 @@ mod tests {
         "render",
         "save",
         "section",
+        "set_language",
         "set_theme",
         "set_vim",
         "state",

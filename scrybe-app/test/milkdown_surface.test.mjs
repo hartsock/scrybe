@@ -148,8 +148,8 @@ test("calls before ready are not lost", async () => {
 test("capabilities, classify and inert settings", async () => {
   await withSurface("", async s => {
     assert.deepEqual(s.capabilities, { vim: false, wrap: false, language: false, previewIsSeparate: false, kinds: ["markdown"] });
-    assert.equal(s.classify("a.md"), "markdown");
-    assert.equal(await s.setLanguage("a.rs"), "markdown");
+    assert.deepEqual(s.classify("a.md"), { kind: "markdown", language: "Markdown" });
+    assert.deepEqual(await s.setLanguage("a.rs"), { kind: "markdown", language: "Markdown" });
     s.setVim(true); s.setWrap(true);
     s.setTheme("dark");
     assert.ok(s.root.classList.contains("scrybe-milkdown-dark"));

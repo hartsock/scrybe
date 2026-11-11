@@ -21,6 +21,16 @@ lock-step version (`[workspace.package] version`).
   the path bar warns when the first edit will also restyle the document's
   Markdown. Vim and the wrap toggle do not apply in this view. Code and text
   tabs stay edit-only.
+- **Code editing basics**: source files get a language chip in the path bar
+  (click to pick another language or go back to auto-detect; the MCP twin is
+  the new `set_language` tool). Files with no recognized extension are
+  detected from a `#!` line (Python, Ruby, shell, Node, Perl, Lua, PHP). Code
+  and text tabs indent the way the file already does, else by the language's
+  convention (Go tabs, Ruby/JS/YAML two spaces, four otherwise), and Tab /
+  Shift-Tab indent and dedent. Each tab keeps its own undo history, cursor,
+  selection and scroll position across tab switches. The Open dialog no
+  longer hides source files. `state` and `list_tabs` report each tab's
+  `language`.
 - **Contract 0.7**: `view_mode` accepts and returns `wysiwyg`; `state` and
   `list_tabs` report each tab's `doc_kind` (`markdown` / `code` / `text`);
   `set_vim` and `state` report the Vim and wrap values actually in effect.

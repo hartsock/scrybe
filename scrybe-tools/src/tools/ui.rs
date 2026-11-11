@@ -2,7 +2,7 @@
 // Copyright 2026 Shawn Hartsock and contributors
 
 //! UI-parity + app-control tools — `state`, `set_theme`, `view_mode`,
-//! `set_vim`, `logs`, `quit`, `close_tab` — dispatched to the live app over
+//! `set_vim`, `set_language`, `logs`, `quit`, `close_tab` — dispatched to the live app over
 //! typed socket methods (workstream A2). These replace the legacy MCP
 //! handlers' `/tmp` signal files and `pkill` fallback: every control now
 //! drives the same code path as the human toolbar and reports what actually
@@ -23,6 +23,7 @@ pub(crate) fn specs() -> Vec<ToolSpec> {
         set_theme_spec(),
         view_mode_spec(),
         set_vim_spec(),
+        set_language_spec(),
         logs_spec(),
         quit_spec(),
         close_tab_spec(),
@@ -47,7 +48,8 @@ fn state_spec() -> ToolSpec {
     ToolSpec {
         name: "state",
         description: "Report the running Scrybe app's current UI state: the \
-            active tab's path/title/dirty flag, view mode, document kind, theme, \
+            active tab's path/title/dirty flag, view mode, document kind and \
+            language, theme, \
             Vim and wrap toggles, and every open path. `vim` and `wrap` are the \
             values in effect for the active tab (both false on a `wysiwyg` tab, \
             whose editor supports neither). Served live from the frontend — the \
@@ -66,6 +68,7 @@ fn state_spec() -> ToolSpec {
                         "is_dirty": { "type": "boolean" },
                         "view_mode": { "type": "string", "enum": ["both", "edit", "preview", "wysiwyg"] },
                         "doc_kind": { "type": "string", "enum": ["markdown", "code", "text"], "description": "How the active tab's document is treated: Markdown (preview + WYSIWYG available), a recognized source-code language, or plain text (both edit-only)." },
+                        "language": { "type": ["string", "null"], "description": "The active tab's language: `Markdown`, a source language such as `Rust` or `C++`, or null for plain text." },
                         "theme": { "type": "string" },
                         "vim": { "type": "boolean" },
                         "wrap": { "type": "boolean" },
@@ -77,6 +80,7 @@ fn state_spec() -> ToolSpec {
                         "is_dirty",
                         "view_mode",
                         "doc_kind",
+                        "language",
                         "theme",
                         "vim",
                         "wrap",
@@ -229,6 +233,56 @@ fn set_vim_spec() -> ToolSpec {
     }
 }
 
+// ── set_language ─────────────────────────────────────────────────────────────
+
+fn set_language_spec() -> ToolSpec {
+    ToolSpec {
+        name: "set_language",
+        description: "Set the language of the ACTIVE tab in the running Scrybe \
+            app (same entry point as the language chip in the path bar): \
+            highlighting, indentation, and whether the tab is Markdown (with \
+            preview and WYSIWYG) or edit-only code/text. Takes a language name \
+            or alias (`Rust`, `python`, `cpp`, `go`, `rb`, `markdown`, `text`) \
+            or `auto` to detect again from the file name and `#!` line. \
+            Returns the language, document kind, and whether it is detected. \
+            An unknown name is an `app_error` and changes nothing.",
+        input_schema: || {
+            json!({
+                "type": "object",
+                "properties": {
+                    "language": { "type": "string", "description": "A language name or alias, or `auto`." }
+                },
+                "required": ["language"]
+            })
+        },
+        data_schema: DataSchema {
+            version: DATA_VERSION,
+            schema: || {
+                crate::schema::envelope(
+                    "set_language",
+                    DATA_VERSION,
+                    json!({
+                        "language": { "type": ["string", "null"], "description": "Canonical language name now in effect; null for plain text." },
+                        "doc_kind": { "type": "string", "enum": ["markdown", "code", "text"] },
+                        "auto": { "type": "boolean", "description": "True when the language is detected rather than set by hand." }
+                    }),
+                    &["language", "doc_kind", "auto"],
+                )
+            },
+        },
+        mutates: true,
+        facet: Facet::UiParity,
+        handler: |ctx, args| {
+            dispatch(
+                ctx,
+                "set_language",
+                "set_language",
+                json!({ "language": str_arg(args, "language") }),
+            )
+        },
+    }
+}
+
 // ── logs ─────────────────────────────────────────────────────────────────────
 
 fn logs_spec() -> ToolSpec {
@@ -361,6 +415,7 @@ mod tests {
             "set_theme",
             "view_mode",
             "set_vim",
+            "set_language",
             "logs",
             "quit",
             "close_tab",
@@ -444,6 +499,67 @@ mod tests {
     }
 
     #[test]
+    fn set_language_forwards_the_name_and_wraps_reply() {
+        let spy = std::sync::Arc::new(Spy {
+            reply: json!({ "language": "Python", "doc_kind": "code", "auto": false }),
+            seen: std::sync::Mutex::new(None),
+        });
+        struct Fwd(std::sync::Arc<Spy>);
+        impl Transport for Fwd {
+            fn call(&self, m: &str, p: Value) -> Result<Value, TransportError> {
+                self.0.call(m, p)
+            }
+            fn is_live(&self) -> bool {
+                true
+            }
+        }
+        let reg = Registry::default();
+        let out = reg
+            .call(
+                "set_language",
+                &Ctx::with_transport(Box::new(Fwd(spy.clone()))),
+                &json!({ "language": "py" }),
+            )
+            .unwrap();
+        assert!(out.is_ok());
+        assert_eq!(out.data["kind"], "set_language");
+        assert_eq!(out.data["language"], "Python");
+        assert_eq!(out.data["doc_kind"], "code");
+        assert_eq!(out.data["auto"], false);
+        let (method, params) = spy.seen.lock().unwrap().clone().unwrap();
+        assert_eq!(method, "set_language");
+        assert_eq!(params["language"], "py");
+    }
+
+    #[test]
+    fn set_language_unknown_name_is_a_business_failure() {
+        struct Refuse;
+        impl Transport for Refuse {
+            fn call(&self, _m: &str, _p: Value) -> Result<Value, TransportError> {
+                Err(TransportError::Remote(scrybe_rpc::RpcError {
+                    code: -32602,
+                    message: "unknown language: klingon".into(),
+                    data: None,
+                }))
+            }
+            fn is_live(&self) -> bool {
+                true
+            }
+        }
+        let out = Registry::default()
+            .call(
+                "set_language",
+                &Ctx::with_transport(Box::new(Refuse)),
+                &json!({ "language": "klingon" }),
+            )
+            .unwrap();
+        assert!(!out.is_ok());
+        let err = out.tool_error.unwrap();
+        assert_eq!(err.code, "app_error");
+        assert!(err.message.contains("klingon"));
+    }
+
+    #[test]
     fn close_tab_dispatches_the_socket_close_method() {
         let spy = std::sync::Arc::new(Spy {
             reply: json!({ "applied": true }),
@@ -481,6 +597,7 @@ mod tests {
             ("set_theme", true),
             ("view_mode", true),
             ("set_vim", true),
+            ("set_language", true),
             ("quit", true),
             ("close_tab", true),
         ] {

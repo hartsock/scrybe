@@ -10,7 +10,7 @@ import { classifyFile } from "./editor";
 import { splitFrontMatter } from "./frontmatter";
 import { crepeSettings } from "./milkdown/crepe-settings";
 import { houseStyle } from "./milkdown/house-style";
-import type { DocKind } from "./kinds";
+import type { DocInfo, LanguageHint } from "./kinds";
 import type { Surface, SurfaceCapabilities, SurfaceChange, SurfaceFactory } from "./surface";
 
 /// Milkdown (Crepe)-backed [`Surface`]. It takes and returns the FULL file
@@ -121,12 +121,13 @@ export class MilkdownSurface implements Surface {
   setVim(_enabled: boolean): void {}
   setWrap(_enabled: boolean): void {}
 
-  async setLanguage(_path: string | null): Promise<DocKind> {
-    return "markdown";
+  async setLanguage(_path: string | null, _hint?: LanguageHint): Promise<DocInfo> {
+    return { kind: "markdown", language: "Markdown" };
   }
 
-  classify(path: string | null): DocKind {
-    return classifyFile(path).kind;
+  classify(path: string | null, hint?: LanguageHint): DocInfo {
+    const { kind, language } = classifyFile(path, hint);
+    return { kind, language };
   }
 
   focus(): void {

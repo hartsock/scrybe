@@ -576,7 +576,7 @@
       "annotations": {
         "readOnlyHint": true
       },
-      "description": "List the tabs currently open in the running Scrybe editor — each with its path, title, dirty flag, view mode, document kind (`markdown`, `code` or `text`), and whether it is the active tab. Requires a live app; with none running it reports `no_live_app`. Read the `data.tabs` array.",
+      "description": "List the tabs currently open in the running Scrybe editor — each with its path, title, dirty flag, view mode, document kind (`markdown`, `code` or `text`), language (e.g. `Rust`; null for plain text), and whether it is the active tab. Requires a live app; with none running it reports `no_live_app`. Read the `data.tabs` array.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {},
@@ -608,6 +608,12 @@
                 },
                 "is_dirty": {
                   "type": "boolean"
+                },
+                "language": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
                 },
                 "path": {
                   "type": "string"
@@ -1175,7 +1181,7 @@
       "annotations": {
         "readOnlyHint": true
       },
-      "description": "Report the running Scrybe app's current UI state: the active tab's path/title/dirty flag, view mode, document kind, theme, Vim and wrap toggles, and every open path. `vim` and `wrap` are the values in effect for the active tab (both false on a `wysiwyg` tab, whose editor supports neither). Served live from the frontend — the human equivalents are the path bar, tab mode icon, theme dropdown, and Vim toggle.",
+      "description": "Report the running Scrybe app's current UI state: the active tab's path/title/dirty flag, view mode, document kind and language, theme, Vim and wrap toggles, and every open path. `vim` and `wrap` are the values in effect for the active tab (both false on a `wysiwyg` tab, whose editor supports neither). Served live from the frontend — the human equivalents are the path bar, tab mode icon, theme dropdown, and Vim toggle.",
       "inputSchema": {
         "properties": {},
         "type": "object"
@@ -1211,6 +1217,13 @@
           "kind": {
             "const": "state",
             "description": "Payload discriminator — the tool name."
+          },
+          "language": {
+            "description": "The active tab's language: `Markdown`, a source language such as `Rust` or `C++`, or null for plain text.",
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "open_paths": {
             "items": {
@@ -1266,6 +1279,7 @@
           "is_dirty",
           "view_mode",
           "doc_kind",
+          "language",
           "theme",
           "vim",
           "wrap",
@@ -1464,6 +1478,81 @@
           "v",
           "kind",
           "enabled"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "annotations": {
+        "readOnlyHint": false
+      },
+      "description": "Set the language of the ACTIVE tab in the running Scrybe app (same entry point as the language chip in the path bar): highlighting, indentation, and whether the tab is Markdown (with preview and WYSIWYG) or edit-only code/text. Takes a language name or alias (`Rust`, `python`, `cpp`, `go`, `rb`, `markdown`, `text`) or `auto` to detect again from the file name and `#!` line. Returns the language, document kind, and whether it is detected. An unknown name is an `app_error` and changes nothing.",
+      "inputSchema": {
+        "properties": {
+          "language": {
+            "description": "A language name or alias, or `auto`.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "language"
+        ],
+        "type": "object"
+      },
+      "name": "set_language",
+      "outputSchema": {
+        "properties": {
+          "auto": {
+            "description": "True when the language is detected rather than set by hand.",
+            "type": "boolean"
+          },
+          "doc_kind": {
+            "enum": [
+              "markdown",
+              "code",
+              "text"
+            ],
+            "type": "string"
+          },
+          "kind": {
+            "const": "set_language",
+            "description": "Payload discriminator — the tool name."
+          },
+          "language": {
+            "description": "Canonical language name now in effect; null for plain text.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "tool_error": {
+            "description": "Business failure — the tool ran and said \"no\". Absent on success. (At the MCP boundary a business failure surfaces as an isError:true result instead of riding inside a success payload.)",
+            "properties": {
+              "code": {
+                "description": "Stable machine code, e.g. no_live_app.",
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "code",
+              "message"
+            ],
+            "type": "object"
+          },
+          "v": {
+            "const": 1,
+            "description": "Payload schema version."
+          }
+        },
+        "required": [
+          "v",
+          "kind",
+          "language",
+          "doc_kind",
+          "auto"
         ],
         "type": "object"
       }

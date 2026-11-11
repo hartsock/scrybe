@@ -22,16 +22,19 @@ function fakeFactory(log, { ready } = {}) {
       setTheme: t => log.push(["theme", t]),
       setVim: () => {},
       setWrap: () => {},
-      setLanguage: async () => "markdown",
-      classify: () => "markdown",
+      setLanguage: async () => ({ kind: "markdown", language: "Markdown" }),
+      classify: () => ({ kind: "markdown", language: "Markdown" }),
       focus: () => log.push(["focus"]),
       destroy: () => log.push(["destroy"]),
       reformatPending: () => text.startsWith("*"),
     };
   };
 }
+const classifyStub = (p, hint) => (hint?.override
+  ? { kind: "code", language: hint.override }
+  : p?.endsWith(".rs") ? { kind: "code", language: "Rust" } : { kind: "markdown", language: "Markdown" });
 const lazy = (load, initial) =>
-  new LazySurface({}, load, () => {}, WYSIWYG_CAPABILITIES, p => (p?.endsWith(".rs") ? "code" : "markdown"), initial);
+  new LazySurface({}, load, () => {}, WYSIWYG_CAPABILITIES, classifyStub, initial);
 
 test("before loading, the wrapper answers from what it was given and loads nothing", async () => {
   let loads = 0;
@@ -43,8 +46,10 @@ test("before loading, the wrapper answers from what it was given and loads nothi
   s.focus();
   assert.equal(s.getContent(), "third");
   assert.equal(s.reformatPending(), false);
-  assert.equal(s.classify("a.rs"), "code");
-  assert.equal(await s.setLanguage("a.rs"), "code");
+  assert.deepEqual(s.classify("a.rs"), { kind: "code", language: "Rust" });
+  assert.deepEqual(await s.setLanguage("a.rs"), { kind: "code", language: "Rust" });
+  assert.deepEqual(s.classify("a.md", { override: "Go" }), { kind: "code", language: "Go" });
+  assert.equal(s.saveState, undefined, "a lazy surface keeps no editing session");
   assert.deepEqual(s.capabilities, WYSIWYG_CAPABILITIES);
   assert.equal(loads, 0);
 });
