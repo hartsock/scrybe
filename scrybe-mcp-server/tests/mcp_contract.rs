@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Shawn Hartsock and contributors
 
-//! A4 golden fixtures — the frozen 0.6.0 MCP contract.
+//! A4 golden fixtures — the frozen MCP contract (0.7).
 //!
 //! Full JSON-RPC round-trips through [`McpServer::handle`] pinned against
 //! checked-in JSON, one file per case in `tests/fixtures/`:
@@ -15,7 +15,7 @@
 //! | unknown tool | `call_unknown_tool.json` | top-level JSON-RPC error `-32602` |
 //!
 //! The sixth case — the complete `tools/list` surface, schemas included — is
-//! pinned against the release artifact `docs/mcp-contract-0.6.json` (one
+//! pinned against the release artifact `docs/mcp-contract-0.7.json` (one
 //! source of truth; a duplicate fixture would drift).
 //!
 //! Every fixture stores the full `{request, response}` pair and is compared
@@ -37,19 +37,19 @@ use scrybe_mcp_server::McpServer;
 /// process-global, so they must not interleave.
 static SOCK_GUARD: Mutex<()> = Mutex::new(());
 
-const REGEN_HINT: &str = "\n\nThe served MCP surface no longer matches the frozen 0.6 contract \
+const REGEN_HINT: &str = "\n\nThe served MCP surface no longer matches the frozen 0.7 contract \
      artifact. If this change is DELIBERATE, regenerate with\n\n    \
      CARGO_TARGET_DIR=\"$PWD/target\" cargo test -p scrybe-mcp-server --test mcp_contract \
      -- --ignored regenerate_contract_artifacts\n\n\
      then review and commit the diff. If it is NOT deliberate, you broke the \
-     frozen 0.6.0 MCP contract — fix the code, not the fixture.\n";
+     frozen 0.7 MCP contract — fix the code, not the fixture.\n";
 
 fn fixtures_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures")
 }
 
 fn contract_artifact_path() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../docs/mcp-contract-0.6.json")
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../docs/mcp-contract-0.7.json")
 }
 
 fn load(name: &str) -> Value {
@@ -187,7 +187,7 @@ fn with_remote_error_app<T>(f: impl FnOnce() -> T) -> T {
 // ── (a) tools/list — the complete advertised surface ────────────────────────
 
 #[test]
-fn tools_list_serves_26_tools_each_with_schemas_and_annotations() {
+fn tools_list_serves_28_tools_each_with_schemas_and_annotations() {
     let resp = handle(&tools_list_request());
     assert_eq!(resp["jsonrpc"], "2.0");
     assert_eq!(resp["id"], 41);
@@ -220,12 +220,14 @@ fn tools_list_serves_26_tools_each_with_schemas_and_annotations() {
             "render",
             "save",
             "section",
+            "set_explorer",
+            "set_language",
             "set_theme",
             "set_vim",
             "state",
             "view_mode",
         ],
-        "the frozen 0.6 tool surface changed{REGEN_HINT}"
+        "the 0.7 tool surface changed{REGEN_HINT}"
     );
     for tool in tools {
         assert!(tool["inputSchema"].is_object(), "no inputSchema: {tool}");
@@ -238,15 +240,15 @@ fn tools_list_serves_26_tools_each_with_schemas_and_annotations() {
 }
 
 #[test]
-fn tools_list_matches_the_checked_in_0_6_contract_artifact() {
-    // `docs/mcp-contract-0.6.json` is the release artifact: the complete
+fn tools_list_matches_the_checked_in_0_7_contract_artifact() {
+    // `docs/mcp-contract-0.7.json` is the release artifact: the complete
     // `tools/list` result, schemas included. Update-by-failing-diff — see
     // REGEN_HINT.
     let artifact: Value = serde_json::from_str(
         &std::fs::read_to_string(contract_artifact_path())
-            .expect("read docs/mcp-contract-0.6.json"),
+            .expect("read docs/mcp-contract-0.7.json"),
     )
-    .expect("parse docs/mcp-contract-0.6.json");
+    .expect("parse docs/mcp-contract-0.7.json");
     let served = handle(&tools_list_request());
     assert_eq!(served["result"], artifact, "{REGEN_HINT}");
 }
@@ -315,7 +317,7 @@ fn call_unknown_tool_matches_golden_fixture() {
 // ── deliberate regeneration ─────────────────────────────────────────────────
 
 #[test]
-#[ignore = "writes tests/fixtures/*.json and docs/mcp-contract-0.6.json; run only for a DELIBERATE contract change, then review + commit the diff"]
+#[ignore = "writes tests/fixtures/*.json and docs/mcp-contract-0.7.json; run only for a DELIBERATE contract change, then review + commit the diff"]
 fn regenerate_contract_artifacts() {
     fn write_pretty(path: &std::path::Path, value: &Value) {
         let text = serde_json::to_string_pretty(value).expect("serialize") + "\n";

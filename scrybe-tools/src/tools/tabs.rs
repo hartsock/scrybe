@@ -20,7 +20,9 @@ pub(crate) fn spec() -> ToolSpec {
     ToolSpec {
         name: "list_tabs",
         description: "List the tabs currently open in the running Scrybe editor — \
-            each with its path, title, dirty flag, view mode, and whether it is the \
+            each with its path, title, dirty flag, view mode, document kind \
+            (`markdown`, `code` or `text`), language (e.g. `Rust`; null for \
+            plain text), and whether it is the \
             active tab. Requires a live app; with none running it reports \
             `no_live_app`. Read the `data.tabs` array.",
         input_schema,
@@ -52,9 +54,11 @@ fn data_schema() -> Value {
                         "title": { "type": "string" },
                         "is_dirty": { "type": "boolean" },
                         "view_mode": { "type": "string" },
+                        "doc_kind": { "type": "string", "enum": ["markdown", "code", "text"] },
+                        "language": { "type": ["string", "null"] },
                         "active": { "type": "boolean" }
                     },
-                    "required": ["path", "title", "is_dirty", "view_mode", "active"]
+                    "required": ["path", "title", "is_dirty", "view_mode", "doc_kind", "active"]
                 }
             },
             "count": { "type": "integer" }
@@ -128,6 +132,22 @@ mod tests {
         assert_eq!(out.data["count"], 2);
         assert_eq!(out.data["tabs"][0]["active"], true);
         assert_eq!(out.data["tabs"][1]["is_dirty"], true);
+        // A pre-0.7 app sends no `doc_kind`; it reads as Markdown.
+        assert_eq!(out.data["tabs"][0]["doc_kind"], "markdown");
+    }
+
+    #[test]
+    fn passes_through_each_tabs_kind_and_wysiwyg_mode() {
+        let reply = json!({ "tabs": [
+            { "path": "/a.md", "title": "a.md", "is_dirty": false, "view_mode": "wysiwyg", "doc_kind": "markdown", "active": true  },
+            { "path": "/m.rs", "title": "m.rs", "is_dirty": false, "view_mode": "edit",    "doc_kind": "code", "language": "Rust", "active": false }
+        ]});
+        let out = call_with(Box::new(MockTabs(reply)));
+        assert!(out.is_ok());
+        assert_eq!(out.data["tabs"][0]["view_mode"], "wysiwyg");
+        assert_eq!(out.data["tabs"][1]["doc_kind"], "code");
+        assert_eq!(out.data["tabs"][1]["language"], "Rust");
+        assert_eq!(out.data["tabs"][0]["language"], Value::Null);
     }
 
     #[test]

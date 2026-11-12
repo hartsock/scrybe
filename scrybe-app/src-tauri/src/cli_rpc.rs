@@ -250,6 +250,8 @@ fn dispatch(app: &AppHandle, req: &Request) -> Response {
         "set_theme" => handle_set_theme(app, req),
         "view_mode" => handle_view_mode(app, req),
         "set_vim" => handle_set_vim(app, req),
+        "set_language" => handle_set_language(app, req),
+        "set_explorer" => handle_set_explorer(app, req),
         "logs" => handle_logs(app, req),
         other => Response::err(
             req.id,
@@ -337,6 +339,37 @@ fn handle_set_vim(app: &AppHandle, req: &Request) -> Response {
         req,
         "scrybe://cli-set-vim",
         serde_json::json!({ "enabled": params.enabled }),
+    )
+}
+
+/// `set_language` — set the active tab's language by name, or `auto`. The
+/// frontend validates the name (it owns the language list) and replies with
+/// what is now in effect.
+fn handle_set_language(app: &AppHandle, req: &Request) -> Response {
+    let params: scrybe_rpc::SetLanguageParams = match parse_params(req) {
+        Ok(p) => p,
+        Err(r) => return r,
+    };
+    dispatch_with_reply(
+        app,
+        req,
+        "scrybe://cli-set-language",
+        serde_json::json!({ "language": params.language }),
+    )
+}
+
+/// `set_explorer` — show or hide the Explorer sidebar. Replies with whether
+/// it is now showing.
+fn handle_set_explorer(app: &AppHandle, req: &Request) -> Response {
+    let params: scrybe_rpc::SetExplorerParams = match parse_params(req) {
+        Ok(p) => p,
+        Err(r) => return r,
+    };
+    dispatch_with_reply(
+        app,
+        req,
+        "scrybe://cli-set-explorer",
+        serde_json::json!({ "visible": params.visible }),
     )
 }
 

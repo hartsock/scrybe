@@ -6,6 +6,22 @@
 /// else (plain text, edit-only).
 export type DocKind = "markdown" | "code" | "text";
 
+/// A document's kind plus the name of its language: `"Markdown"`, a source
+/// language such as `"Rust"` or `"C++"`, or null for plain text.
+export interface DocInfo {
+  kind: DocKind;
+  language: string | null;
+}
+
+/// Extra evidence for classifying a document beyond its file name.
+export interface LanguageHint {
+  /// The document's first line, checked for a `#!` interpreter line when the
+  /// file name alone says nothing.
+  firstLine?: string;
+  /// A language chosen by hand; wins over the file name. Null means detect.
+  override?: string | null;
+}
+
 /// Raster images the sidebar opens as an image preview rather than a buffer.
 /// Such a tab has a path but no text; anything that treats the active tab as
 /// a Markdown document (print, Google Docs export) must check this first.

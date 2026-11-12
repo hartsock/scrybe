@@ -27,7 +27,7 @@
 //! request id, exactly one of `result`/`error` must be present, and the
 //! `error` member must be a well-formed error object. Frames are capped at
 //! [`MAX_FRAME_BYTES`] before any unbounded allocation. The full contract is
-//! frozen in `docs/rpc-contract-0.6.md`.
+//! frozen in `docs/rpc-contract-0.7.md`.
 
 use crate::{default_socket_path, JsonRpcVersion, Request, RpcError};
 use std::io::{Read as _, Write};
@@ -71,8 +71,8 @@ pub const WRITE_TIMEOUT: Duration = Duration::from_secs(5);
 /// Maximum reply frame size (one newline-terminated line, newline included):
 /// 16 MiB. Read buffers are capped at this size *before* allocation, so a
 /// runaway or malicious server cannot balloon client memory; a larger frame is
-/// a typed [`ClientError::FrameTooLarge`]. Part of the frozen 0.6 contract
-/// (`docs/rpc-contract-0.6.md`) — raising it is a contract change.
+/// a typed [`ClientError::FrameTooLarge`]. Part of the frozen 0.7 contract
+/// (`docs/rpc-contract-0.7.md`) — raising it is a contract change.
 pub const MAX_FRAME_BYTES: usize = 16 * 1024 * 1024;
 
 /// The request id used on every connection. The client opens one connection
@@ -187,7 +187,7 @@ pub enum ClientError {
     },
     /// The app answered with an in-band JSON-RPC error object. The transport
     /// worked — this is an application-level outcome, carrying the stable
-    /// error code registry documented in `docs/rpc-contract-0.6.md`.
+    /// error code registry documented in `docs/rpc-contract-0.7.md`.
     #[error("Scrybe app error {}: {}", .0.code, .0.message)]
     Remote(RpcError),
 }

@@ -37,10 +37,12 @@ addressed by canonical `path`.
 | `reload` | Re-read an open tab from disk into its live buffer | `path`, `force?` |
 | `close_tab` | Close a tab by its canonical path | `path` |
 | `quit` | Gracefully close the Scrybe GUI window | `force?` |
-| `state` | Report the GUI's active path, view mode, theme, and Vim state | — |
+| `state` | Report the GUI's active path, view mode, document kind and language, theme, Vim state, and whether the Explorer is showing | — |
 | `set_theme` | Set editor + preview theme (human: theme dropdown) | `theme` |
-| `view_mode` | Set active tab view mode (human: View button) | `mode` |
-| `set_vim` | Toggle Vim keybindings (human: Vim toggle) | `enabled` |
+| `view_mode` | Set active tab view mode: `both`, `edit`, `preview`, `wysiwyg`, or `cycle` (human: View button; View ▸ WYSIWYG View) | `mode` |
+| `set_vim` | Toggle Vim keybindings (human: Vim toggle); no effect on a `wysiwyg` tab | `enabled` |
+| `set_explorer` | Show or hide the Explorer sidebar (human: toolbar ☰, header «, View ▸ Show Explorer ⇧⌘E) | `visible` |
+| `set_language` | Set the active tab's language by name or alias (`Rust`, `py`, `cpp`, `markdown`, `text`), or `auto` to detect again (human: language chip in the path bar) | `language` |
 | `export` | Export Markdown to Word (.docx) with Mermaid PNGs | `path`, `output?`, `no_diagrams?` |
 | `export_figures` | Export every Mermaid diagram in a document to sibling `<stem>_fig_NN.png` files (each embeds its source) | `path` |
 | `gdoc_auth` | Sign in/out of Google or report state (`login` opens the host browser for consent); data `{status, expires_at, config_dir}` | `action` (`login` / `logout` / `status`) |
@@ -49,9 +51,10 @@ addressed by canonical `path`.
 | `gdoc_import` | Import a Google Doc (id or URL) to a Markdown file; PNGs carrying Mermaid source become fences again; data `{path, doc_id, diagrams, images, figures[{index, verification: verified\|unverified\|alt-text\|manifest}], image_paths}` | `doc`, `output` |
 
 > **Parity rule:** every human control in scrybe-app has an MCP equivalent
-> and vice versa. The `state`/`set_theme`/`view_mode`/`set_vim`/`export`/
-> `export_figures` tools mirror the path bar, theme dropdown, View button,
-> Vim toggle, the Export button, and the "Export Diagrams…" menu item
+> and vice versa. The `state`/`set_theme`/`view_mode`/`set_vim`/`set_language`/
+> `set_explorer`/`export`/`export_figures` tools mirror the path bar, theme
+> dropdown, View button, Vim toggle, the path bar's language chip, the ☰
+> Explorer toggle, the Export button, and the "Export Diagrams…" menu item
 > respectively. `mermaid_to_png` mirrors right-clicking a rendered Mermaid
 > diagram to open the PNG save dialog; the GUI snapshots Mermaid.js
 > pixels while the headless tool renders independently, and both embed the
@@ -92,7 +95,7 @@ Since 0.6.0 (workstream A4) the MCP boundary is honest per the MCP spec:
   the content text is the human-readable message.
 - **Unknown tool / malformed `tools/call` params**: a top-level JSON-RPC
   `-32602` protocol error, not a tool result.
-- The full frozen surface lives in `docs/mcp-contract-0.6.json`.
+- The full frozen surface lives in `docs/mcp-contract-0.7.json`.
 
 **Breaking change:** before 0.6.0 a business failure was returned as a
 *success* (`isError: false`) with `tool_error` tucked inside the `data`

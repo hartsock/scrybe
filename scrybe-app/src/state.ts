@@ -1,8 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
 import type { DocKind } from "./kinds";
 
-export type ViewMode = "both" | "edit" | "preview";
-const VIEW_CYCLE: ViewMode[] = ["both", "edit", "preview"];
+/// `wysiwyg` swaps the source editor and preview pane for one rich-text
+/// editing surface. Markdown tabs only; code/text tabs stay `edit`.
+export type ViewMode = "both" | "edit" | "preview" | "wysiwyg";
+export const VIEW_MODES: readonly ViewMode[] = ["both", "edit", "preview", "wysiwyg"];
+const VIEW_CYCLE: readonly ViewMode[] = VIEW_MODES;
+
+export function isViewMode(mode: string): mode is ViewMode {
+  return (VIEW_MODES as readonly string[]).includes(mode);
+}
 
 export interface TabEntry {
   id: string;
@@ -14,13 +21,23 @@ export interface TabEntry {
   /// How this document is treated. `code`/`text` tabs have no Markdown
   /// preview, so they open (and stay) in edit-only view.
   kind: DocKind;
+  /// The language in effect: "Markdown", a source language name such as
+  /// "Rust", or null for plain text.
+  language: string | null;
+  /// A language picked by hand, overriding detection; null = auto-detect.
+  languageOverride: string | null;
 }
 
 export class AppState {
   tabs: TabEntry[] = [];
   activeTabId: string | null = null;
 
-  addTab(path: string | null, content: string, kind: DocKind = "markdown"): string {
+  addTab(
+    path: string | null,
+    content: string,
+    kind: DocKind = "markdown",
+    language: string | null = kind === "markdown" ? "Markdown" : null,
+  ): string {
     if (path) {
       const existing = this.tabs.find(t => t.path === path);
       if (existing) {
@@ -32,7 +49,7 @@ export class AppState {
     const title = path ? path.split("/").pop() ?? "Untitled" : "Untitled";
     // Code/text documents have no Markdown preview — open edit-only.
     const viewMode: ViewMode = kind === "markdown" ? "both" : "edit";
-    this.tabs.push({ id, path, title, isDirty: false, content, viewMode, kind });
+    this.tabs.push({ id, path, title, isDirty: false, content, viewMode, kind, language, languageOverride: null });
     this.activeTabId = id;
     return id;
   }

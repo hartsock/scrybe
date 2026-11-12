@@ -5,8 +5,8 @@
 //!
 //! Each test stands up a scratch `UnixListener` that replies with a
 //! deliberately shaped (often malformed) frame and asserts the client
-//! surfaces the exact [`ClientError`] variant the 0.6 contract
-//! (`docs/rpc-contract-0.6.md`) promises. Unix-only, like the transport.
+//! surfaces the exact [`ClientError`] variant the 0.7 contract
+//! (`docs/rpc-contract-0.7.md`) promises. Unix-only, like the transport.
 
 #![cfg(unix)]
 

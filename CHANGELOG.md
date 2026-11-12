@@ -11,16 +11,6 @@ lock-step version (`[workspace.package] version`).
 
 ## [Unreleased]
 
-### Added
-- **Idempotent shell-command lifecycle**: `just install` and the macOS app now
-  install or repair a managed `~/.local/bin/scrybe` link. Repeated installs
-  are no-ops; broken and recognized stale links repair atomically; unrelated
-  files and healthy links fail closed. Status reports flag competing commands
-  and duplicate app bundles, and uninstall removes only Scrybe-owned artifacts.
-- **CLI embedded in desktop bundles**: direct DMG users can install, repair, or
-  remove the command from the native Scrybe menu; Homebrew links the same
-  version-matched binary through its cask.
-
 ### Added — Google Docs (`scrybe-gdocs`)
 - **New crate `scrybe-gdocs`**: export a Markdown document to a native Google
   Doc in Drive and import it back to Markdown. OAuth 2.0 installed-app flow
@@ -92,6 +82,87 @@ lock-step version (`[workspace.package] version`).
 ### Docs
 - `docs/google-docs.md`: one-time OAuth client setup, the app/CLI/MCP
   surface, error codes, the provenance fallbacks, and a round-trip check.
+
+## [0.7.0] — 2026-11-10
+
+### Added
+- **WYSIWYG view mode** (#251, #267): `wysiwyg` is a fourth per-tab view mode for
+  Markdown, after both / editor / preview. It swaps the source editor and
+  preview pane for one rich-text editing surface (Milkdown), loaded on first
+  use. Reach it from the tab mode icon, the toolbar View button, View ▸
+  WYSIWYG View, or the `view_mode` tool. Front matter is kept byte-for-byte
+  and a file is never rewritten by opening it; a "Reformat pending" badge in
+  the path bar warns when the first edit will also restyle the document's
+  Markdown. Vim and the wrap toggle do not apply in this view. Code and text
+  tabs stay edit-only.
+- **Code editing basics** (#268): source files get a language chip in the path bar
+  (click to pick another language or go back to auto-detect; the MCP twin is
+  the new `set_language` tool). Files with no recognized extension are
+  detected from a `#!` line (Python, Ruby, shell, Node, Perl, Lua, PHP). Code
+  and text tabs indent the way the file already does, else by the language's
+  convention (Go tabs, Ruby/JS/YAML two spaces, four otherwise), and Tab /
+  Shift-Tab indent and dedent. Each tab keeps its own undo history, cursor,
+  selection and scroll position across tab switches. The Open dialog no
+  longer hides source files. `state` and `list_tabs` report each tab's
+  `language`.
+- **Hide the Explorer** (#269): the toolbar ☰ button, a « button in the Explorer
+  header, and View ▸ Show Explorer (⇧⌘E) hide or show the sidebar so the
+  editor gets the full width. The choice is remembered across launches.
+  Opening a folder shows it again. Agents use the new `set_explorer` tool;
+  `state` reports `explorer`.
+- **Contract 0.7**: `view_mode` accepts and returns `wysiwyg`; `state` and
+  `list_tabs` report each tab's `doc_kind` (`markdown` / `code` / `text`) and
+  `language`; `state` reports `explorer`; new `set_language` and
+  `set_explorer` tools; `set_vim` and `state` report the Vim and wrap values
+  actually in effect.
+  The artifacts are now `docs/mcp-contract-0.7.json` and
+  `docs/rpc-contract-0.7.md`.
+- **Editor surfaces and the in-place overlay** (#251, #262, #263, #264,
+  #265): the editor sits behind a `Surface` seam so another editing engine
+  can be swapped in. Front matter is split off and kept byte-for-byte. An
+  in-place overlay editor makes source-preserving saves with compare-and-swap
+  rebase and crash recovery.
+- **`scrybe view`** (#229, #230, #231, #244): a read-only terminal Markdown
+  viewer in the CLI, with wrap-aware scrolling, syntax-highlighted fenced
+  code (opt-in `highlight` feature) and GFM tables drawn as a grid. The
+  `scrybe-tui` viewer also opens links on click.
+- **Save a rendered Mermaid diagram as PNG** (#241): right-click a diagram in
+  the preview to save the image as displayed, with its Mermaid source, UUID
+  and SHA-256 embedded.
+- **Build identity in versions** (#242): `scrybe version` and the app report
+  the git commit and a dirty flag, e.g. `0.7.0 (a1b2c3d4e5f6)`.
+- **Windows live sessions** (#245): the CLI and MCP server reach a running
+  app over a named pipe on Windows.
+- **Idempotent shell-command lifecycle** (#247): `just install` and the macOS app now
+  install or repair a managed `~/.local/bin/scrybe` link. Repeated installs
+  are no-ops; broken and recognized stale links repair atomically; unrelated
+  files and healthy links fail closed. Status reports flag competing commands
+  and duplicate app bundles, and uninstall removes only Scrybe-owned artifacts.
+- **CLI embedded in desktop bundles**: direct DMG users can install, repair, or
+  remove the command from the native Scrybe menu; Homebrew links the same
+  version-matched binary through its cask.
+
+### Fixed
+- **No open tabs** (#269): closing the last tab shows a "No open tabs" screen
+  instead of leaving the old preview up and an editor that silently dropped
+  typing.
+- **Socket `quit` exits the process** (#233), not just the window; the
+  socket no longer outlives a `scrybe quit --force`.
+- **WebView navigation is locked down** (#249): a native allowlist keeps
+  remote, `file:`, `data:` and `javascript:` pages out of the app window,
+  including links Mermaid creates.
+
+### Security
+- **crates.io publishing** (#257) runs on GitHub-hosted runners with the token
+  in a tag-gated environment, instead of on self-hosted runners.
+
+### Licensing
+- **Third-party notices** (#239): the desktop bundles ship the MPL-2.0 text
+  and notices for the four MPL-licensed crates they link.
+
+### CI
+- **UAT / live-integration tier** (#234): nightly and release-gate runs drive
+  the real app and the TUI under Xvfb.
 
 ## [0.6.3] — 2026-07-21
 

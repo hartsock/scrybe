@@ -10,8 +10,8 @@ A single `scrybe` binary that mirrors every MCP tool. Humans drive the GUI from 
 
 JSON-RPC 2.0, newline-delimited, one line per request and one per response. Unix uses `~/.scrybe/sock`; Windows uses the per-user `\\.\pipe\scrybe-<user>` named pipe. Override either endpoint with `$SCRYBE_SOCK`.
 
-> **The normative contract lives in [`docs/rpc-contract-0.6.md`](../rpc-contract-0.6.md)** —
-> the 0.6 compatibility artifact. It freezes the full method table
+> **The normative contract lives in [`docs/rpc-contract-0.7.md`](../rpc-contract-0.7.md)** —
+> the 0.7 compatibility artifact. It freezes the full method table
 > (params/results/app-errors), the stable error-code registry, the
 > client-enforced envelope validation rules, the 16 MiB frame cap, the
 > timeouts, and the malformed-reply → typed-`ClientError` guarantees. This
@@ -21,7 +21,7 @@ JSON-RPC 2.0, newline-delimited, one line per request and one per response. Unix
 ### Methods
 
 `open`, `save`, `read`, `find`, `section`, `edit`, `list_tabs`, `reload`,
-`close`, `quit`, `state`, `set_theme`, `view_mode`, `set_vim`, `logs` — see
+`close`, `quit`, `state`, `set_theme`, `view_mode`, `set_vim`, `set_language`, `set_explorer`, `logs` — see
 the fixture for shapes and per-method errors. `close`/`quit` are
 fire-and-forget acks; everything else is request-with-reply.
 

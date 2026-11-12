@@ -22,7 +22,7 @@ not make the toolchain more impressive.
 | `scrybe-core/` | Rust | AST, Document, ContentAddressable (BLAKE3+CBOR), Plugin trait, Workspace |
 | `scrybe-render/` | Rust | HTML pipeline, syntect highlighting, KaTeX/Mermaid |
 | `scrybe-tools/` | Rust | The ONE shared ToolSpec registry (handlers, schemas, dispatch) consumed by both the CLI and the MCP server |
-| `scrybe-mcp-server/` | Rust | Inbound MCP server — a thin stdio shim over `scrybe-tools`. Tools: open/read/section/edit/save/find/render/embed/extract/lint/list_tabs/mermaid_to_png/export_figures/logs/reload/quit/close_tab + UI-parity tools state/set_theme/view_mode/set_vim/export + Google Docs tools gdoc_auth/gdoc_list/gdoc_export/gdoc_import |
+| `scrybe-mcp-server/` | Rust | Inbound MCP server — a thin stdio shim over `scrybe-tools`. Tools: open/read/section/edit/save/find/render/embed/extract/lint/list_tabs/mermaid_to_png/export_figures/logs/reload/quit/close_tab + UI-parity tools state/set_theme/view_mode/set_vim/set_language/set_explorer/export + Google Docs tools gdoc_auth/gdoc_list/gdoc_export/gdoc_import |
 | `scrybe-mcp-client/` | Rust | Outbound MCP — registers external agent servers |
 | `scrybe-mermaid/` | Rust | PNG iTXt codec (Mermaid source embedded in PNG metadata) |
 | `scrybe-mermaid-render/` | Rust | Thin wrapper over the adopted `mermaid-rs-renderer`: SVG `<metadata>` provenance (source + sha256) + PNG via resvg |
@@ -169,8 +169,8 @@ claude mcp add scrybe -- scrybe-mcp-server stdio
 Available tools: `open`, `read`, `section`, `edit`, `save`, `find`,
 `render`, `embed`, `extract`, `lint`, `list_tabs`, `mermaid_to_png`,
 `export_figures`, `logs`, `reload`, `quit`, `close_tab`, `state`,
-`set_theme`, `view_mode`, `set_vim`, `export`, `gdoc_auth`, `gdoc_list`,
-`gdoc_export`, `gdoc_import`
+`set_theme`, `view_mode`, `set_vim`, `set_language`, `set_explorer`, `export`,
+`gdoc_auth`, `gdoc_list`, `gdoc_export`, `gdoc_import`
 
 All tools are served by the one shared `scrybe-tools` registry (the same
 handlers, schemas, and dispatch the CLI uses), so the MCP and CLI surfaces
@@ -180,9 +180,9 @@ Edits land in the in-memory buffer and leave the tab dirty; `save` is the
 explicit persist (the agent-side twin of Cmd+S / 💾).
 
 Every human control in scrybe-app has an MCP equivalent and vice versa
-(`state`/`set_theme`/`view_mode`/`set_vim`/`export`/`export_figures` mirror
-the path bar, theme dropdown, View button, Vim toggle, the Export button,
-and the "Export Diagrams…" menu item; `mermaid_to_png` mirrors right-clicking
+(`state`/`set_theme`/`view_mode`/`set_vim`/`set_language`/`set_explorer`/`export`/`export_figures` mirror
+the path bar, theme dropdown, View button, Vim toggle, the path bar's
+language chip, the ☰ Explorer toggle, the Export button, and the "Export Diagrams…" menu item; `mermaid_to_png` mirrors right-clicking
 a rendered Mermaid diagram, with GUI and headless renderers sharing the embedded
 source/UUID/SHA-256 provenance contract; `gdoc_export`/`gdoc_import`/`gdoc_list`/
 `gdoc_auth` mirror the ☁️ Google Docs toolbar button (File ▸ Export to Google

@@ -1,0 +1,62 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+/* WYSIWYG view: the Milkdown (Crepe) surface mounted in #editor-wysiwyg. */
+
+#editor-wysiwyg {
+  background: #fff;
+}
+
+#editor-wysiwyg .milkdown {
+  min-height: 100%;
+}
+
+#editor-wysiwyg .milkdown .ProseMirror {
+  max-width: 860px;
+  margin: 0 auto;
+  padding: 24px 48px 96px;
+}
+
+/* Dark theme: Crepe's frame-dark palette, applied by class so both themes
+   can ship in one stylesheet. */
+#editor-wysiwyg.scrybe-milkdown-dark {
+  background: #1a1a1a;
+}
+
+#editor-wysiwyg.scrybe-milkdown-dark .milkdown {
+  --crepe-color-background: #1a1a1a;
+  --crepe-color-on-background: #e6e6e6;
+  --crepe-color-surface: #121212;
+  --crepe-color-surface-low: #1c1c1c;
+  --crepe-color-on-surface: #d1d1d1;
+  --crepe-color-on-surface-variant: #a9a9a9;
+  --crepe-color-outline: #757575;
+  --crepe-color-primary: #b5b5b5;
+  --crepe-color-secondary: #4d4d4d;
+  --crepe-color-on-secondary: #d6d6d6;
+  --crepe-color-inverse: #e5e5e5;
+  --crepe-color-on-inverse: #2a2a2a;
+  --crepe-color-inline-code: #ff6666;
+  --crepe-color-error: #ff6666;
+  --crepe-color-hover: #232323;
+  --crepe-color-selected: #2f2f2f;
+  --crepe-color-inline-area: #2b2b2b;
+}
+
+/* Solarized light, matching the source editor's solarized theme. */
+#editor-wysiwyg.scrybe-milkdown-solarized {
+  background: #fdf6e3;
+}
+
+#editor-wysiwyg.scrybe-milkdown-solarized .milkdown {
+  --crepe-color-background: #fdf6e3;
+  --crepe-color-on-background: #586e75;
+  --crepe-color-surface: #eee8d5;
+  --crepe-color-surface-low: #f5efdc;
+  --crepe-color-on-surface: #657b83;
+  --crepe-color-on-surface-variant: #839496;
+  --crepe-color-outline: #93a1a1;
+  --crepe-color-primary: #268bd2;
+  --crepe-color-inline-code: #cb4b16;
+  --crepe-color-hover: #eee8d5;
+  --crepe-color-selected: #e4ddc8;
+  --crepe-color-inline-area: #eee8d5;
+}

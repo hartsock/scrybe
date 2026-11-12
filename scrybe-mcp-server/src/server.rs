@@ -33,7 +33,7 @@
 //! boundary a failed invocation now reads as failed.
 //!
 //! The complete `tools/list` surface (schemas included) is frozen as the
-//! release artifact `docs/mcp-contract-0.6.json`, pinned by
+//! release artifact `docs/mcp-contract-0.7.json`, pinned by
 //! `tests/mcp_contract.rs`.
 
 use std::io::{BufRead, Write};
@@ -334,10 +334,10 @@ mod tests {
         assert!(resp["result"].is_object());
     }
 
-    /// The complete public MCP tool list for the 0.6 line (the 0.6.0 surface
-    /// plus the `gdoc_*` tools), sorted. `tools/list` must serve EXACTLY this
-    /// set — a change here is a deliberate surface change.
-    const TOOL_NAMES_0_6: &[&str] = &[
+    /// The complete public MCP tool list for contract 0.7 (plus the `gdoc_*`
+    /// Google Docs tools), sorted. `tools/list` must serve EXACTLY this set —
+    /// a change here is a deliberate surface change.
+    const TOOL_NAMES_0_6_0: &[&str] = &[
         "close_tab",
         "edit",
         "embed",
@@ -360,6 +360,8 @@ mod tests {
         "render",
         "save",
         "section",
+        "set_explorer",
+        "set_language",
         "set_theme",
         "set_vim",
         "state",
@@ -389,13 +391,13 @@ mod tests {
     }
 
     #[test]
-    fn test_list_tools_snapshot_is_the_0_6_surface() {
+    fn test_list_tools_snapshot_is_the_0_6_0_surface() {
         // Snapshot of the complete public tool list (sorted). If this fails you
-        // changed the 0.6 MCP surface — update the snapshot deliberately.
+        // changed the 0.7 MCP surface — update the snapshot deliberately.
         let mut s = server();
         let mut names = listed_names(&mut s);
         names.sort();
-        assert_eq!(names, TOOL_NAMES_0_6, "tools/list surface changed");
+        assert_eq!(names, TOOL_NAMES_0_6_0, "tools/list surface changed");
     }
 
     #[test]

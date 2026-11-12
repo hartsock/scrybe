@@ -7,7 +7,7 @@ export type Theme = "default" | "dark" | "solarized";
 
 export interface ToolbarHandlers {
   onThemeChange: (theme: Theme) => void;
-  /// Cycle the active tab's view mode (both → edit → preview → both),
+  /// Cycle the active tab's view mode (both → edit → preview → wysiwyg → both),
   /// mirroring the per-tab mode icon in the tab bar.
   onCyclePreview: () => void;
   onOpenFile: (path: string) => void;
@@ -29,11 +29,14 @@ export interface ToolbarHandlers {
   onToggleVim: () => void;
   /// Toggle soft word-wrap in the editor on/off.
   onToggleWrap: () => void;
+  /// Show or hide the Explorer sidebar.
+  onToggleExplorer: () => void;
 }
 
 export function buildToolbar(container: HTMLElement, handlers: ToolbarHandlers): void {
   const btn = "background:transparent;border:1px solid #666;color:#ccc;padding:2px 8px;border-radius:3px;font-size:12px;cursor:pointer;";
   container.innerHTML = `
+    <button id="toggle-explorer" title="Hide Explorer (⇧⌘E)" aria-pressed="true" style="${btn}margin-right:10px;">☰</button>
     <span style="font-weight:600;letter-spacing:0.5px;">Scrybe</span>
     <div style="margin-left:auto;display:flex;align-items:center;gap:8px;">
       <button id="tb-save" title="Save active tab (⌘S / Ctrl+S)" style="${btn}">💾 Save</button>
@@ -50,7 +53,7 @@ export function buildToolbar(container: HTMLElement, handlers: ToolbarHandlers):
       </select>
       <button id="toggle-vim" title="Toggle Vim keybindings" aria-pressed="false" style="${btn}">Vim: off</button>
       <button id="toggle-wrap" title="Toggle soft word wrap" aria-pressed="false" style="${btn}">Wrap: off</button>
-      <button id="toggle-preview" title="Cycle view: both / editor / preview" style="${btn}">View: ◧◨</button>
+      <button id="toggle-preview" title="Cycle view: both / editor / preview / WYSIWYG" style="${btn}">View: ◧◨</button>
       <button id="toggle-devtools" title="Toggle DevTools inspector" style="background:transparent;border:1px solid #555;color:#888;padding:2px 6px;border-radius:3px;font-size:13px;cursor:pointer;line-height:1;">🐞</button>
     </div>
   `;
@@ -67,16 +70,11 @@ export function buildToolbar(container: HTMLElement, handlers: ToolbarHandlers):
   container.querySelector<HTMLButtonElement>("#open-file")!
     .addEventListener("click", async () => {
       const home = await homeDir();
-      const result = await open({
-        multiple: false,
-        defaultPath: home,
-        filters: [
-          { name: "All supported", extensions: ["md", "markdown", "txt", "mmd", "png", "jpg", "jpeg", "gif", "webp"] },
-          { name: "Markdown", extensions: ["md", "markdown", "txt"] },
-          { name: "Mermaid", extensions: ["mmd"] },
-          { name: "Images", extensions: ["png", "jpg", "jpeg", "gif", "webp"] },
-        ],
-      });
+      // No extension filters: Scrybe opens Markdown, images and any source
+      // or text file, including ones with no extension (Makefile, scripts).
+      // macOS merges every filter into one allow-list, so even an "All files"
+      // entry would leave those unselectable.
+      const result = await open({ multiple: false, defaultPath: home });
       if (result) handlers.onOpenFile(result as string);
     });
   container.querySelector<HTMLButtonElement>("#open-folder")!
@@ -91,13 +89,15 @@ export function buildToolbar(container: HTMLElement, handlers: ToolbarHandlers):
     .addEventListener("click", () => handlers.onToggleVim());
   container.querySelector<HTMLButtonElement>("#toggle-wrap")!
     .addEventListener("click", () => handlers.onToggleWrap());
+  container.querySelector<HTMLButtonElement>("#toggle-explorer")!
+    .addEventListener("click", () => handlers.onToggleExplorer());
   container.querySelector<HTMLButtonElement>("#toggle-preview")!
     .addEventListener("click", () => handlers.onCyclePreview());
   container.querySelector<HTMLButtonElement>("#toggle-devtools")!
     .addEventListener("click", () => invoke("toggle_devtools").catch(console.error));
 }
 
-const MODE_GLYPH: Record<string, string> = { both: "◧◨", edit: "◧", preview: "◨" };
+const MODE_GLYPH: Record<string, string> = { both: "◧◨", edit: "◧", preview: "◨", wysiwyg: "✎" };
 
 /// Reflect the active tab's view mode on the toolbar's View button so the
 /// label matches what the per-tab mode icon shows.
@@ -132,4 +132,30 @@ export function setToolbarWrap(container: HTMLElement, enabled: boolean): void {
     b.style.borderColor = enabled ? "#1577c4" : "#666";
     b.style.color = enabled ? "#fff" : "#ccc";
   }
+}
+
+/// Reflect whether the Explorer sidebar is showing on its toolbar toggle.
+export function setToolbarExplorer(container: HTMLElement, visible: boolean): void {
+  const b = container.querySelector<HTMLButtonElement>("#toggle-explorer");
+  if (b) {
+    b.setAttribute("aria-pressed", String(visible));
+    b.title = `${visible ? "Hide" : "Show"} Explorer (⇧⌘E)`;
+    b.style.borderColor = visible ? "#1577c4" : "#666";
+    b.style.color = visible ? "#fff" : "#ccc";
+  }
+}
+
+/// Grey out the Vim and Wrap toggles when the active editing surface does not
+/// support them (the WYSIWYG surface supports neither).
+export function setToolbarSurfaceControls(container: HTMLElement, supported: { vim: boolean; wrap: boolean }): void {
+  const set = (id: string, ok: boolean, on: string, off: string) => {
+    const b = container.querySelector<HTMLButtonElement>(id);
+    if (!b) return;
+    b.disabled = !ok;
+    b.style.opacity = ok ? "1" : "0.45";
+    b.style.cursor = ok ? "pointer" : "not-allowed";
+    b.title = ok ? on : off;
+  };
+  set("#toggle-vim", supported.vim, "Toggle Vim keybindings", "Vim keybindings are not available in WYSIWYG view");
+  set("#toggle-wrap", supported.wrap, "Toggle soft word wrap", "Word wrap is always on in WYSIWYG view");
 }

@@ -1,8 +1,8 @@
-# Scrybe socket RPC contract — 0.6 compatibility artifact
+# Scrybe socket RPC contract — 0.7 compatibility artifact
 
-> **This file is the 0.6 compatibility artifact.** It freezes the wire
+> **This file is the 0.7 compatibility artifact.** It freezes the wire
 > contract between the `scrybe` CLI / MCP server (clients) and the running
-> Scrybe app (server) for the 0.6 line. Anything documented here — method
+> Scrybe app (server) for the 0.7 line. Anything documented here — method
 > names, param/result shapes, error codes, envelope rules, limits — may only
 > change with a contract version bump and a new fixture. The design narrative
 > lives in `docs/design/cli-rpc.md`; this file is the normative reference.
@@ -76,14 +76,16 @@ them except `close`/`quit` — `ERR_REPLY_TIMEOUT`.
 | `find` | `{pattern, paths?, literal?, case_sensitive?}` | `{hits: [{path, line, column, text}]}` | — |
 | `section` | `{path, heading}` | `{heading, level, content}` | `ERR_TAB_NOT_OPEN`, `ERR_SECTION_NOT_FOUND` |
 | `edit` | `{path, start_line, end_line, content}` | `{applied, size_after, is_dirty}` | `ERR_TAB_NOT_OPEN` |
-| `list_tabs` | `{}` | `{tabs: [{path, title, is_dirty, view_mode, active}]}` | — |
+| `list_tabs` | `{}` | `{tabs: [{path, title, is_dirty, view_mode, doc_kind, language, active}]}` | — |
 | `reload` | `{path, force?}` | `{path, bytes, was_dirty}` | `ERR_TAB_NOT_OPEN`, `ERR_DIRTY_RELOAD_REFUSED` |
 | `close` | `{path}` | `{applied}` (fire-and-forget ack; not-open collapses to `applied: false` frontend-side) | — |
 | `quit` | `{force?}` | `{applied}` (fire-and-forget ack) | `ERR_DIRTY_QUIT_REFUSED` |
-| `state` | `{}` | `{active_path, active_title, is_dirty, view_mode, theme, vim, wrap, open_paths}` | — |
+| `state` | `{}` | `{active_path, active_title, is_dirty, view_mode, doc_kind, language, theme, vim, wrap, explorer, open_paths}` | — |
 | `set_theme` | `{theme}` | `{theme}` (applied) | — |
-| `view_mode` | `{mode}` (`both`\|`edit`\|`preview`\|`cycle`) | `{mode}` (the CONCRETE mode now active) | — |
-| `set_vim` | `{enabled}` | `{enabled}` (applied) | — |
+| `view_mode` | `{mode}` (`both`\|`edit`\|`preview`\|`wysiwyg`\|`cycle`) | `{mode}` (the CONCRETE mode now active) | — |
+| `set_vim` | `{enabled}` | `{enabled}` (the value in effect; always `false` on a `wysiwyg` tab) | — |
+| `set_language` | `{language}` (a name or alias, or `auto`) | `{language, doc_kind, auto}` (what is now in effect for the active tab) | `ERR_TAB_NOT_OPEN` (no active tab); `-32602` for an unknown language |
+| `set_explorer` | `{visible}` | `{visible}` (whether the Explorer sidebar is now showing) | — |
 | `logs` | `{tail?}` | `{lines}` (newest-last, from the app's in-memory ring) | — |
 
 Notes:
@@ -94,6 +96,33 @@ Notes:
   explicit persist.
 - `save` against a not-open path errors `ERR_TAB_NOT_OPEN` on the wire; the
   CLI *presents* that as its documented silent no-op.
+
+- `view_mode: wysiwyg` swaps the source editor and preview pane for one
+  rich-text editing surface. Markdown tabs only: a `code`/`text` tab pins to
+  `edit` whatever is requested. The buffer, dirty flag, and every line-based
+  method (`read`/`find`/`section`/`edit`) behave the same in all view modes.
+- `state.vim` / `state.wrap` and the `set_vim` reply report what is in effect
+  for the active tab. The WYSIWYG surface supports neither, so both are
+  `false` there and `set_vim` changes nothing.
+
+- `language` is the language in effect: `Markdown`, a source language name
+  such as `Rust`, `Python`, `C++` or `Go`, or null for plain text. It is
+  detected from the file name, then from a `#!` first line, unless set by
+  hand with `set_language`. Setting a language can change `doc_kind`; a tab
+  that stops being Markdown pins to `edit`.
+
+## Changes from 0.6
+
+- `view_mode` accepts and returns `wysiwyg`; `cycle` advances
+  both→edit→preview→wysiwyg. `state.view_mode` and `list_tabs[].view_mode`
+  may be `wysiwyg`.
+- `state` and each `list_tabs` entry gain `doc_kind` (`markdown`\|`code`\|`text`).
+  A 0.7 client reading a 0.6 app treats a missing `doc_kind` as `markdown`.
+- `set_vim` replies with the value in effect rather than echoing the request.
+- New method `set_language`. `state` and each `list_tabs` entry gain
+  `language`; a 0.7 client reading an app without it treats it as null.
+- New method `set_explorer`. `state` gains `explorer`; a 0.7 client reading
+  an app without it treats it as `true` (showing).
 
 ## Stable error codes
 
@@ -178,4 +207,4 @@ At the MCP boundary (since A4) *all three* rows surface as a tool result with
 `tool_error` is a `ToolOutcome` (the tool ran), an `EngineFault` is not. On
 the CLI, engine faults exit non-zero. The MCP mapping table is normative in
 `scrybe-mcp-server/src/server.rs`; the frozen surface is
-`docs/mcp-contract-0.6.json`.
+`docs/mcp-contract-0.7.json`.

@@ -576,7 +576,7 @@
       "annotations": {
         "readOnlyHint": true
       },
-      "description": "List the tabs currently open in the running Scrybe editor — each with its path, title, dirty flag, view mode, and whether it is the active tab. Requires a live app; with none running it reports `no_live_app`. Read the `data.tabs` array.",
+      "description": "List the tabs currently open in the running Scrybe editor — each with its path, title, dirty flag, view mode, document kind (`markdown`, `code` or `text`), language (e.g. `Rust`; null for plain text), and whether it is the active tab. Requires a live app; with none running it reports `no_live_app`. Read the `data.tabs` array.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {},
@@ -598,8 +598,22 @@
                 "active": {
                   "type": "boolean"
                 },
+                "doc_kind": {
+                  "enum": [
+                    "markdown",
+                    "code",
+                    "text"
+                  ],
+                  "type": "string"
+                },
                 "is_dirty": {
                   "type": "boolean"
+                },
+                "language": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
                 },
                 "path": {
                   "type": "string"
@@ -616,6 +630,7 @@
                 "title",
                 "is_dirty",
                 "view_mode",
+                "doc_kind",
                 "active"
               ],
               "type": "object"
@@ -1166,7 +1181,7 @@
       "annotations": {
         "readOnlyHint": true
       },
-      "description": "Report the running Scrybe app's current UI state: the active tab's path/title/dirty flag, view mode, theme, Vim and wrap toggles, and every open path. Served live from the frontend — the human equivalents are the path bar, tab mode icon, theme dropdown, and Vim toggle.",
+      "description": "Report the running Scrybe app's current UI state: the active tab's path/title/dirty flag, view mode, document kind and language, theme, Vim and wrap toggles, whether the Explorer sidebar is showing, and every open path. `vim` and `wrap` are the values in effect for the active tab (both false on a `wysiwyg` tab, whose editor supports neither). Served live from the frontend — the human equivalents are the path bar, tab mode icon, theme dropdown, and Vim toggle.",
       "inputSchema": {
         "properties": {},
         "type": "object"
@@ -1187,12 +1202,32 @@
               "null"
             ]
           },
+          "doc_kind": {
+            "description": "How the active tab's document is treated: Markdown (preview + WYSIWYG available), a recognized source-code language, or plain text (both edit-only).",
+            "enum": [
+              "markdown",
+              "code",
+              "text"
+            ],
+            "type": "string"
+          },
+          "explorer": {
+            "description": "The Explorer sidebar is showing.",
+            "type": "boolean"
+          },
           "is_dirty": {
             "type": "boolean"
           },
           "kind": {
             "const": "state",
             "description": "Payload discriminator — the tool name."
+          },
+          "language": {
+            "description": "The active tab's language: `Markdown`, a source language such as `Rust` or `C++`, or null for plain text.",
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "open_paths": {
             "items": {
@@ -1228,7 +1263,8 @@
             "enum": [
               "both",
               "edit",
-              "preview"
+              "preview",
+              "wysiwyg"
             ],
             "type": "string"
           },
@@ -1246,9 +1282,12 @@
           "active_title",
           "is_dirty",
           "view_mode",
+          "doc_kind",
+          "language",
           "theme",
           "vim",
           "wrap",
+          "explorer",
           "open_paths"
         ],
         "type": "object"
@@ -1325,7 +1364,7 @@
       "annotations": {
         "readOnlyHint": false
       },
-      "description": "Set the active tab's view mode in the running Scrybe app — `both`, `edit`, `preview`, or `cycle` to advance both→edit→preview (same entry point as the toolbar View button). Returns the CONCRETE mode now active (a code/text tab pins to `edit`).",
+      "description": "Set the active tab's view mode in the running Scrybe app — `both` (source editor + preview), `edit`, `preview`, `wysiwyg` (one rich-text editing surface for Markdown; no Vim or wrap toggle), or `cycle` to advance both→edit→preview→wysiwyg (same entry point as the toolbar View button). Returns the CONCRETE mode now active (a code/text tab pins to `edit`).",
       "inputSchema": {
         "properties": {
           "mode": {
@@ -1333,6 +1372,7 @@
               "both",
               "edit",
               "preview",
+              "wysiwyg",
               "cycle"
             ],
             "type": "string"
@@ -1355,7 +1395,8 @@
             "enum": [
               "both",
               "edit",
-              "preview"
+              "preview",
+              "wysiwyg"
             ],
             "type": "string"
           },
@@ -1393,7 +1434,7 @@
       "annotations": {
         "readOnlyHint": false
       },
-      "description": "Enable or disable Vim keybindings in the running Scrybe editor (same entry point as the toolbar Vim toggle). Returns the applied setting.",
+      "description": "Enable or disable Vim keybindings in the running Scrybe editor (same entry point as the toolbar Vim toggle). Returns the setting actually in effect: on a `wysiwyg` tab, which has no Vim mode, nothing changes and `enabled` is false.",
       "inputSchema": {
         "properties": {
           "enabled": {
@@ -1409,7 +1450,7 @@
       "outputSchema": {
         "properties": {
           "enabled": {
-            "description": "The setting now applied.",
+            "description": "The setting now in effect for the active tab.",
             "type": "boolean"
           },
           "kind": {
@@ -1442,6 +1483,138 @@
           "v",
           "kind",
           "enabled"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "annotations": {
+        "readOnlyHint": false
+      },
+      "description": "Set the language of the ACTIVE tab in the running Scrybe app (same entry point as the language chip in the path bar): highlighting, indentation, and whether the tab is Markdown (with preview and WYSIWYG) or edit-only code/text. Takes a language name or alias (`Rust`, `python`, `cpp`, `go`, `rb`, `markdown`, `text`) or `auto` to detect again from the file name and `#!` line. Returns the language, document kind, and whether it is detected. An unknown name is an `app_error` and changes nothing.",
+      "inputSchema": {
+        "properties": {
+          "language": {
+            "description": "A language name or alias, or `auto`.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "language"
+        ],
+        "type": "object"
+      },
+      "name": "set_language",
+      "outputSchema": {
+        "properties": {
+          "auto": {
+            "description": "True when the language is detected rather than set by hand.",
+            "type": "boolean"
+          },
+          "doc_kind": {
+            "enum": [
+              "markdown",
+              "code",
+              "text"
+            ],
+            "type": "string"
+          },
+          "kind": {
+            "const": "set_language",
+            "description": "Payload discriminator — the tool name."
+          },
+          "language": {
+            "description": "Canonical language name now in effect; null for plain text.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "tool_error": {
+            "description": "Business failure — the tool ran and said \"no\". Absent on success. (At the MCP boundary a business failure surfaces as an isError:true result instead of riding inside a success payload.)",
+            "properties": {
+              "code": {
+                "description": "Stable machine code, e.g. no_live_app.",
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "code",
+              "message"
+            ],
+            "type": "object"
+          },
+          "v": {
+            "const": 1,
+            "description": "Payload schema version."
+          }
+        },
+        "required": [
+          "v",
+          "kind",
+          "language",
+          "doc_kind",
+          "auto"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "annotations": {
+        "readOnlyHint": false
+      },
+      "description": "Show or hide the Explorer sidebar (file browser, agents and version-control panels) in the running Scrybe app — same entry point as the toolbar ☰ button and View ▸ Show Explorer. Returns whether it is now showing.",
+      "inputSchema": {
+        "properties": {
+          "visible": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "visible"
+        ],
+        "type": "object"
+      },
+      "name": "set_explorer",
+      "outputSchema": {
+        "properties": {
+          "kind": {
+            "const": "set_explorer",
+            "description": "Payload discriminator — the tool name."
+          },
+          "tool_error": {
+            "description": "Business failure — the tool ran and said \"no\". Absent on success. (At the MCP boundary a business failure surfaces as an isError:true result instead of riding inside a success payload.)",
+            "properties": {
+              "code": {
+                "description": "Stable machine code, e.g. no_live_app.",
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "code",
+              "message"
+            ],
+            "type": "object"
+          },
+          "v": {
+            "const": 1,
+            "description": "Payload schema version."
+          },
+          "visible": {
+            "description": "The Explorer is now showing.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "v",
+          "kind",
+          "visible"
         ],
         "type": "object"
       }

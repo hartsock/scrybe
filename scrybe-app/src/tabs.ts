@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 import type { AppState } from "./state";
 
-const MODE_ICON: Record<string, string> = { both: "◧◨", edit: "◧", preview: "◨" };
-const MODE_TITLE: Record<string, string> = { both: "Both panes", edit: "Editor only", preview: "Preview only" };
+const MODE_ICON: Record<string, string> = { both: "◧◨", edit: "◧", preview: "◨", wysiwyg: "✎" };
+const MODE_TITLE: Record<string, string> = { both: "Both panes", edit: "Editor only", preview: "Preview only", wysiwyg: "WYSIWYG" };
 
 export function renderTabBar(
   container: HTMLElement,

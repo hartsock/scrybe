@@ -43,11 +43,13 @@ pub const MENU_IDS: &[&str] = &[
     "print",
     "close_tab",
     "cycle_view",
+    "view_wysiwyg",
     "theme_default",
     "theme_dark",
     "theme_solarized",
     "toggle_vim",
     "toggle_wrap",
+    "toggle_explorer",
     "close_window",
     #[cfg(target_os = "macos")]
     "install_shell_command",
@@ -70,6 +72,7 @@ struct CheckItems {
     theme_solarized: CheckMenuItem<Wry>,
     vim: CheckMenuItem<Wry>,
     wrap: CheckMenuItem<Wry>,
+    explorer: CheckMenuItem<Wry>,
 }
 
 static CHECK_ITEMS: Mutex<Option<CheckItems>> = Mutex::new(None);
@@ -176,6 +179,7 @@ pub fn build(app: &AppHandle<Wry>) -> tauri::Result<Menu<Wry>> {
     // No accelerator: ⇧⌘V is macOS "Paste and Match Style" muscle memory,
     // and the toolbar View button never had a shortcut either.
     let cycle_view = MenuItem::with_id(app, "cycle_view", "Cycle View Mode", true, None::<&str>)?;
+    let view_wysiwyg = MenuItem::with_id(app, "view_wysiwyg", "WYSIWYG View", true, None::<&str>)?;
     let theme_default = CheckMenuItem::with_id(
         app,
         "theme_default",
@@ -206,6 +210,15 @@ pub fn build(app: &AppHandle<Wry>) -> tauri::Result<Menu<Wry>> {
     // is correct on first paint, before the first publishState → menu_sync.
     let toggle_wrap =
         CheckMenuItem::with_id(app, "toggle_wrap", "Word Wrap", true, true, None::<&str>)?;
+    // ⇧⌘E, as in VS Code. Not ⌘B: the WYSIWYG editor uses that for bold.
+    let toggle_explorer = CheckMenuItem::with_id(
+        app,
+        "toggle_explorer",
+        "Show Explorer",
+        true,
+        true,
+        Some("CmdOrCtrl+Shift+E"),
+    )?;
 
     let view = Submenu::with_items(
         app,
@@ -213,6 +226,7 @@ pub fn build(app: &AppHandle<Wry>) -> tauri::Result<Menu<Wry>> {
         true,
         &[
             &cycle_view,
+            &view_wysiwyg,
             &PredefinedMenuItem::separator(app)?,
             &theme_default,
             &theme_dark,
@@ -220,6 +234,8 @@ pub fn build(app: &AppHandle<Wry>) -> tauri::Result<Menu<Wry>> {
             &PredefinedMenuItem::separator(app)?,
             &toggle_vim,
             &toggle_wrap,
+            &PredefinedMenuItem::separator(app)?,
+            &toggle_explorer,
         ],
     )?;
 
@@ -257,6 +273,7 @@ pub fn build(app: &AppHandle<Wry>) -> tauri::Result<Menu<Wry>> {
         theme_solarized,
         vim: toggle_vim,
         wrap: toggle_wrap,
+        explorer: toggle_explorer,
     });
 
     // On macOS the first submenu becomes the application menu.
@@ -314,13 +331,14 @@ pub fn handle_event<R: Runtime>(app: &AppHandle<R>, event: &tauri::menu::MenuEve
 /// MCP `state` tool — so menu, toolbar, and MCP stay in agreement no
 /// matter which surface changed the setting.
 #[tauri::command]
-pub fn menu_sync(theme: String, vim: bool, wrap: bool) {
+pub fn menu_sync(theme: String, vim: bool, wrap: bool, explorer: bool) {
     if let Some(items) = CHECK_ITEMS.lock().unwrap().as_ref() {
         let _ = items.theme_default.set_checked(theme == "default");
         let _ = items.theme_dark.set_checked(theme == "dark");
         let _ = items.theme_solarized.set_checked(theme == "solarized");
         let _ = items.vim.set_checked(vim);
         let _ = items.wrap.set_checked(wrap);
+        let _ = items.explorer.set_checked(explorer);
     }
 }
 
@@ -357,6 +375,12 @@ mod tests {
         ] {
             assert_eq!(menu_action(id), Some(id));
         }
+    }
+
+    #[test]
+    fn explorer_toggle_is_a_menu_action() {
+        // The toolbar ☰ button and the `set_explorer` tool have a menu twin.
+        assert_eq!(menu_action("toggle_explorer"), Some("toggle_explorer"));
     }
 
     #[test]

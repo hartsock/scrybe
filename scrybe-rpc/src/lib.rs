@@ -172,10 +172,26 @@ pub struct TabInfo {
     pub title: String,
     /// Unsaved edits present.
     pub is_dirty: bool,
-    /// Current view mode (`both` | `edit` | `preview`).
+    /// Current view mode (`both` | `edit` | `preview` | `wysiwyg`).
     pub view_mode: String,
+    /// How the document is treated (`markdown` | `code` | `text`). Added in
+    /// contract 0.7; an older app omits it, which reads as `markdown`.
+    #[serde(default = "default_doc_kind")]
+    pub doc_kind: String,
+    /// The language in effect (`Markdown`, a source language such as `Rust`,
+    /// or null for plain text). Added in contract 0.7; absent from older apps.
+    #[serde(default)]
+    pub language: Option<String>,
     /// True for the currently focused tab.
     pub active: bool,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+fn default_doc_kind() -> String {
+    "markdown".to_string()
 }
 
 /// Result of `list_tabs`: the live set of open tabs.
@@ -214,10 +230,25 @@ pub struct StateResult {
     pub active_path: Option<String>,
     pub active_title: Option<String>,
     pub is_dirty: bool,
+    /// `both` | `edit` | `preview` | `wysiwyg`.
     pub view_mode: String,
+    /// The active tab's document kind (`markdown` | `code` | `text`). Added in
+    /// contract 0.7; an older app omits it, which reads as `markdown`.
+    #[serde(default = "default_doc_kind")]
+    pub doc_kind: String,
+    /// The active tab's language (`Markdown`, e.g. `Rust`, or null for plain
+    /// text). Added in contract 0.7; absent from older apps.
+    #[serde(default)]
+    pub language: Option<String>,
     pub theme: String,
+    /// Vim keybindings in effect for the active tab (false on a `wysiwyg` tab).
     pub vim: bool,
+    /// Soft wrap toggle in effect for the active tab (false on a `wysiwyg` tab).
     pub wrap: bool,
+    /// The Explorer sidebar is showing. Added in contract 0.7; an older app
+    /// omits it, which reads as showing.
+    #[serde(default = "default_true")]
+    pub explorer: bool,
     pub open_paths: Vec<String>,
 }
 
@@ -237,7 +268,8 @@ pub struct SetThemeResult {
 /// Params for `view_mode`: a concrete mode or `cycle`.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ViewModeParams {
-    /// `both`, `edit`, `preview`, or `cycle` (advance both→edit→preview).
+    /// `both`, `edit`, `preview`, `wysiwyg`, or `cycle` (advance
+    /// both→edit→preview→wysiwyg).
     pub mode: String,
 }
 
@@ -253,10 +285,43 @@ pub struct SetVimParams {
     pub enabled: bool,
 }
 
-/// Result of `set_vim`: echoes the applied setting.
+/// Result of `set_vim`: the setting in effect (false on a `wysiwyg` tab,
+/// whatever was requested).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct SetVimResult {
     pub enabled: bool,
+}
+
+/// Params for `set_language`: a language name for the ACTIVE tab, or `auto`
+/// to return to detection from the file name and `#!` line.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct SetLanguageParams {
+    /// A language name or alias (`Rust`, `python`, `cpp`, `rs`, `markdown`,
+    /// `text`), or `auto`.
+    pub language: String,
+}
+
+/// Result of `set_language`: what is now in effect for the active tab.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct SetLanguageResult {
+    /// Canonical language name, or null for plain text.
+    pub language: Option<String>,
+    /// `markdown` | `code` | `text`.
+    pub doc_kind: String,
+    /// True when the language is detected rather than set by hand.
+    pub auto: bool,
+}
+
+/// Params for `set_explorer`: show or hide the Explorer sidebar.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct SetExplorerParams {
+    pub visible: bool,
+}
+
+/// Result of `set_explorer`: whether the Explorer is now showing.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct SetExplorerResult {
+    pub visible: bool,
 }
 
 /// Params for `logs`: recent console output from the running app.
@@ -395,19 +460,19 @@ impl Reply {
 // ── JSON-RPC error codes ────────────────────────────────────────────────────
 //
 // Standard codes (-32700 to -32603) follow the spec. Application codes live in
-// APP_ERR_RANGE below. The full registry is frozen in docs/rpc-contract-0.6.md.
+// APP_ERR_RANGE below. The full registry is frozen in docs/rpc-contract-0.7.md.
 
 /// The reserved range for Scrybe application error codes, per the JSON-RPC 2.0
 /// "server error" convention: every `ERR_*` application code MUST fall inside
 /// `-32099..=-32000`, MUST be unique, and — once shipped in a release — MUST
-/// keep its meaning forever (the 0.6 contract fixture,
-/// `docs/rpc-contract-0.6.md`, is the compatibility artifact). Enforced by the
+/// keep its meaning forever (the 0.7 contract fixture,
+/// `docs/rpc-contract-0.7.md`, is the compatibility artifact). Enforced by the
 /// `app_error_codes_unique_and_in_reserved_range` test.
 pub const APP_ERR_RANGE: std::ops::RangeInclusive<i32> = -32099..=-32000;
 
 /// Every application-defined error code, in one place. New codes MUST be added
 /// here (the registry test checks uniqueness + range membership against this
-/// slice) and documented in `docs/rpc-contract-0.6.md`.
+/// slice) and documented in `docs/rpc-contract-0.7.md`.
 pub const APP_ERROR_CODES: &[i32] = &[
     ERR_TAB_NOT_OPEN,
     ERR_DIRTY_QUIT_REFUSED,
