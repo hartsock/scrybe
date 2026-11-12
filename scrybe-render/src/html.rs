@@ -22,14 +22,16 @@ use crate::theme::Theme;
 use crate::RenderOutput;
 
 // Front matter is split before parsing. Metadata flags would also consume
-// Markdown delimiters that belong to the body; all other 0.12 flags stay enabled.
-const MARKDOWN_OPTIONS: Options = Options::ENABLE_TABLES
+// Markdown delimiters that belong to the body. Footnotes are GFM-style, not
+// `ENABLE_OLD_FOOTNOTES`: under the legacy mode a block indented under a
+// footnote definition renders as an indented code block outside it, while
+// scrybe-core's `Ast` nests it inside. All other 0.12 flags stay enabled.
+pub(crate) const MARKDOWN_OPTIONS: Options = Options::ENABLE_TABLES
     .union(Options::ENABLE_FOOTNOTES)
     .union(Options::ENABLE_STRIKETHROUGH)
     .union(Options::ENABLE_TASKLISTS)
     .union(Options::ENABLE_SMART_PUNCTUATION)
     .union(Options::ENABLE_HEADING_ATTRIBUTES)
-    .union(Options::ENABLE_OLD_FOOTNOTES)
     .union(Options::ENABLE_MATH)
     .union(Options::ENABLE_GFM)
     .union(Options::ENABLE_DEFINITION_LIST);
@@ -47,7 +49,8 @@ const SITE_OPTIONS: Options = Options::ENABLE_TABLES
 /// code blocks and automatic heading IDs compatible with the house site.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RenderProfile {
-    /// Desktop compatibility: all existing non-metadata parser extensions.
+    /// Desktop compatibility: all existing non-metadata parser extensions,
+    /// with GFM-style footnotes.
     App,
     /// House site dialect: tables, modern footnotes, strikethrough, task lists,
     /// and smart punctuation. Math and other App-only syntax remain literal.
@@ -199,11 +202,16 @@ mod tests {
     }
 
     #[test]
-    fn test_explicit_options_exclude_only_metadata() {
-        let metadata = Options::ENABLE_YAML_STYLE_METADATA_BLOCKS
-            .union(Options::ENABLE_PLUSES_DELIMITED_METADATA_BLOCKS);
+    fn test_explicit_options_exclude_only_metadata_and_legacy_footnotes() {
+        // OLD_FOOTNOTES includes the modern FOOTNOTES bit; only its legacy
+        // extra bit is excluded.
+        let excluded = Options::ENABLE_YAML_STYLE_METADATA_BLOCKS
+            .union(Options::ENABLE_PLUSES_DELIMITED_METADATA_BLOCKS)
+            .union(Options::ENABLE_OLD_FOOTNOTES.difference(Options::ENABLE_FOOTNOTES));
         // New upstream flags must prompt an explicit rendering-policy decision.
-        assert_eq!(MARKDOWN_OPTIONS, Options::all().difference(metadata));
+        assert_eq!(MARKDOWN_OPTIONS, Options::all().difference(excluded));
+        assert!(MARKDOWN_OPTIONS.contains(Options::ENABLE_FOOTNOTES));
+        assert_eq!(crate::PARSE_OPTIONS, MARKDOWN_OPTIONS);
     }
 
     #[test]
@@ -344,6 +352,32 @@ mod tests {
         assert!(
             !out.body_html.contains("title="),
             "body_html: {}",
+            out.body_html
+        );
+    }
+
+    #[test]
+    fn test_footnote_nested_fence_is_highlighted_inside_the_definition() {
+        let md = "Text[^1]\n\n[^1]: Note\n\n    ```rust\n    fn main() {}\n    ```\n";
+        let out = render_html(&doc(md), Theme::Default);
+        let open = out
+            .body_html
+            .find("<div class=\"footnote-definition\"")
+            .expect("footnote definition div");
+        let close = out.body_html[open..]
+            .find("</div>")
+            .expect("definition closes")
+            + open;
+        let inside = &out.body_html[open..close];
+        assert!(
+            inside.contains(r#"<code class="language-rust">"#),
+            "fenced block inside the footnote: {}",
+            out.body_html
+        );
+        assert!(inside.contains("<span"), "highlighted: {}", out.body_html);
+        assert!(
+            !out.body_html.contains("```"),
+            "no raw fence text: {}",
             out.body_html
         );
     }

@@ -20,6 +20,12 @@ pub use math::{extract_math, MathPlaceholder};
 pub use mermaid::inject_mermaid_wrappers;
 pub use theme::Theme;
 
+/// The pulldown-cmark option set [`RenderProfile::App`] parses with, for
+/// consumers that must find the same blocks the renderer does (scrybe-gdocs).
+/// The renderer parses only the body after `scrybe_core::frontmatter::split`,
+/// so such consumers must split front matter off first too.
+pub const PARSE_OPTIONS: pulldown_cmark::Options = html::MARKDOWN_OPTIONS;
+
 /// The rendered output of a document.
 #[derive(Debug, Clone)]
 pub struct RenderOutput {

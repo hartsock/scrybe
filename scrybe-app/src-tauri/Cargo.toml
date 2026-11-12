@@ -24,6 +24,7 @@ scrybe-mcp-server.workspace = true
 scrybe-tools.workspace = true
 scrybe-vcs.workspace = true
 scrybe-rpc.workspace = true
+scrybe-gdocs.workspace = true
 anyhow.workspace = true
 thiserror.workspace = true
 serde.workspace = true

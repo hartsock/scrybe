@@ -187,7 +187,7 @@ fn with_remote_error_app<T>(f: impl FnOnce() -> T) -> T {
 // ── (a) tools/list — the complete advertised surface ────────────────────────
 
 #[test]
-fn tools_list_serves_24_tools_each_with_schemas_and_annotations() {
+fn tools_list_serves_28_tools_each_with_schemas_and_annotations() {
     let resp = handle(&tools_list_request());
     assert_eq!(resp["jsonrpc"], "2.0");
     assert_eq!(resp["id"], 41);
@@ -205,6 +205,10 @@ fn tools_list_serves_24_tools_each_with_schemas_and_annotations() {
             "export_figures",
             "extract",
             "find",
+            "gdoc_auth",
+            "gdoc_export",
+            "gdoc_import",
+            "gdoc_list",
             "lint",
             "list_tabs",
             "logs",

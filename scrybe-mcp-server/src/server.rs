@@ -334,8 +334,9 @@ mod tests {
         assert!(resp["result"].is_object());
     }
 
-    /// The complete public MCP tool list for contract 0.7, sorted. `tools/list` must
-    /// serve EXACTLY this set — a change here is a deliberate surface change.
+    /// The complete public MCP tool list for contract 0.7 (plus the `gdoc_*`
+    /// Google Docs tools), sorted. `tools/list` must serve EXACTLY this set —
+    /// a change here is a deliberate surface change.
     const TOOL_NAMES_0_6_0: &[&str] = &[
         "close_tab",
         "edit",
@@ -344,6 +345,10 @@ mod tests {
         "export_figures",
         "extract",
         "find",
+        "gdoc_auth",
+        "gdoc_export",
+        "gdoc_import",
+        "gdoc_list",
         "lint",
         "list_tabs",
         "logs",

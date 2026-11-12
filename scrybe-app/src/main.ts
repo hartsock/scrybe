@@ -7,6 +7,7 @@ import "./styles/mcp_panel.css";
 import "./styles/vcs_panel.css";
 import "./styles/pathbar.css";
 import "./styles/print.css";
+import "./styles/gdocs.css";
 import { invoke, convertFileSrc } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { basename, dirname, homeDir, join } from "@tauri-apps/api/path";
@@ -20,6 +21,7 @@ import { renderTabBar } from "./tabs";
 import { createCodeMirrorSurface, knownLanguage, languageNames } from "./codemirror-surface";
 import { LazySurface, WYSIWYG_CAPABILITIES } from "./surfaces";
 import type { Surface, SurfaceChange } from "./surface";
+import { isImagePath, asMarkdown } from "./kinds";
 import { PreviewPane, SAVE_MERMAID_PNG_EVENT } from "./preview";
 import type { MermaidPngExportDetail, MermaidPreviewDocument } from "./mermaid_png";
 import { documentStem, mermaidPngFilename, rasterizeMermaidSvg } from "./mermaid_png";
@@ -30,6 +32,8 @@ import { Sidebar } from "./sidebar";
 import { PluginManager } from "./plugins";
 import { McpPanel } from "./mcp_panel";
 import { VcsPanel } from "./vcs_panel";
+import { exportActiveTabToGdoc, importFromGdoc, closeImportPanel, gdocSignIn, gdocSignOut } from "./gdocs";
+import type { GdocsDeps } from "./gdocs";
 import { findHeadings } from "./sections";
 
 // Keep recent console output in an in-memory ring so the socket `logs`
@@ -275,6 +279,13 @@ async function reloadActiveTabNow(): Promise<void> {
   await reloadTabFromDisk(tab.path);
 }
 
+// Google Docs export/import (gdocs.ts) borrows the active tab and the one
+// open-file path, so an imported .md opens exactly like a sidebar click.
+const gdocs: GdocsDeps = {
+  activeTab: () => state.activeTab(),
+  openFile: openFileByPath,
+};
+
 buildToolbar(toolbarEl, {
   onThemeChange: (theme) => applyTheme(theme),
   onCyclePreview: () => cyclePreviewMode(),
@@ -283,6 +294,7 @@ buildToolbar(toolbarEl, {
   onSave: () => { void saveActiveTabNow(); },
   onReload: () => { void reloadActiveTabNow(); },
   onExport: () => { void exportActiveTabToWord(); },
+  onExportGdoc: () => { void exportActiveTabToGdoc(gdocs); },
   onPrint: () => { void printActiveTab(); },
   onToggleVim: () => toggleVim(),
   onToggleWrap: () => toggleWrap(),
@@ -305,6 +317,9 @@ async function printActiveTab(): Promise<void> {
     showToast("Printing is available for Markdown documents", "info");
     return;
   }
+  // print.css hides the import panel too, but an open one is dismissed so
+  // the page the user sees afterwards matches what printed.
+  closeImportPanel();
   const request = beginPreviewRequest(tab.id, tab.path);
   await preview.render(previewSource(tab, tab.content), request.document);
   // KaTeX/Mermaid post-processing is async; give it a beat before the snapshot.
@@ -693,7 +708,7 @@ function beginPreviewRequest(id: string, path: string | null): {
 /// The Markdown to render for a tab's buffer. A `.mmd` file is bare Mermaid
 /// source, shown as one diagram.
 function previewSource(tab: TabEntry, content: string): string {
-  return tab.path && extOf(tab.path) === "mmd" ? "```mermaid\n" + content + "\n```" : content;
+  return asMarkdown(tab.path, content);
 }
 
 async function renderPreview(content: string): Promise<void> {
@@ -881,16 +896,10 @@ function closeTab(id: string): void {
   doCloseTab(id);
 }
 
-function extOf(path: string): string {
-  return path.split(".").pop()?.toLowerCase() ?? "";
-}
-
 async function openFileByPath(path: string): Promise<void> {
   try {
-    const ext = extOf(path);
-
-    // PNG — binary file, render as image directly
-    if (ext === "png" || ext === "jpg" || ext === "jpeg" || ext === "gif" || ext === "webp") {
+    // Raster image — binary file, render as image directly
+    if (isImagePath(path)) {
       // An image tab has an empty buffer; addTab re-activates one already open.
       stashEditor();
       state.addTab(path, "");
@@ -1045,6 +1054,10 @@ listen<string>("scrybe://menu", event => {
     case "save":        void saveActiveTabNow(); break;
     case "reload":      void reloadActiveTabNow(); break;
     case "export_docx": void exportActiveTabToWord(); break;
+    case "export_gdoc": void exportActiveTabToGdoc(gdocs); break;
+    case "import_gdoc": void importFromGdoc(gdocs); break;
+    case "gdoc_sign_in": void gdocSignIn(); break;
+    case "gdoc_sign_out": void gdocSignOut(); break;
     case "export_figures": void exportActiveTabFigures(); break;
     case "print":       void printActiveTab(); break;
     case "close_tab":
