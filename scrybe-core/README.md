@@ -29,6 +29,7 @@ depend on `scrybe-core` and never on each other for core types.
 | `ContentAddressable` | Trait: `fn content_digest(&self) -> ContentDigest` (deprecated `content_id` wrapper retained) |
 | `Ast` / `Node` | Markdown AST types produced by the parser |
 | `DocumentChange` / `DocumentHistory` / `TextRange` | Fine-grained change tracking |
+| `table::Table` / `table::Dialect` | Lossless CSV/TSV codec: every cell's byte span, plus cell and row edits planned as single `DocumentChange` splices |
 | `Plugin` | Trait for Python and native extension plugins |
 | `Workspace` | Collection of open documents keyed by `DocumentId` |
 | `ScrybeError` | Unified error type for the workspace |
