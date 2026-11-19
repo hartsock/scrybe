@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Shawn Hartsock and contributors
 
-//! Render a `scrybe-core` Markdown document as styled `ratatui` text.
+//! Render a `scrybe-core` Markdown document, or a CSV/TSV table, as styled
+//! `ratatui` text.
 //!
 //! Another lens onto the same AST as the Scrybe desktop app, CLI, and MCP
 //! server — extracted from `scrybe-tui` (#194) so any ratatui application can
@@ -14,6 +15,10 @@
 //! - [`MarkdownView`] — a `StatefulWidget` for one half of a split, a popup,
 //!   a sidebar; [`MarkdownViewState`] holds the scroll position and adapts to
 //!   the viewport at render time.
+//! - [`GridView`] — a `StatefulWidget` for a read-only CSV/TSV
+//!   [`scrybe_core::table::Table`]: pinned header row, row-number gutter,
+//!   vertical and horizontal scrolling; [`GridViewState`] holds the scroll
+//!   position.
 //!
 //! ```no_run
 //! # use ratatui::{Frame, layout::Rect, widgets::{Block, Borders}};
@@ -43,8 +48,10 @@
 //! **ratatui compatibility:** `MarkdownView: StatefulWidget` ties this crate to
 //! a ratatui major line (currently 0.29); a ratatui bump is a semver event.
 
+pub mod grid;
 pub mod render;
 pub mod view;
 
+pub use grid::{GridView, GridViewState};
 pub use render::{render, render_source};
 pub use view::{MarkdownView, MarkdownViewState};

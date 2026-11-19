@@ -80,6 +80,16 @@ tmux -L "$SOCK" send-keys -t view G; sleep 1
 tmux -L "$SOCK" capture-pane -t view -p | grep -q "THE-END-OF-PROBE" ; check "view: inherits wrap-aware G" $?
 tmux -L "$SOCK" send-keys -t view q; sleep 1
 
+# ── 4. scrybe view on a CSV: grid, not Markdown (#273) ───────────────────────
+printf 'fruit,qty\napplepie,3\n' > "$WORK/t.csv"
+tmux -L "$SOCK" new-session -d -s csv -x 100 -y 14 "$CLI view '$WORK/t.csv'"
+ok=1; for _ in $(seq 1 40); do
+  tmux -L "$SOCK" capture-pane -t csv -p 2>/dev/null | grep -qE "2 +applepie +3" && { ok=0; break; }; sleep 0.5
+done
+check "csv: view renders a grid with gutter" $ok
+tmux -L "$SOCK" capture-pane -t csv -p | grep -qE "1 +fruit +qty" ; check "csv: header row shown" $?
+tmux -L "$SOCK" send-keys -t csv q; sleep 1
+
 echo "──────────────────────────────"
 echo "UAT tui-drive: $PASS passed, $FAIL failed"
 [ "$FAIL" = 0 ]

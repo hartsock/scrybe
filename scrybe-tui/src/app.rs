@@ -26,8 +26,20 @@ use crate::render;
 use crate::render::LinkSpan;
 use crate::view::{MarkdownView, MarkdownViewState};
 use scrybe_core::ast::Ast;
+use scrybe_core::table::{Dialect, Table};
+use scrybe_ratatui::{GridView, GridViewState};
+
+/// A CSV/TSV body: the parsed table plus its scroll state.
+struct Grid {
+    dialect: Dialect,
+    table: Table,
+    state: GridViewState,
+}
 
 /// One document pane in the viewer.
+///
+/// A pane is Markdown (`text` / `links` / `state`) unless `grid` is set, in
+/// which case it is a CSV/TSV table and the Markdown fields stay empty.
 struct Pane {
     title: String,
     /// Backing file, if this pane was loaded from disk (enables live reload).
@@ -37,6 +49,8 @@ struct Pane {
     /// Hyperlink locations in `text`, for click-to-open (#244).
     links: Vec<LinkSpan>,
     state: MarkdownViewState,
+    /// Set for a `.csv` / `.tsv` pane.
+    grid: Option<Grid>,
 }
 
 impl Pane {
@@ -50,13 +64,30 @@ impl Pane {
             text,
             links,
             state,
+            grid: None,
         }
+    }
+
+    fn from_table(source: &str, dialect: Dialect, title: impl Into<String>) -> Self {
+        let table = Table::parse(source, dialect);
+        let state = GridViewState::new(&table);
+        let mut pane = Self::from_source("", title);
+        pane.grid = Some(Grid {
+            dialect,
+            table,
+            state,
+        });
+        pane
     }
 
     fn from_file(path: PathBuf) -> Result<Self> {
         let source =
             fs::read_to_string(&path).with_context(|| format!("reading {}", path.display()))?;
-        let mut pane = Self::from_source(&source, path.display().to_string());
+        let title = path.display().to_string();
+        let mut pane = match Dialect::from_path(&path) {
+            Some(dialect) => Self::from_table(&source, dialect, title),
+            None => Self::from_source(&source, title),
+        };
         pane.mtime = file_mtime(&path);
         pane.path = Some(path);
         Ok(pane)
@@ -64,6 +95,11 @@ impl Pane {
 
     /// Re-render from `source`, preserving the scroll position where possible.
     fn set_source(&mut self, source: &str) {
+        if let Some(grid) = &mut self.grid {
+            grid.table = Table::parse(source, grid.dialect);
+            grid.state.sync(&grid.table);
+            return;
+        }
         let (text, links) = render::render_with_links(&Ast::parse(source));
         self.text = text;
         self.links = links;
@@ -87,6 +123,65 @@ impl Pane {
                 true
             }
             Err(_) => false,
+        }
+    }
+}
+
+/// Forward a scroll call to whichever state the pane's body uses.
+macro_rules! on_state {
+    ($pane:expr, $s:ident => $call:expr) => {
+        match &mut $pane.grid {
+            Some(g) => {
+                let $s = &mut g.state;
+                $call
+            }
+            None => {
+                let $s = &mut $pane.state;
+                $call
+            }
+        }
+    };
+}
+
+impl Pane {
+    fn scroll_by(&mut self, delta: i32) {
+        on_state!(self, s => s.scroll_by(delta));
+    }
+
+    /// Column scrolling only exists on a grid; no-op on Markdown.
+    fn scroll_cols_by(&mut self, delta: i32) {
+        if let Some(g) = &mut self.grid {
+            g.state.scroll_cols_by(delta);
+        }
+    }
+
+    fn half_page(&mut self, down: bool) {
+        on_state!(self, s => s.half_page(down));
+    }
+
+    fn page(&mut self, down: bool) {
+        on_state!(self, s => s.page(down));
+    }
+
+    fn scroll_to_top(&mut self) {
+        on_state!(self, s => s.scroll_to_top());
+    }
+
+    fn scroll_to_bottom(&mut self) {
+        on_state!(self, s => s.scroll_to_bottom());
+    }
+
+    fn fits(&self) -> bool {
+        match &self.grid {
+            Some(g) => g.state.fits(),
+            None => self.state.fits(),
+        }
+    }
+
+    fn percent(&self) -> u16 {
+        match &self.grid {
+            Some(g) => g.state.percent(),
+            None => self.state.percent(),
         }
     }
 }
@@ -189,10 +284,6 @@ impl App {
         }
     }
 
-    fn focused(&mut self) -> &mut MarkdownViewState {
-        &mut self.panes[self.focus].state
-    }
-
     fn on_key(&mut self, key: KeyEvent) {
         let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
         let n = self.panes.len();
@@ -207,14 +298,16 @@ impl App {
                     Direction::Vertical => Direction::Horizontal,
                 }
             }
-            KeyCode::Char('j') | KeyCode::Down => self.focused().scroll_by(1),
-            KeyCode::Char('k') | KeyCode::Up => self.focused().scroll_by(-1),
-            KeyCode::Char('d') if ctrl => self.focused().half_page(true),
-            KeyCode::Char('u') if ctrl => self.focused().half_page(false),
-            KeyCode::PageDown | KeyCode::Char(' ') => self.focused().page(true),
-            KeyCode::PageUp => self.focused().page(false),
-            KeyCode::Char('g') | KeyCode::Home => self.focused().scroll_to_top(),
-            KeyCode::Char('G') | KeyCode::End => self.focused().scroll_to_bottom(),
+            KeyCode::Char('j') | KeyCode::Down => self.panes[self.focus].scroll_by(1),
+            KeyCode::Char('k') | KeyCode::Up => self.panes[self.focus].scroll_by(-1),
+            KeyCode::Char('h') | KeyCode::Left => self.panes[self.focus].scroll_cols_by(-1),
+            KeyCode::Char('l') | KeyCode::Right => self.panes[self.focus].scroll_cols_by(1),
+            KeyCode::Char('d') if ctrl => self.panes[self.focus].half_page(true),
+            KeyCode::Char('u') if ctrl => self.panes[self.focus].half_page(false),
+            KeyCode::PageDown | KeyCode::Char(' ') => self.panes[self.focus].page(true),
+            KeyCode::PageUp => self.panes[self.focus].page(false),
+            KeyCode::Char('g') | KeyCode::Home => self.panes[self.focus].scroll_to_top(),
+            KeyCode::Char('G') | KeyCode::End => self.panes[self.focus].scroll_to_bottom(),
             _ => {}
         }
     }
@@ -256,6 +349,9 @@ impl App {
             .pane_areas
             .iter()
             .position(|a| rect_contains(*a, col, row))?;
+        if self.panes[pane_idx].grid.is_some() {
+            return None;
+        }
         let area = self.pane_areas[pane_idx];
 
         let is_link_style = |x: u16, y: u16| -> bool {
@@ -312,20 +408,29 @@ impl App {
             // Content area post-border, for mapping a click to this pane
             // (#244) — computed before `block` moves into `.block(block)`.
             self.pane_areas[i] = block.inner(areas[i]);
-            let view = MarkdownView::new(&pane.text).block(block);
-            f.render_stateful_widget(view, areas[i], &mut pane.state);
+            match &mut pane.grid {
+                Some(g) => {
+                    let view = GridView::new(&g.table).block(block);
+                    f.render_stateful_widget(view, areas[i], &mut g.state);
+                }
+                None => {
+                    let view = MarkdownView::new(&pane.text).block(block);
+                    f.render_stateful_widget(view, areas[i], &mut pane.state);
+                }
+            }
         }
 
         let fp = &self.panes[focus];
-        let progress = if fp.state.fits() {
+        let progress = if fp.fits() {
             " All ".to_string()
         } else {
-            format!(" {}% ", fp.state.percent())
+            format!(" {}% ", fp.percent())
         };
+        let cols = if fp.grid.is_some() { "h/l  " } else { "" };
         let hint = if n > 1 {
-            " j/k  ^d/^u  g/G  Tab:pane  o:split  q:quit "
+            format!(" j/k  {cols}^d/^u  g/G  Tab:pane  o:split  q:quit ")
         } else {
-            " j/k ↑↓  ^d/^u  space  g/G  q:quit "
+            format!(" j/k ↑↓  {cols}^d/^u  space  g/G  q:quit ")
         };
         let footer = Line::from(vec![
             Span::styled(hint, Style::default().fg(Color::DarkGray)),
@@ -498,5 +603,107 @@ mod tests {
         assert!(pane.text.lines.len() > before, "content should have grown");
 
         let _ = fs::remove_file(&path);
+    }
+
+    // -----------------------------------------------------------------------
+    // CSV / TSV grid panes (#273)
+    // -----------------------------------------------------------------------
+
+    fn key(app: &mut App, c: KeyCode) {
+        app.on_key(KeyEvent::new(c, KeyModifiers::NONE));
+    }
+
+    fn screen(app: &mut App, width: u16, height: u16) -> String {
+        drawn(app, width, height);
+        let buf = app.last_buffer.as_ref().unwrap();
+        (0..height)
+            .map(|y| {
+                (0..width)
+                    .map(|x| buf[(x, y)].symbol().to_string())
+                    .collect::<String>()
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    fn temp(name: &str, body: &str) -> PathBuf {
+        let path = std::env::temp_dir().join(format!("scrybe-tui-{}-{name}", std::process::id()));
+        fs::write(&path, body).unwrap();
+        path
+    }
+
+    #[test]
+    fn extension_picks_grid_or_markdown_case_insensitively() {
+        for (name, grid) in [("g1.csv", true), ("g2.TSV", true), ("g3.md", false)] {
+            let path = temp(name, "a,b\n1,2\n");
+            let pane = Pane::from_file(path.clone()).unwrap();
+            assert_eq!(pane.grid.is_some(), grid, "{name}");
+            let _ = fs::remove_file(&path);
+        }
+    }
+
+    #[test]
+    fn csv_pane_draws_as_a_grid() {
+        let path = temp("draw.csv", "name,qty\napple,3\n");
+        let mut app = App::from_files(vec![path.clone()]).unwrap();
+        let out = screen(&mut app, 40, 8);
+        assert!(out.contains("name") && out.contains("apple"), "{out}");
+        assert!(out.contains("h/l"), "{out}");
+        let _ = fs::remove_file(&path);
+    }
+
+    #[test]
+    fn h_l_move_columns_on_grid_and_noop_on_markdown() {
+        let path = temp("cols.csv", "alpha,bravo,charlie\n1,2,3\n");
+        let mut app = App::from_files(vec![path.clone()]).unwrap();
+        // Narrow enough that columns do not all fit.
+        screen(&mut app, 16, 6);
+        key(&mut app, KeyCode::Char('l'));
+        let out = screen(&mut app, 16, 6);
+        assert!(!out.contains("alpha"), "leading column scrolled off: {out}");
+        key(&mut app, KeyCode::Char('h'));
+        let out = screen(&mut app, 16, 6);
+        assert!(out.contains("alpha"), "{out}");
+        let _ = fs::remove_file(&path);
+
+        let mut md = App::from_source("# T\n\nbody\n", "t.md");
+        let before = md.panes[0].state.scroll();
+        key(&mut md, KeyCode::Char('l'));
+        key(&mut md, KeyCode::Char('h'));
+        assert_eq!(md.panes[0].state.scroll(), before);
+        assert!(md.panes[0].grid.is_none());
+    }
+
+    #[test]
+    fn csv_reload_reparses_and_keeps_scroll() {
+        let rows: String = (0..60).map(|i| format!("r{i},x\n")).collect();
+        let path = temp("reload.csv", &rows);
+        let mut app = App::from_files(vec![path.clone()]).unwrap();
+        screen(&mut app, 30, 10);
+        key(&mut app, KeyCode::Char('j'));
+        key(&mut app, KeyCode::Char('j'));
+        let scrolled = app.panes[0].percent();
+        assert!(scrolled > 0);
+
+        fs::write(&path, format!("{rows}extra,row\n")).unwrap();
+        app.panes[0].mtime = None;
+        assert!(app.panes[0].reload_if_changed());
+        let out = screen(&mut app, 30, 10);
+        assert!(app.panes[0].percent() > 0, "scroll kept: {out}");
+        key(&mut app, KeyCode::Char('G'));
+        let out = screen(&mut app, 30, 10);
+        assert!(out.contains("extra"), "re-parsed: {out}");
+        let _ = fs::remove_file(&path);
+    }
+
+    #[test]
+    fn split_of_markdown_and_csv_draws_both() {
+        let md = temp("split.md", "# Heading\n\nbody\n");
+        let csv = temp("split.csv", "name,qty\napple,3\n");
+        let mut app = App::from_files(vec![md.clone(), csv.clone()]).unwrap();
+        let out = screen(&mut app, 80, 8);
+        assert!(out.contains("Heading") && out.contains("apple"), "{out}");
+        let _ = fs::remove_file(&md);
+        let _ = fs::remove_file(&csv);
     }
 }

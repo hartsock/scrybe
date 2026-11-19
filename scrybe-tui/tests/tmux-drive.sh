@@ -102,6 +102,25 @@ printf '# Live\n\nbeforeedit\n\n## AFTEREDIT\n' >"$TMP/live.md"
 check "reload: after external edit" "$PANE" 'AFTEREDIT'
 tm send-keys -t "$PANE" q
 
+# ── 4. CSV / TSV open as a grid (#273) ───────────────────────────────────────
+printf 'fruit,qty\napplepie,3\n' >"$TMP/t.csv"
+launch "t.csv"
+check "csv: header shown in the grid" "$PANE" '1 +fruit +qty'
+check "csv: row shown with gutter" "$PANE" '2 +applepie +3'
+tm send-keys -t "$PANE" q
+
+printf 'fruit\tqty\npeartart\t4\n' >"$TMP/t.tsv"
+launch "t.tsv"
+check "tsv: row shown as a grid" "$PANE" '2 +peartart +4'
+tm send-keys -t "$PANE" q
+
+printf 'a,b\nbeforecsv,1\n' >"$TMP/live.csv"
+launch "live.csv"
+check "csv reload: initial content" "$PANE" '2 +beforecsv +1'
+printf 'a,b\nbeforecsv,1\nAFTERCSV,2\n' >"$TMP/live.csv"
+check "csv reload: after external edit" "$PANE" '3 +AFTERCSV +2'
+tm send-keys -t "$PANE" q
+
 if [ "$fails" -eq 0 ]; then
   echo "== ALL PASS =="
 else

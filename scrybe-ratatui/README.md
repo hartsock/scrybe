@@ -1,7 +1,7 @@
 # scrybe-ratatui
 
 Render a [`scrybe-core`](https://crates.io/crates/scrybe-core) Markdown
-document as styled [`ratatui`](https://ratatui.rs) text — an embeddable
+document (or a CSV/TSV table) as styled [`ratatui`](https://ratatui.rs) text — an embeddable
 Markdown view for any ratatui app, extracted from Scrybe's terminal viewer.
 
 Dependencies: `scrybe-core` + `ratatui`. No crossterm, no file IO, no event
@@ -38,9 +38,14 @@ fn draw(f: &mut Frame, area: Rect, state: &mut MarkdownViewState) {
 `render_source(&str)` parses and renders in one call. `MarkdownViewState`
 holds the scroll offset and adapts to the viewport at render time.
 
+`GridView` + `GridViewState` do the same for a read-only CSV/TSV
+`scrybe_core::table::Table`: a pinned bold header row, a dim row-number
+gutter, and vertical and horizontal scrolling. Wide cells are clamped with
+`…`; control characters in a cell are shown as visible glyphs.
+
 ## Compatibility
 
-`MarkdownView` implements ratatui's `StatefulWidget`, which ties each release
+`MarkdownView` and `GridView` implement ratatui's `StatefulWidget`, which ties each release
 of this crate to a ratatui major line (currently **0.29**); a ratatui bump is
 a semver event here.
 
