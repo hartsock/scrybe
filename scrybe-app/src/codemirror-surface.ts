@@ -35,6 +35,7 @@ export function knownLanguage(name: string): (DocInfo & { name: string }) | null
 interface SavedSession {
   state: EditorState;
   scroll: StateEffect<unknown>;
+  crPending: boolean;
 }
 
 /// CodeMirror-backed [`Surface`]. Compartments and the language-request
@@ -68,8 +69,12 @@ export class CodeMirrorSurface implements Surface {
   private themeName = "default";
   private vimOn = false;
   private wrapOn = false;
+  /// The text it was given holds a CR and nothing has been typed yet:
+  /// CodeMirror stores line breaks as LF, so the first edit rewrites them all.
+  private crPending: boolean;
 
   constructor(parent: HTMLElement, initialContent: string, onChange: (change: SurfaceChange) => void) {
+    this.crPending = initialContent.includes("\r");
     this.view = new EditorView({
       state: EditorState.create({
         doc: initialContent,
@@ -83,6 +88,7 @@ export class CodeMirrorSurface implements Surface {
           this.wrap.of([]),
           EditorView.updateListener.of(update => {
             if (update.docChanged && !isProgrammaticUpdate(update)) {
+              this.crPending = false;
               onChange({ content: update.state.doc.toString() });
             }
           }),
@@ -97,10 +103,12 @@ export class CodeMirrorSurface implements Surface {
   }
 
   setContent(text: string): void {
+    this.crPending = text.includes("\r");
     this.view.dispatch(swapDocumentSpec(this.view.state.doc.length, text));
   }
 
   replaceContent(text: string): void {
+    this.crPending = text.includes("\r");
     this.view.dispatch(replaceDocumentSpec(this.view.state.doc.length, text));
   }
 
@@ -154,12 +162,13 @@ export class CodeMirrorSurface implements Surface {
   }
 
   saveState(): unknown {
-    const saved: SavedSession = { state: this.view.state, scroll: this.view.scrollSnapshot() };
+    const saved: SavedSession = { state: this.view.state, scroll: this.view.scrollSnapshot(), crPending: this.crPending };
     return saved;
   }
 
   restoreState(saved: unknown): void {
-    const { state, scroll } = saved as SavedSession;
+    const { state, scroll, crPending } = saved as SavedSession;
+    this.crPending = crPending;
     // A language still loading for the previous document must not land here.
     this.languageGen++;
     this.view.setState(state);
@@ -171,6 +180,10 @@ export class CodeMirrorSurface implements Surface {
         scroll,
       ],
     });
+  }
+
+  reformatPending(): boolean {
+    return this.crPending;
   }
 
   focus(): void {

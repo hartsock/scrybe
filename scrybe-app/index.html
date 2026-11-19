@@ -40,6 +40,10 @@
       #editor-and-preview.mode-wysiwyg #editor,
       #editor-and-preview.mode-wysiwyg #preview { display: none; }
       #editor-and-preview.mode-wysiwyg #editor-wysiwyg { display: block; }
+      /* A table tab's wysiwyg mode is its grid, not the Markdown editor. */
+      #editor-grid { flex: 1; min-width: 0; overflow: hidden; display: none; }
+      #editor-and-preview.mode-wysiwyg.is-grid #editor-wysiwyg { display: none; }
+      #editor-and-preview.mode-wysiwyg.is-grid #editor-grid { display: flex; }
       /* No open tabs: an empty screen instead of an editor with nothing behind it. */
       #empty-state { flex: 1; display: none; flex-direction: column; align-items: center; justify-content: center; gap: 14px; background: #1e1e1e; color: #888; font-size: 14px; }
       #empty-state div { display: flex; gap: 10px; }
@@ -95,6 +99,7 @@
           <div id="editor-and-preview">
             <div id="editor"></div>
             <div id="editor-wysiwyg"></div>
+            <div id="editor-grid"></div>
             <div id="preview"></div>
           </div>
           <div id="empty-state">

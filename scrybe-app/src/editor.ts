@@ -15,6 +15,9 @@ import type { DocKind, LanguageHint } from "./kinds";
 /// open site — so it stays a preview-capable tab rather than edit-only code.
 const MARKDOWN_EXTS = new Set(["md", "markdown", "mdown", "mkd", "mkdn", "mdx", "mmd"]);
 
+/// Table extensions and the language name each one shows. Not in the picker.
+const TABLE_LANGUAGES: Record<string, string> = { csv: "CSV", tsv: "TSV" };
+
 function fileName(path: string): string {
   return path.split("/").pop() ?? path;
 }
@@ -94,8 +97,8 @@ export function languageNames(): string[] {
 }
 
 /// Classify a document into a [`DocKind`]. A hand-picked language wins.
-/// Otherwise Markdown extensions (and untitled buffers) are the native
-/// surface; a file name recognized by CodeMirror's language-data is `code`,
+/// Otherwise `.csv`/`.tsv` are tables, Markdown extensions (and untitled
+/// buffers) are the native surface; a file name recognized by CodeMirror's language-data is `code`,
 /// as is an unrecognized name whose first line is a known `#!` interpreter;
 /// anything else is plain `text`.
 export function classifyFile(path: string | null, hint: LanguageHint = {}): Classified {
@@ -104,6 +107,8 @@ export function classifyFile(path: string | null, hint: LanguageHint = {}): Clas
     if (chosen) return chosen;
   }
   if (!path) return AS_MARKDOWN;
+  const table = TABLE_LANGUAGES[extOf(path)];
+  if (table) return { kind: "table", lang: null, language: table };
   if (MARKDOWN_EXTS.has(extOf(path))) return AS_MARKDOWN;
   const lang = LanguageDescription.matchFilename(languages, fileName(path))
     ?? (hint.firstLine ? shebangLanguage(hint.firstLine) : null);

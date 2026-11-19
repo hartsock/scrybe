@@ -92,13 +92,15 @@ export function buildToolbar(container: HTMLElement, handlers: ToolbarHandlers):
     .addEventListener("click", () => invoke("toggle_devtools").catch(console.error));
 }
 
+/// A table tab's `wysiwyg` mode is its grid.
+const TABLE_GLYPH = "▦";
 const MODE_GLYPH: Record<string, string> = { both: "◧◨", edit: "◧", preview: "◨", wysiwyg: "✎" };
 
 /// Reflect the active tab's view mode on the toolbar's View button so the
 /// label matches what the per-tab mode icon shows.
-export function setToolbarViewMode(container: HTMLElement, mode: string): void {
+export function setToolbarViewMode(container: HTMLElement, mode: string, kind?: string): void {
   const b = container.querySelector<HTMLButtonElement>("#toggle-preview");
-  if (b) b.textContent = `View: ${MODE_GLYPH[mode] ?? "◧◨"}`;
+  if (b) b.textContent = `View: ${kind === "table" && mode === "wysiwyg" ? TABLE_GLYPH : MODE_GLYPH[mode] ?? "◧◨"}`;
 }
 
 /// Reflect the current theme selection on the toolbar dropdown.
@@ -151,6 +153,6 @@ export function setToolbarSurfaceControls(container: HTMLElement, supported: { v
     b.style.cursor = ok ? "pointer" : "not-allowed";
     b.title = ok ? on : off;
   };
-  set("#toggle-vim", supported.vim, "Toggle Vim keybindings", "Vim keybindings are not available in WYSIWYG view");
-  set("#toggle-wrap", supported.wrap, "Toggle soft word wrap", "Word wrap is always on in WYSIWYG view");
+  set("#toggle-vim", supported.vim, "Toggle Vim keybindings", "Vim keybindings are not available in this view");
+  set("#toggle-wrap", supported.wrap, "Toggle soft word wrap", "Word wrap is not available in this view");
 }
