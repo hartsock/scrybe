@@ -21,7 +21,7 @@ pub(crate) fn spec() -> ToolSpec {
         name: "list_tabs",
         description: "List the tabs currently open in the running Scrybe editor — \
             each with its path, title, dirty flag, view mode, document kind \
-            (`markdown`, `code` or `text`), language (e.g. `Rust`; null for \
+            (`markdown`, `code`, `text` or `table`), language (e.g. `Rust`; null for \
             plain text), and whether it is the \
             active tab. Requires a live app; with none running it reports \
             `no_live_app`. Read the `data.tabs` array.",
@@ -54,7 +54,7 @@ fn data_schema() -> Value {
                         "title": { "type": "string" },
                         "is_dirty": { "type": "boolean" },
                         "view_mode": { "type": "string" },
-                        "doc_kind": { "type": "string", "enum": ["markdown", "code", "text"] },
+                        "doc_kind": { "type": "string", "enum": ["markdown", "code", "text", "table"] },
                         "language": { "type": ["string", "null"] },
                         "active": { "type": "boolean" }
                     },

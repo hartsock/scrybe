@@ -43,6 +43,10 @@ addressed by canonical `path`.
 | `set_vim` | Toggle Vim keybindings (human: Vim toggle); no effect on a `wysiwyg` tab | `enabled` |
 | `set_explorer` | Show or hide the Explorer sidebar (human: toolbar ☰, header «, View ▸ Show Explorer ⇧⌘E) | `visible` |
 | `set_language` | Set the active tab's language by name or alias (`Rust`, `py`, `cpp`, `markdown`, `text`), or `auto` to detect again (human: language chip in the path bar) | `language` |
+| `table_get` | Read rows of a `.csv`/`.tsv` file (1-based, paged: 1000 rows by default; re-call with `start_row` while `end_row < row_count`). Reads the live buffer when the file is open in the app, else the file | `path`, `start_row?`, `end_row?` |
+| `table_set_cell` | Set one cell of a `.csv`/`.tsv` file (1-based `row`/`col`; value written literally; minimal-diff) | `path`, `row`, `col`, `value` |
+| `table_insert_row` | Insert a row so it becomes row `row` (1..=row_count+1) | `path`, `row`, `cells?` |
+| `table_delete_row` | Delete row `row`; returns the deleted cells | `path`, `row` |
 | `export` | Export Markdown to Word (.docx) with Mermaid PNGs | `path`, `output?`, `no_diagrams?` |
 | `export_figures` | Export every Mermaid diagram in a document to sibling `<stem>_fig_NN.png` files (each embeds its source) | `path` |
 
@@ -62,6 +66,9 @@ addressed by canonical `path`.
 
 > `embed`, `extract`, `export`, `mermaid_to_png`, `export_figures`, `render`,
 > and `lint` are **in-process** — they work headless, no running app needed.
+> The `table_*` tools work headless on the file on disk (written immediately)
+> and on the live buffer when the file is open in the app (left dirty until
+> `save`); they never launch the app.
 > The stateful editor/UI tools report `no_live_app` when no app is running.
 
 ### Reading MCP results (0.6.0 — BREAKING for older agents)
@@ -78,7 +85,7 @@ Since 0.6.0 (workstream A4) the MCP boundary is honest per the MCP spec:
   the content text is the human-readable message.
 - **Unknown tool / malformed `tools/call` params**: a top-level JSON-RPC
   `-32602` protocol error, not a tool result.
-- The full frozen surface lives in `docs/mcp-contract-0.7.json`.
+- The full frozen surface lives in `docs/mcp-contract-0.8.json`.
 
 **Breaking change:** before 0.6.0 a business failure was returned as a
 *success* (`isError: false`) with `tool_error` tucked inside the `data`
@@ -130,6 +137,17 @@ to discard. Autosave only writes a `<path>.scrybe-buffer` crash-recovery
 sidecar, never the real file. The human's Cmd+S / 💾 and the agent's `save`
 are the same explicit act. Headless (no running app), the editor tools
 return a `no_live_app` tool_error — manage disk writes yourself.
+
+### Editing tables
+
+`.csv` / `.tsv` files are edited with the `table_*` tools (CLI: `scrybe table
+get|set-cell|insert-row|delete-row`), not `edit`: row and column numbers are
+1-based, values are written literally (no trimming, no formula sanitizing),
+and only the touched cell or row changes, so quoting, line endings and BOM
+elsewhere are preserved. If the file is open in the app the change lands in
+the buffer (`is_dirty: true`, `target: "buffer"`) and needs `save`; otherwise
+it is written to disk at once (`target: "file"`). `table_get` pages 1000 rows
+at a time: re-call with `start_row` while `end_row < row_count`.
 
 ## Swarm Participation (scrybe-swarm)
 

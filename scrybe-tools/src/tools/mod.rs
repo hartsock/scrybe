@@ -13,6 +13,7 @@ pub mod export;
 pub mod lint;
 pub mod mermaid;
 pub mod render;
+pub mod table;
 pub mod tabs;
 pub mod ui;
 
@@ -30,6 +31,9 @@ pub(crate) fn register_defaults(reg: &mut Registry) {
         reg.register(spec);
     }
     for spec in ui::specs() {
+        reg.register(spec);
+    }
+    for spec in table::specs() {
         reg.register(spec);
     }
 }

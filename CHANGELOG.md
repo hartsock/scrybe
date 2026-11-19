@@ -20,6 +20,18 @@ lock-step version (`[workspace.package] version`).
   the file are kept. Nothing user-facing yet; the grid views and tools of #271
   build on it.
 
+- **Table tools** (#271, #276): `table_get`, `table_set_cell`,
+  `table_insert_row` and `table_delete_row` read and edit `.csv` / `.tsv` files
+  by 1-based row and column, with CLI twins `scrybe table get | set-cell |
+  insert-row | delete-row`. When the file is open in the app the edit lands in
+  its buffer (dirty until `save`); otherwise the file is written with a
+  minimal diff. A new test checks every tool has a CLI twin or is on a
+  shrinking known-missing list (#125).
+- **Contract 0.8**: the four table tools join the MCP surface (28 tools);
+  `doc_kind` may be `table` in `state`, `set_language` and `list_tabs`. No
+  socket change. The artifacts are now `docs/mcp-contract-0.8.json` and
+  `docs/rpc-contract-0.8.md`.
+
 ## [0.7.0] — 2026-11-10
 
 ### Added
