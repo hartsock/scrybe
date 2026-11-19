@@ -19,6 +19,11 @@ lock-step version (`[workspace.package] version`).
   other byte untouched, so the quoting, line endings and BOM of the rest of
   the file are kept. Nothing user-facing yet; the grid views and tools of #271
   build on it.
+- **CSV/TSV grid view in the terminal** (#271, #273): `scrybe view` and
+  `scrybe-tui` open `.csv` and `.tsv` files as a read-only scrollable grid, with
+  a pinned header row, a row-number gutter and `h`/`l` column scrolling,
+  instead of parsing them as Markdown. `scrybe-tui` reloads the grid live when
+  the file changes. The widget is `scrybe_ratatui::GridView`.
 
 ## [0.7.0] — 2026-11-10
 

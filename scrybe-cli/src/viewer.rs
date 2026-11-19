@@ -10,6 +10,11 @@
 //! `scrybe-cli` must not depend on the unpublished `scrybe-tui` crate (#194).
 //! Groundwork for exposing the same viewer loop to other hosts (#165).
 //!
+//! `.csv` / `.tsv` files (chosen by extension, [`Dialect::from_path`]) open as
+//! a read-only scrollable grid instead, with `h`/`l` (or the arrow keys)
+//! scrolling columns; that path is private and leaves the public items below
+//! unchanged.
+//!
 //! Key handling is factored into pure functions ([`key_action`] /
 //! [`apply_action`]) so the mapping is unit-testable without a terminal.
 
@@ -25,7 +30,8 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, Borders, Paragraph};
 use ratatui::{Frame, Terminal};
-use scrybe_ratatui::{render_source, MarkdownView, MarkdownViewState};
+use scrybe_core::table::{Dialect, Table};
+use scrybe_ratatui::{render_source, GridView, GridViewState, MarkdownView, MarkdownViewState};
 use std::io::{stdin, stdout, IsTerminal};
 use std::path::Path;
 
@@ -90,8 +96,8 @@ fn check_tty(stdin_tty: bool, stdout_tty: bool) -> Result<(), &'static str> {
     }
 }
 
-/// Run `scrybe view <FILE>`: render the file and drive the viewer loop until
-/// the user quits.
+/// Run `scrybe view <FILE>`: render the file (Markdown, or a grid for
+/// `.csv` / `.tsv`) and drive the viewer loop until the user quits.
 ///
 /// A missing or unreadable file is an ordinary CLI error; running without an
 /// interactive terminal prints a friendly message and exits 2.
@@ -101,6 +107,10 @@ pub fn run(path: &Path) -> Result<()> {
     if let Err(msg) = check_tty(stdin().is_terminal(), stdout().is_terminal()) {
         eprintln!("{msg}");
         std::process::exit(2);
+    }
+
+    if let Some(dialect) = Dialect::from_path(path) {
+        return run_grid(&source, dialect, &path.display().to_string());
     }
 
     let text = render_source(&source);
@@ -159,6 +169,80 @@ fn draw(f: &mut Frame, text: &Text<'_>, title: &str, state: &mut MarkdownViewSta
     let footer = Line::from(vec![
         Span::styled(
             " j/k ↑↓  ^d/^u  space  g/G  q:quit ",
+            Style::default().fg(Color::DarkGray),
+        ),
+        Span::styled(progress, Style::default().fg(Color::Yellow)),
+    ]);
+    f.render_widget(Paragraph::new(footer), outer[1]);
+}
+
+/// Apply a key to a grid's scroll state; `true` means quit. Columns are
+/// handled here, everything else through [`key_action`].
+fn grid_key(key: KeyEvent, state: &mut GridViewState) -> bool {
+    match key.code {
+        KeyCode::Char('h') | KeyCode::Left => state.scroll_cols_by(-1),
+        KeyCode::Char('l') | KeyCode::Right => state.scroll_cols_by(1),
+        _ => match key_action(key) {
+            Some(KeyAction::Quit) => return true,
+            Some(KeyAction::ScrollBy(d)) => state.scroll_by(d),
+            Some(KeyAction::HalfPage(down)) => state.half_page(down),
+            Some(KeyAction::Page(down)) => state.page(down),
+            Some(KeyAction::Top) => state.scroll_to_top(),
+            Some(KeyAction::Bottom) => state.scroll_to_bottom(),
+            None => {}
+        },
+    }
+    false
+}
+
+/// The grid twin of the Markdown path in [`run`] (terminal already vetted).
+fn run_grid(source: &str, dialect: Dialect, title: &str) -> Result<()> {
+    let table = Table::parse(source, dialect);
+    let mut state = GridViewState::new(&table);
+    let mut terminal = setup_terminal()?;
+    let res = grid_event_loop(&mut terminal, &table, title, &mut state);
+    restore_terminal();
+    res
+}
+
+fn grid_event_loop(
+    terminal: &mut Terminal<CrosstermBackend<std::io::Stdout>>,
+    table: &Table,
+    title: &str,
+    state: &mut GridViewState,
+) -> Result<()> {
+    loop {
+        terminal.draw(|f| draw_grid(f, table, title, state))?;
+        if let Event::Key(key) = event::read()? {
+            if key.kind == KeyEventKind::Press && grid_key(key, state) {
+                return Ok(());
+            }
+        }
+    }
+}
+
+/// Same layout as [`draw`]: bordered pane with the title over a footer.
+fn draw_grid(f: &mut Frame, table: &Table, title: &str, state: &mut GridViewState) {
+    let outer = Layout::vertical([Constraint::Min(1), Constraint::Length(1)]).split(f.area());
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::DarkGray))
+        .title(Span::styled(
+            format!(" {title} "),
+            Style::default()
+                .fg(Color::Gray)
+                .add_modifier(Modifier::BOLD),
+        ));
+    f.render_stateful_widget(GridView::new(table).block(block), outer[0], state);
+
+    let progress = if state.fits() {
+        " All ".to_string()
+    } else {
+        format!(" {}% ", state.percent())
+    };
+    let footer = Line::from(vec![
+        Span::styled(
+            " j/k ↑↓  h/l ←→  ^d/^u  space  g/G  q:quit ",
             Style::default().fg(Color::DarkGray),
         ),
         Span::styled(progress, Style::default().fg(Color::Yellow)),
@@ -266,6 +350,41 @@ mod tests {
             let err = check_tty(stdin_tty, stdout_tty).unwrap_err();
             assert!(err.contains("requires a terminal"), "{err}");
         }
+    }
+
+    #[test]
+    fn grid_keys_scroll_rows_and_columns_and_quit() {
+        let rows: String = (0..50).map(|i| format!("a{i},b,c,d\n")).collect();
+        let table = Table::parse(rows, Dialect::CSV);
+        let mut s = GridViewState::new(&table);
+        assert!(!grid_key(key(KeyCode::Char('j')), &mut s));
+        assert!(!grid_key(key(KeyCode::Char('l')), &mut s));
+        assert!(!grid_key(key(KeyCode::Left), &mut s));
+        assert!(!grid_key(key(KeyCode::Char('G')), &mut s));
+        assert_eq!(s.percent(), 100);
+        assert!(!grid_key(key(KeyCode::Char('x')), &mut s));
+        assert!(grid_key(key(KeyCode::Char('q')), &mut s));
+        assert!(grid_key(ctrl('c'), &mut s));
+    }
+
+    #[test]
+    fn draw_grid_shows_title_cells_and_footer() {
+        let table = Table::parse("name,qty\napple,3\n", Dialect::CSV);
+        let mut s = GridViewState::new(&table);
+        let mut t = Terminal::new(ratatui::backend::TestBackend::new(70, 8)).unwrap();
+        let done = t.draw(|f| draw_grid(f, &table, "x.csv", &mut s)).unwrap();
+        let out: String = done.buffer.content().iter().map(|c| c.symbol()).collect();
+        for want in ["x.csv", "name", "apple", "h/l", "All"] {
+            assert!(out.contains(want), "{want}: {out}");
+        }
+    }
+
+    #[test]
+    fn missing_csv_errors_before_any_terminal_setup() {
+        let path =
+            std::env::temp_dir().join(format!("scrybe-view-missing-{}.csv", std::process::id()));
+        let err = run(&path).unwrap_err().to_string();
+        assert!(err.contains("scrybe view: cannot read"), "{err}");
     }
 
     #[test]

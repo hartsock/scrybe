@@ -22,7 +22,7 @@ const HR_WIDTH: usize = 60;
 
 /// Column content is clamped to this many display columns (truncated with
 /// `…`) so one wide cell can't blow a table out to an unreadable width.
-const MAX_COL_WIDTH: usize = 30;
+pub(crate) const MAX_COL_WIDTH: usize = 30;
 
 /// A hyperlink's location in rendered [`Text`], for click-to-open (#244).
 ///
@@ -459,7 +459,7 @@ fn flatten_inline(nodes: &[Node]) -> String {
 /// Truncate `s` to at most `width` display columns, replacing the tail with
 /// `…` when it doesn't fit. Grapheme-aware only to the extent `chars()` is —
 /// good enough for the ASCII/Latin content table cells overwhelmingly are.
-fn truncate(s: &str, width: usize) -> String {
+pub(crate) fn truncate(s: &str, width: usize) -> String {
     if s.width() <= width {
         return s.to_string();
     }
