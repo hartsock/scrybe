@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import type { DocInfo, LanguageHint } from "./kinds";
+import type { DocInfo, DocKind, LanguageHint } from "./kinds";
 import type { Surface, SurfaceCapabilities, SurfaceChange, SurfaceFactory } from "./surface";
 
 /// What the WYSIWYG surface can do, known before its code is loaded. Must
@@ -11,6 +11,13 @@ export const WYSIWYG_CAPABILITIES: SurfaceCapabilities = {
   previewIsSeparate: false,
   kinds: ["markdown"],
 };
+
+/// Which surface shows a tab: the grid for a table in `wysiwyg` mode, the
+/// Markdown WYSIWYG surface for any other `wysiwyg`, the text editor otherwise.
+export function pickSurface(mode: string, kind: DocKind): "grid" | "wysiwyg" | "source" {
+  if (mode !== "wysiwyg") return "source";
+  return kind === "table" ? "grid" : "wysiwyg";
+}
 
 /// A [`Surface`] whose implementation is fetched on first use, so a large
 /// editor stays out of the startup bundle. Until it arrives the wrapper

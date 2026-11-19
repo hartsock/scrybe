@@ -28,6 +28,15 @@ export interface TabEntry {
   languageOverride: string | null;
 }
 
+/// The mode a tab of `kind` may show when `mode` is asked for. A table's grid
+/// is its `wysiwyg` mode and its raw text is `edit`; code and text are edit-only.
+/// Markdown accepts any mode.
+export function viewModeFor(kind: DocKind, mode: ViewMode): ViewMode {
+  if (kind === "markdown") return mode;
+  if (kind === "table") return mode === "wysiwyg" ? "wysiwyg" : "edit";
+  return "edit";
+}
+
 export class AppState {
   tabs: TabEntry[] = [];
   activeTabId: string | null = null;
@@ -48,7 +57,8 @@ export class AppState {
     const id = crypto.randomUUID();
     const title = path ? path.split("/").pop() ?? "Untitled" : "Untitled";
     // Code/text documents have no Markdown preview — open edit-only.
-    const viewMode: ViewMode = kind === "markdown" ? "both" : "edit";
+    // A table opens as its grid, which is the `wysiwyg` mode.
+    const viewMode: ViewMode = kind === "markdown" ? "both" : kind === "table" ? "wysiwyg" : "edit";
     this.tabs.push({ id, path, title, isDirty: false, content, viewMode, kind, language, languageOverride: null });
     this.activeTabId = id;
     return id;
@@ -76,6 +86,11 @@ export class AppState {
   cycleViewMode(id: string): ViewMode {
     const tab = this.tabs.find(t => t.id === id);
     if (!tab) return "both";
+    // A table toggles between its grid and its raw text.
+    if (tab.kind === "table") {
+      tab.viewMode = tab.viewMode === "wysiwyg" ? "edit" : "wysiwyg";
+      return tab.viewMode;
+    }
     // A code/text document has no rendered preview to cycle to — stay edit-only.
     if (tab.kind !== "markdown") {
       tab.viewMode = "edit";

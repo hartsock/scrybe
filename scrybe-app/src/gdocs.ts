@@ -143,7 +143,7 @@ export async function gdocSignOut(): Promise<void> {
 /// Export the active tab's live buffer to Google Docs (toolbar ☁️ and
 /// File ▸ Export to Google Docs…). Needs a saved Markdown tab: the
 /// `<stem>.gdoc.json` sidecar that ties the file to its doc lives beside the
-/// file, the same rule as export_figures, and a code, text or image tab has
+/// file, the same rule as export_figures, and a code, text, table or image tab has
 /// no document to send. A `.mmd` tab exports as the one-figure doc it is
 /// previewed as. MCP twin: `gdoc_export`.
 export async function exportActiveTabToGdoc(deps: GdocsDeps): Promise<void> {

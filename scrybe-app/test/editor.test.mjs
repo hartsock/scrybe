@@ -225,3 +225,19 @@ test("agent replacement isolates history even at the same timestamp", () => {
   assert.equal(undo({ state, dispatch }), true);
   assert.equal(state.doc.toString(), "original");
 });
+
+test("csv and tsv classify as the table kind, by extension, case-insensitively", () => {
+  assert.deepEqual(classified("/a/data.csv"), ["table", "CSV"]);
+  assert.deepEqual(classified("/a/data.tsv"), ["table", "TSV"]);
+  assert.deepEqual(classified("/a/DATA.CSV"), ["table", "CSV"]);
+  assert.deepEqual(classified("/a/Data.Tsv"), ["table", "TSV"]);
+  assert.deepEqual(classified("/a/notes.txt"), ["text", null]);
+  assert.deepEqual(classified("/a/csv"), ["text", null]);
+  assert.deepEqual(classified("/a/.csv"), ["text", null], "a dotfile has no extension");
+});
+
+test("a manual language override wins over the table kind, and auto brings it back", () => {
+  assert.deepEqual(classified("/a/data.csv", { override: "Markdown" }), ["markdown", "Markdown"]);
+  assert.deepEqual(classified("/a/data.csv", { override: "Rust" }), ["code", "Rust"]);
+  assert.deepEqual(classified("/a/data.csv", { override: null }), ["table", "CSV"]);
+});
