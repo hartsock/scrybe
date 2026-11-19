@@ -18,7 +18,8 @@
 //! - [`GridView`] — a `StatefulWidget` for a read-only CSV/TSV
 //!   [`scrybe_core::table::Table`]: pinned header row, row-number gutter,
 //!   vertical and horizontal scrolling; [`GridViewState`] holds the scroll
-//!   position.
+//!   position and an optional cursor (reversed cell, bold row number) that the
+//!   viewport follows.
 //!
 //! ```no_run
 //! # use ratatui::{Frame, layout::Rect, widgets::{Block, Borders}};

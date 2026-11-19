@@ -21,6 +21,9 @@ PASS=0; FAIL=0
 check() { if [ "$2" = 0 ]; then PASS=$((PASS+1)); echo "  ok: $1"; else FAIL=$((FAIL+1)); echo "  FAIL: $1"; fi; }
 cleanup() { tmux -L "$SOCK" kill-server 2>/dev/null; }
 trap cleanup EXIT
+# Keep the server alive: a section that quits its TUI would otherwise empty the server
+# and the next new-session would race its shutdown.
+tmux -L "$SOCK" new-session -d -s keepalive 'sleep 3600' || { echo "tmux server failed to start"; exit 2; }
 
 # ── fixture: wrap-heavy doc (the #163 acceptance scenario, verbatim) ─────────
 {
@@ -89,6 +92,41 @@ done
 check "csv: view renders a grid with gutter" $ok
 tmux -L "$SOCK" capture-pane -t csv -p | grep -qE "1 +fruit +qty" ; check "csv: header row shown" $?
 tmux -L "$SOCK" send-keys -t csv q; sleep 1
+
+# ── 5. edit a CSV cell, save, check the bytes on disk (#274) ─────────────────
+printf 'n,v\r\nabc,1\r\n' > "$WORK/e.csv"
+tmux -L "$SOCK" new-session -d -s edit -x 100 -y 14 "$TUI '$WORK/e.csv'"
+ok=1; for _ in $(seq 1 40); do
+  tmux -L "$SOCK" capture-pane -t edit -p 2>/dev/null | grep -qE "2 +abc +1" && { ok=0; break; }; sleep 0.5
+done
+check "edit: grid renders" $ok
+tmux -L "$SOCK" send-keys -t edit j i X Enter C-s; sleep 1
+printf 'n,v\r\nabcX,1\r\n' > "$WORK/e.expected"
+cmp -s "$WORK/e.csv" "$WORK/e.expected" ; check "edit: saved file differs only in the edited cell (CRLF kept)" $?
+tmux -L "$SOCK" send-keys -t edit q; sleep 1
+
+# ── 6. quit with unsaved edits prompts; d discards (#274) ────────────────────
+printf 'n,v\nabc,1\n' > "$WORK/q.csv"
+tmux -L "$SOCK" new-session -d -s quit -x 100 -y 14 "$TUI '$WORK/q.csv'"
+sleep 1
+tmux -L "$SOCK" send-keys -t quit j i Z Enter q; sleep 1
+tmux -L "$SOCK" capture-pane -t quit -p | grep -q "Unsaved changes: s save all" ; check "quit: prompt shown with unsaved edits" $?
+tmux -L "$SOCK" send-keys -t quit d; sleep 1
+printf 'n,v\nabc,1\n' > "$WORK/q.expected"
+cmp -s "$WORK/q.csv" "$WORK/q.expected" ; check "quit: d leaves the file untouched" $?
+tmux -L "$SOCK" has-session -t quit 2>/dev/null ; [ $? -ne 0 ] ; check "quit: d exits the app" $?
+
+# ── 7. external change under unsaved edits prompts (#274) ────────────────────
+printf 'n,v\nabc,1\n' > "$WORK/x.csv"
+tmux -L "$SOCK" new-session -d -s ext -x 100 -y 14 "$TUI '$WORK/x.csv'"
+sleep 1
+tmux -L "$SOCK" send-keys -t ext j i Y Enter; sleep 1
+printf 'n,v\nELSEWHERE,9\n' > "$WORK/x.csv"; sleep 1
+tmux -L "$SOCK" capture-pane -t ext -p | grep -q "File changed on disk: r reload" ; check "external: conflict prompt shown" $?
+tmux -L "$SOCK" send-keys -t ext k; sleep 1
+tmux -L "$SOCK" capture-pane -t ext -p | grep -q "abcY" ; check "external: k keeps the edit" $?
+tmux -L "$SOCK" capture-pane -t ext -p | grep -q "File changed on disk" ; [ $? -ne 0 ] ; check "external: k dismisses the prompt" $?
+tmux -L "$SOCK" send-keys -t ext q d; sleep 1
 
 echo "──────────────────────────────"
 echo "UAT tui-drive: $PASS passed, $FAIL failed"

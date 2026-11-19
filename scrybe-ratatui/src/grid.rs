@@ -42,6 +42,10 @@ pub struct GridViewState {
     rendered: bool,
     /// Columns available to the gutter plus data columns at the last render.
     viewport_width: usize,
+    /// Optional cursor `(file row, column)`, both 0-based.
+    cursor: Option<(usize, usize)>,
+    /// The cursor moved since the last render: scroll it into view once.
+    follow: bool,
 }
 
 impl GridViewState {
@@ -67,6 +71,52 @@ impl GridViewState {
         }
         self.widths = widths.into_iter().map(|w| w as u16).collect();
         self.clamp();
+        if let Some((r, c)) = self.cursor {
+            self.set_cursor(r, c);
+        }
+    }
+
+    /// Put the cursor on file row `row`, column `col` (row 0 is the header),
+    /// clamped to the table. The next render scrolls it into view.
+    pub fn set_cursor(&mut self, row: usize, col: usize) {
+        let row = row.min(self.rows.saturating_sub(1));
+        let col = col.min(self.cols.saturating_sub(1));
+        self.cursor = Some((row, col));
+        self.follow = true;
+    }
+
+    /// The cursor `(file row, column)`, if one is set.
+    pub fn cursor(&self) -> Option<(usize, usize)> {
+        self.cursor
+    }
+
+    /// Move the cursor by a signed delta, clamped to the table; a cursor that
+    /// is not set starts from the top-left cell.
+    pub fn move_cursor(&mut self, drow: i32, dcol: i32) {
+        let (r, c) = self.cursor.unwrap_or((0, 0));
+        let r = (r as i64 + i64::from(drow)).max(0) as usize;
+        let c = (c as i64 + i64::from(dcol)).max(0) as usize;
+        self.set_cursor(r, c);
+    }
+
+    /// Scroll rows and columns so the cursor cell is visible (once per move).
+    fn follow_cursor(&mut self) {
+        let Some((r, c)) = self.cursor else { return };
+        if r > 0 && self.viewport_rows > 0 {
+            let body = r - 1;
+            if body < self.row_offset {
+                self.row_offset = body;
+            } else if body >= self.row_offset + self.viewport_rows {
+                self.row_offset = body + 1 - self.viewport_rows;
+            }
+        }
+        if c < self.col_offset {
+            self.col_offset = c;
+        }
+        // Bounded by `cols`: at `col_offset == c` the column is always shown.
+        while self.col_offset < c && !self.visible_cols().iter().any(|&(v, _)| v == c) {
+            self.col_offset += 1;
+        }
     }
 
     /// Scroll body rows by a signed delta, clamped into range.
@@ -234,21 +284,34 @@ impl StatefulWidget for GridView<'_> {
         state.viewport_width = inner.width as usize;
         state.rendered = true;
         state.clamp();
+        if std::mem::take(&mut state.follow) {
+            state.follow_cursor();
+        }
         if state.rows == 0 || inner.is_empty() {
             return;
         }
         let gutter = state.gutter();
         let cols = state.visible_cols();
         let make_row = |r: usize, style: Style| {
-            let num = Cell::from(format!("{:>gutter$}", r + 1))
-                .style(Style::new().add_modifier(Modifier::DIM));
+            let here = state.cursor.filter(|&(cr, _)| cr == r).map(|(_, c)| c);
+            let num_style = if here.is_some() {
+                Style::new().add_modifier(Modifier::BOLD)
+            } else {
+                Style::new().add_modifier(Modifier::DIM)
+            };
+            let num = Cell::from(format!("{:>gutter$}", r + 1)).style(num_style);
             let cells = cols.iter().map(|&(c, w)| {
                 let text = self
                     .table
                     .cell(r, c)
                     .map(|t| sanitize(&t))
                     .unwrap_or_default();
-                Cell::from(truncate(&text, w))
+                let cell = Cell::from(truncate(&text, w));
+                if here == Some(c) {
+                    cell.style(Style::new().add_modifier(Modifier::REVERSED))
+                } else {
+                    cell
+                }
             });
             Row::new(std::iter::once(num).chain(cells)).style(style)
         };
@@ -409,6 +472,85 @@ mod tests {
         let small = table("h\n1\n2\n3\n");
         st.sync(&small);
         assert_eq!(rows(&small, &mut st, 8, 3)[1], "3 2");
+    }
+
+    #[test]
+    fn cursor_cell_is_reversed_and_row_number_bold() {
+        let t = table("a,b\nc,d\n");
+        let mut st = GridViewState::new(&t);
+        st.set_cursor(1, 1);
+        let (buf, _) = draw(&t, &mut st, 10, 2);
+        assert!(buf[(4, 1)].modifier.contains(Modifier::REVERSED));
+        assert!(!buf[(2, 1)].modifier.contains(Modifier::REVERSED));
+        assert!(!buf[(4, 0)].modifier.contains(Modifier::REVERSED));
+        assert!(buf[(0, 1)].modifier.contains(Modifier::BOLD));
+        assert!(!buf[(0, 1)].modifier.contains(Modifier::DIM));
+    }
+
+    #[test]
+    fn cursorless_render_has_no_reversed_cell() {
+        let t = table("a,b\nc,d\n");
+        let mut st = GridViewState::new(&t);
+        let (buf, _) = draw(&t, &mut st, 10, 2);
+        assert_eq!(st.cursor(), None);
+        assert!((0..10).all(|x| !buf[(x, 1)].modifier.contains(Modifier::REVERSED)));
+        assert!(buf[(0, 1)].modifier.contains(Modifier::DIM));
+    }
+
+    #[test]
+    fn move_cursor_clamps_to_the_table() {
+        let t = table("a,b\n1,2\n");
+        let mut st = GridViewState::new(&t);
+        st.move_cursor(-3, -3);
+        assert_eq!(st.cursor(), Some((0, 0)));
+        st.move_cursor(9, 9);
+        assert_eq!(st.cursor(), Some((1, 1)));
+        st.set_cursor(50, 50);
+        assert_eq!(st.cursor(), Some((1, 1)));
+    }
+
+    #[test]
+    fn viewport_follows_cursor_vertically() {
+        let t = table("h\n1\n2\n3\n4\n5\n");
+        let mut st = GridViewState::new(&t);
+        rows(&t, &mut st, 8, 3);
+        st.set_cursor(5, 0);
+        assert_eq!(rows(&t, &mut st, 8, 3), ["1 h", "5 4", "6 5"]);
+        st.set_cursor(1, 0);
+        assert_eq!(rows(&t, &mut st, 8, 3)[1], "2 1");
+        st.set_cursor(0, 0);
+        assert_eq!(rows(&t, &mut st, 8, 3)[1], "2 1");
+    }
+
+    #[test]
+    fn viewport_follows_cursor_horizontally() {
+        let t = table("aaaa,bbbb,cccc\n1,2,3\n");
+        let mut st = GridViewState::new(&t);
+        rows(&t, &mut st, 12, 2);
+        st.set_cursor(0, 2);
+        assert_eq!(rows(&t, &mut st, 12, 2)[0], "1 bbbb cccc");
+        st.set_cursor(0, 0);
+        assert_eq!(rows(&t, &mut st, 12, 2)[0], "1 aaaa bbbb");
+    }
+
+    #[test]
+    fn scrolling_is_not_undone_by_the_cursor() {
+        let t = table("h\n1\n2\n3\n4\n5\n");
+        let mut st = GridViewState::new(&t);
+        rows(&t, &mut st, 8, 3);
+        st.set_cursor(1, 0);
+        rows(&t, &mut st, 8, 3);
+        st.scroll_by(3);
+        assert_eq!(rows(&t, &mut st, 8, 3)[1], "5 4");
+    }
+
+    #[test]
+    fn sync_reclamps_the_cursor() {
+        let big = table("a,b\n1,2\n3,4\n5,6\n");
+        let mut st = GridViewState::new(&big);
+        st.set_cursor(3, 1);
+        st.sync(&table("a\n1\n"));
+        assert_eq!(st.cursor(), Some((1, 0)));
     }
 
     #[test]

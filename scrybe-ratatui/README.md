@@ -41,7 +41,9 @@ holds the scroll offset and adapts to the viewport at render time.
 `GridView` + `GridViewState` do the same for a read-only CSV/TSV
 `scrybe_core::table::Table`: a pinned bold header row, a dim row-number
 gutter, and vertical and horizontal scrolling. Wide cells are clamped with
-`…`; control characters in a cell are shown as visible glyphs.
+`…`; control characters in a cell are shown as visible glyphs. An optional cursor
+(`set_cursor`, `move_cursor`) draws one cell reversed and its row number bold,
+and the viewport follows it; without a cursor the render is unchanged.
 
 ## Compatibility
 
