@@ -3,8 +3,9 @@
 /// How a document is treated. `markdown` is the native surface (rendered
 /// preview + Markdown highlighting); `code` is a recognized source language
 /// (syntax highlighting, edit-only, no Markdown preview); `text` is anything
-/// else (plain text, edit-only).
-export type DocKind = "markdown" | "code" | "text";
+/// else (plain text, edit-only); `table` is a CSV/TSV file, edited as a grid
+/// (or as raw text).
+export type DocKind = "markdown" | "code" | "text" | "table";
 
 /// A document's kind plus the name of its language: `"Markdown"`, a source
 /// language such as `"Rust"` or `"C++"`, or null for plain text.
