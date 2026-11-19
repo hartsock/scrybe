@@ -19,6 +19,16 @@ lock-step version (`[workspace.package] version`).
   other byte untouched, so the quoting, line endings and BOM of the rest of
   the file are kept. Nothing user-facing yet; the grid views and tools of #271
   build on it.
+- **CSV and TSV open as an editable grid** (#271, #275): `.csv` and `.tsv`
+  files show as a table with a sticky header row and row numbers. Click or
+  use the arrow keys to pick a cell, type or press Enter to edit it, and use
+  the Insert row above, Insert row below and Delete row buttons. Each edit
+  changes only that cell or row of the file, so quoting, line endings, a BOM
+  and ragged rows are kept as they were. Undo and redo work in the grid, and
+  the tab's View button switches to the raw text of the same file. A very
+  large table shows its first rows and says so; the text view has the rest.
+  Editing a CRLF file in the text view converts its line endings to LF, so
+  the path bar now says so before your first edit.
 
 - **Table tools** (#271, #276): `table_get`, `table_set_cell`,
   `table_insert_row` and `table_delete_row` read and edit `.csv` / `.tsv` files

@@ -30,6 +30,8 @@ scrybe-app/
 ├── src/                   TypeScript frontend
 │   ├── main.ts            App bootstrap, window/tab lifecycle, MCP tab signal polling
 │   ├── editor.ts          CodeMirror 6 editor setup and state management
+│   ├── grid-surface.ts    CSV/TSV grid editor (text splices via table.ts)
+│   ├── table.ts           Lossless CSV/TSV codec, twin of scrybe_core::table
 │   ├── preview.ts         Live HTML preview pane
 │   ├── mermaid_png.ts     WYSIWYG Mermaid SVG → source-bearing PNG export
 │   ├── tabs.ts            Tab bar: open, close, switch, dirty indicator

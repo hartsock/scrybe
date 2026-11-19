@@ -4,6 +4,9 @@ import type { AppState } from "./state";
 const MODE_ICON: Record<string, string> = { both: "◧◨", edit: "◧", preview: "◨", wysiwyg: "✎" };
 const MODE_TITLE: Record<string, string> = { both: "Both panes", edit: "Editor only", preview: "Preview only", wysiwyg: "WYSIWYG" };
 
+// A table tab's `wysiwyg` mode is its grid, not the Markdown editor.
+const GRID_ICON = "▦";
+
 export function renderTabBar(
   container: HTMLElement,
   state: AppState,
@@ -22,8 +25,9 @@ export function renderTabBar(
 
     const mode = document.createElement("span");
     mode.className = "tab-mode";
-    mode.textContent = MODE_ICON[tab.viewMode];
-    mode.title = MODE_TITLE[tab.viewMode];
+    const grid = tab.kind === "table" && tab.viewMode === "wysiwyg";
+    mode.textContent = grid ? GRID_ICON : MODE_ICON[tab.viewMode];
+    mode.title = grid ? "Grid" : tab.kind === "table" ? "Text" : MODE_TITLE[tab.viewMode];
     mode.onclick = (e) => { e.stopPropagation(); onCycleMode(tab.id); };
     btn.appendChild(mode);
 
