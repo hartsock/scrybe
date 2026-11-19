@@ -11,6 +11,15 @@ lock-step version (`[workspace.package] version`).
 
 ## [Unreleased]
 
+### Added
+- **Lossless CSV/TSV codec** (#271, #272): `scrybe_core::table` reads CSV and
+  TSV text into rows of cells and records every cell's byte span, so any file,
+  malformed quoting included, is rebuilt byte for byte. Setting a cell and
+  inserting or deleting a row are each planned as one splice that leaves every
+  other byte untouched, so the quoting, line endings and BOM of the rest of
+  the file are kept. Nothing user-facing yet; the grid views and tools of #271
+  build on it.
+
 ### Added — Google Docs (`scrybe-gdocs`)
 - **New crate `scrybe-gdocs`**: export a Markdown document to a native Google
   Doc in Drive and import it back to Markdown. OAuth 2.0 installed-app flow

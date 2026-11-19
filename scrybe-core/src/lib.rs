@@ -12,6 +12,7 @@
 //! - [`Workspace`] — collection of open documents + shared state
 //! - [`Ast`] / [`Node`] — Markdown AST types
 //! - [`DocumentChange`] / [`DocumentHistory`] / [`TextRange`] — change tracking
+//! - [`table::Table`] / [`table::Dialect`] — lossless CSV/TSV codec with single-splice edits
 
 pub mod ast;
 pub mod build_info;
@@ -21,6 +22,7 @@ pub mod document;
 pub mod error;
 pub mod frontmatter;
 pub mod plugin;
+pub mod table;
 pub mod workspace;
 
 pub use ast::{Ast, Node};
