@@ -328,9 +328,13 @@ fn regenerate_generated_fixtures() {
 
 #[test]
 fn generated_fixtures_match_the_codec() {
-    let checked_in = fs::read_to_string(generated_path()).unwrap();
+    // Compare the parsed JSON, not the bytes: a Windows checkout may give the
+    // file CRLF line endings, which are only whitespace between JSON tokens.
+    let checked_in: Value = serde_json::from_str(&fs::read_to_string(generated_path()).unwrap())
+        .expect("generated.json is not valid JSON");
+    let fresh: Value = serde_json::from_str(&generate()).expect("generate() makes valid JSON");
     assert!(
-        checked_in == generate(),
+        checked_in == fresh,
         "generated.json is stale: regenerate it with the ignored test"
     );
 }
