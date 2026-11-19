@@ -6,6 +6,7 @@ import "./styles/sidebar.css";
 import "./styles/mcp_panel.css";
 import "./styles/vcs_panel.css";
 import "./styles/pathbar.css";
+import "./styles/grid.css";
 import "./styles/print.css";
 import { invoke, convertFileSrc } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
@@ -13,12 +14,13 @@ import { basename, dirname, homeDir, join } from "@tauri-apps/api/path";
 import { open as openExternal } from "@tauri-apps/plugin-shell";
 import { ask, message, save as saveDialog } from "@tauri-apps/plugin-dialog";
 import { showToast } from "./toast";
-import { AppState, isViewMode } from "./state";
+import { AppState, isViewMode, viewModeFor } from "./state";
 import type { TabEntry } from "./state";
 import type { DocInfo, LanguageHint } from "./kinds";
 import { renderTabBar } from "./tabs";
 import { createCodeMirrorSurface, knownLanguage, languageNames } from "./codemirror-surface";
-import { LazySurface, WYSIWYG_CAPABILITIES } from "./surfaces";
+import { LazySurface, WYSIWYG_CAPABILITIES, pickSurface } from "./surfaces";
+import { createGridSurface } from "./grid-surface";
 import type { Surface, SurfaceChange } from "./surface";
 import { PreviewPane, SAVE_MERMAID_PNG_EVENT } from "./preview";
 import type { MermaidPngExportDetail, MermaidPreviewDocument } from "./mermaid_png";
@@ -91,6 +93,7 @@ const tabBarEl = document.getElementById("tab-bar")!;
 const pathBarEl = document.getElementById("path-bar")!;
 const editorEl = document.getElementById("editor")!;
 const wysiwygEl = document.getElementById("editor-wysiwyg")!;
+const gridEl = document.getElementById("editor-grid")!;
 const previewEl = document.getElementById("preview")!;
 const toolbarEl = document.getElementById("toolbar")!;
 const sidebarEl = document.getElementById("sidebar")!;
@@ -326,6 +329,7 @@ function applyTheme(theme: Theme): void {
   preview.setTheme(theme);
   source.setTheme(theme);
   wysiwyg.setTheme(theme);
+  grid.setTheme(theme);
   setToolbarTheme(toolbarEl, theme);
   const tab = state.activeTab();
   if (tab) renderPreview(tab.content);
@@ -348,10 +352,11 @@ function setViewMode(mode: string): void {
   if (!tab) return;
   // A code/text tab has no rendered preview — it stays edit-only regardless of
   // what an agent requests, mirroring the guard in state.cycleViewMode so the
-  // MCP concrete-mode path can't flip a source file into a blank preview.
+  // MCP concrete-mode path can't flip a source file into a blank preview. A
+  // table has its grid (`wysiwyg`) and its raw text (`edit`).
   if (tab.kind !== "markdown") {
-    tab.viewMode = "edit";
-    applyViewMode("edit");
+    tab.viewMode = viewModeFor(tab.kind, isViewMode(mode) ? mode : "edit");
+    applyViewMode(tab.viewMode);
     redrawTabs();
     return;
   }
@@ -459,9 +464,13 @@ function updatePathBar(): void {
   const badge = surface.reformatPending?.()
     ? {
         text: "Reformat pending",
-        title: "This document's Markdown is not in Scrybe's house style. " +
-          "Your first edit in WYSIWYG view will also rewrite its formatting " +
-          "(list markers, spacing, escapes). Nothing changes until you edit.",
+        title: surface === source
+          ? "This file has CR or CRLF line endings. Editing in the text view " +
+            "converts every line ending to LF; the grid and WYSIWYG views do not. " +
+            "Nothing changes until you edit."
+          : "This document's Markdown is not in Scrybe's house style. " +
+            "Your first edit in WYSIWYG view will also rewrite its formatting " +
+            "(list markers, spacing, escapes). Nothing changes until you edit.",
       }
     : undefined;
   const tab = state.activeTab();
@@ -504,10 +513,14 @@ function setActiveLanguage(choice: string): DocInfo | null {
   }
   tab.languageOverride = override;
   const info = source.classify(tab.path, languageHint(tab));
+  const wasTable = tab.kind === "table";
   tab.kind = info.kind;
   tab.language = info.language;
-  // Only Markdown has a preview or a WYSIWYG view.
-  if (tab.kind !== "markdown") tab.viewMode = "edit";
+  // Only Markdown has a preview or a WYSIWYG view; a table has its grid,
+  // which a tab newly classified as a table opens in.
+  if (tab.kind !== "markdown") {
+    tab.viewMode = tab.kind === "table" && !wasTable ? "wysiwyg" : viewModeFor(tab.kind, tab.viewMode);
+  }
   applyViewMode(tab.viewMode);
   void surface.setLanguage(tab.path, languageHint(tab));
   void renderPreview(tab.content);
@@ -632,6 +645,7 @@ const wysiwyg: LazySurface = new LazySurface(
   WYSIWYG_CAPABILITIES,
   (path, hint) => source.classify(path, hint),
 );
+const grid: Surface = createGridSurface(gridEl, "", onSurfaceChange(() => grid), (path, hint) => source.classify(path, hint));
 let surface: Surface = source;
 
 const editorAndPreview = document.getElementById("editor-and-preview")!;
@@ -643,8 +657,11 @@ const editorAndPreview = document.getElementById("editor-and-preview")!;
 function applyViewMode(mode: string, loadOnSwitch = true): void {
   editorAndPreview.classList.remove("mode-both", "mode-edit", "mode-preview", "mode-wysiwyg");
   editorAndPreview.classList.add(`mode-${mode}`);
-  activateSurface(mode === "wysiwyg" ? wysiwyg : source, loadOnSwitch);
-  setToolbarViewMode(toolbarEl, mode);
+  const picked = pickSurface(mode, state.activeTab()?.kind ?? "markdown");
+  // The grid shares the wysiwyg mode class; this one tells the CSS which pane.
+  editorAndPreview.classList.toggle("is-grid", picked === "grid");
+  activateSurface(picked === "grid" ? grid : picked === "wysiwyg" ? wysiwyg : source, loadOnSwitch);
+  setToolbarViewMode(toolbarEl, mode, state.activeTab()?.kind);
   syncSurfaceControls();
   publishState();
 }

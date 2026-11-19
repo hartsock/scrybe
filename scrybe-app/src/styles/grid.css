@@ -1,0 +1,112 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+/* CSV/TSV grid surface, mounted in #editor-grid. Themes are classes on the pane. */
+
+#editor-grid {
+  --grid-bg: #fff;
+  --grid-fg: #1f2328;
+  --grid-line: #d0d7de;
+  --grid-head: #f3f4f6;
+  --grid-active: #0969da;
+  --grid-muted: #656d76;
+  flex-direction: column;
+  background: var(--grid-bg);
+  color: var(--grid-fg);
+}
+
+#editor-grid.scrybe-grid-dark {
+  --grid-bg: #1a1a1a;
+  --grid-fg: #e6e6e6;
+  --grid-line: #3a3a3a;
+  --grid-head: #262626;
+  --grid-active: #58a6ff;
+  --grid-muted: #a9a9a9;
+}
+
+#editor-grid.scrybe-grid-solarized {
+  --grid-bg: #fdf6e3;
+  --grid-fg: #586e75;
+  --grid-line: #d9d2bd;
+  --grid-head: #eee8d5;
+  --grid-active: #268bd2;
+  --grid-muted: #93a1a1;
+}
+
+.scrybe-grid-controls {
+  display: flex;
+  gap: 6px;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--grid-line);
+}
+
+.scrybe-grid-notice {
+  padding: 6px 12px;
+  background: var(--grid-head);
+  color: var(--grid-muted);
+  font-size: 13px;
+}
+
+.scrybe-grid-scroll {
+  flex: 1;
+  overflow: auto;
+}
+
+.scrybe-grid-table {
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: 13px;
+  outline: none;
+}
+
+.scrybe-grid-table td {
+  min-width: 90px;
+  max-width: 420px;
+  min-height: 1.4em;
+  padding: 3px 8px;
+  border-right: 1px solid var(--grid-line);
+  border-bottom: 1px solid var(--grid-line);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  vertical-align: top;
+  background: var(--grid-bg);
+}
+
+.scrybe-grid-table td.scrybe-grid-gutter {
+  position: sticky;
+  left: 0;
+  min-width: 36px;
+  text-align: right;
+  color: var(--grid-muted);
+  background: var(--grid-head);
+  z-index: 1;
+}
+
+.scrybe-grid-header td {
+  position: sticky;
+  top: 0;
+  font-weight: 600;
+  background: var(--grid-head);
+  z-index: 2;
+}
+
+.scrybe-grid-header td.scrybe-grid-gutter {
+  z-index: 3;
+}
+
+.scrybe-grid-table td.scrybe-grid-active {
+  outline: 2px solid var(--grid-active);
+  outline-offset: -2px;
+}
+
+.scrybe-grid-editor {
+  display: block;
+  width: 100%;
+  min-height: 3em;
+  box-sizing: border-box;
+  font: inherit;
+  color: inherit;
+  background: var(--grid-bg);
+  border: 0;
+  padding: 0;
+  resize: both;
+  outline: none;
+}

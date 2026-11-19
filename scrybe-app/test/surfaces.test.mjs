@@ -4,8 +4,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-const { LazySurface, WYSIWYG_CAPABILITIES } = await import("../src/surfaces.ts");
-const { AppState, VIEW_MODES, isViewMode } = await import("../src/state.ts");
+const { LazySurface, WYSIWYG_CAPABILITIES, pickSurface } = await import("../src/surfaces.ts");
+const { AppState, VIEW_MODES, isViewMode, viewModeFor } = await import("../src/state.ts");
 
 /// A recording stand-in for a real surface.
 function fakeFactory(log, { ready } = {}) {
@@ -117,4 +117,30 @@ test("view modes: Markdown cycles through wysiwyg; code and text stay edit", () 
   const rs = state.addTab("/a.rs", "fn main() {}", "code");
   assert.equal(state.activeTab().viewMode, "edit");
   assert.equal(state.cycleViewMode(rs), "edit");
+});
+
+test("a table tab opens in wysiwyg (the grid) and cycles wysiwyg <-> edit", () => {
+  const state = new AppState();
+  const id = state.addTab("/a/d.csv", "a,b\n", "table", "CSV");
+  assert.equal(state.activeTab().viewMode, "wysiwyg");
+  assert.equal(state.cycleViewMode(id), "edit");
+  assert.equal(state.cycleViewMode(id), "wysiwyg");
+  assert.deepEqual([...VIEW_MODES], ["both", "edit", "preview", "wysiwyg"]);
+});
+
+test("viewModeFor resolves a requested mode per kind", () => {
+  assert.equal(viewModeFor("table", "wysiwyg"), "wysiwyg");
+  for (const m of ["both", "edit", "preview"]) assert.equal(viewModeFor("table", m), "edit");
+  for (const m of VIEW_MODES) assert.equal(viewModeFor("code", m), "edit");
+  assert.equal(viewModeFor("text", "wysiwyg"), "edit");
+  assert.equal(viewModeFor("markdown", "preview"), "preview");
+});
+
+test("pickSurface: grid only for wysiwyg on a table, Milkdown for other wysiwyg, else source", () => {
+  assert.equal(pickSurface("wysiwyg", "table"), "grid");
+  assert.equal(pickSurface("wysiwyg", "markdown"), "wysiwyg");
+  assert.equal(pickSurface("wysiwyg", "code"), "wysiwyg");
+  for (const k of ["markdown", "code", "text", "table"]) {
+    for (const m of ["both", "edit", "preview"]) assert.equal(pickSurface(m, k), "source");
+  }
 });

@@ -148,3 +148,189 @@ fn shared_edit_fixtures() {
         );
     }
 }
+
+// ---- Generated differential cases -----------------------------------------
+//
+// `generated.json` holds cases drawn from a fixed-seed PRNG, in the same shape
+// as `corpus.json`, so the TypeScript twin is checked on far more inputs than
+// are written by hand. The Rust codec is the reference that produced them.
+
+const GENERATED_PARSE_CASES: usize = 300;
+const GENERATED_EDIT_CASES: usize = 600;
+const ALPHABET: [char; 10] = ['a', 'b', ',', '\t', '"', '\r', '\n', ' ', 'é', '\u{feff}'];
+
+/// SplitMix64: a deterministic generator with no dependencies.
+struct Prng(u64);
+
+impl Prng {
+    fn next(&mut self) -> u64 {
+        self.0 = self.0.wrapping_add(0x9e37_79b9_7f4a_7c15);
+        let mut z = self.0;
+        z = (z ^ (z >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+        z = (z ^ (z >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
+        z ^ (z >> 31)
+    }
+
+    /// A number in `0..bound` (`bound > 0`).
+    fn below(&mut self, bound: usize) -> usize {
+        usize::try_from(self.next() % u64::try_from(bound).unwrap()).unwrap()
+    }
+
+    fn input(&mut self) -> String {
+        let len = self.below(13);
+        (0..len)
+            .map(|_| ALPHABET[self.below(ALPHABET.len())])
+            .collect()
+    }
+}
+
+/// A JSON string in ASCII only: every non-ASCII or control character is escaped.
+fn json(text: &str) -> String {
+    let mut out = String::from("\"");
+    for c in text.chars() {
+        match c {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            ' '..='~' => out.push(c),
+            _ => {
+                for unit in c.encode_utf16(&mut [0; 2]) {
+                    out.push_str(&format!("\\u{unit:04x}"));
+                }
+            }
+        }
+    }
+    out.push('"');
+    out
+}
+
+fn json_list<T>(items: impl IntoIterator<Item = T>, each: impl Fn(T) -> String) -> String {
+    let items: Vec<String> = items.into_iter().map(each).collect();
+    format!("[{}]", items.join(", "))
+}
+
+fn generate() -> String {
+    let mut prng = Prng(0x5c4b_e000_0000_0275);
+    let mut lines = Vec::new();
+    for n in 0..GENERATED_PARSE_CASES {
+        let dialect = if prng.below(2) == 0 {
+            Dialect::CSV
+        } else {
+            Dialect::TSV
+        };
+        let input = prng.input();
+        let table = Table::parse(input.as_str(), dialect);
+        let rows = 0..table.row_count();
+        let raw = json_list(rows.clone(), |r| {
+            json_list(0..table.row_len(r).unwrap(), |c| {
+                json(table.raw_cell(r, c).unwrap())
+            })
+        });
+        let cells = json_list(rows.clone(), |r| {
+            json_list(0..table.row_len(r).unwrap(), |c| {
+                json(&table.cell(r, c).unwrap())
+            })
+        });
+        let terminators = json_list(rows, |r| json(table.terminator(r).unwrap()));
+        lines.push(format!(
+            "    {{\"name\": \"gen-parse-{n}\", \"delimiter\": {}, \"input\": {}, \"bom\": {}, \"raw\": {raw}, \"terminators\": {terminators}, \"cells\": {cells}}}",
+            json(&dialect.delimiter().to_string()),
+            json(&input),
+            table.has_bom(),
+        ));
+    }
+    let parse = lines.join(",\n");
+
+    let mut lines = Vec::new();
+    for n in 0..GENERATED_EDIT_CASES {
+        let dialect = if prng.below(2) == 0 {
+            Dialect::CSV
+        } else {
+            Dialect::TSV
+        };
+        let delimiter = dialect.delimiter().to_string();
+        let values = [
+            "",
+            "plain text",
+            "x",
+            delimiter.as_str(),
+            "\"",
+            "\r",
+            "\n",
+            "\u{feff}x",
+            "é",
+        ];
+        let input = prng.input();
+        let mut table = Table::parse(input.as_str(), dialect);
+        let (rows, cols) = (table.row_count(), table.col_count());
+        // One past the end is allowed so that the error outcomes are covered.
+        let (op, args, planned) = match prng.below(3) {
+            0 => {
+                let (row, col) = (prng.below(rows + 2), prng.below(cols + 2));
+                let value = values[prng.below(values.len())];
+                let args = format!(
+                    "{{\"row\": {row}, \"col\": {col}, \"value\": {}}}",
+                    json(value)
+                );
+                ("set_cell", args, table.set_cell(row, col, value))
+            }
+            1 => {
+                let at = prng.below(rows + 2);
+                let cells: Vec<&str> = (0..prng.below(4))
+                    .map(|_| values[prng.below(values.len())])
+                    .collect();
+                let args = format!(
+                    "{{\"at\": {at}, \"cells\": {}}}",
+                    json_list(&cells, |cell| json(cell))
+                );
+                ("insert_row", args, table.insert_row(at, &cells).map(Some))
+            }
+            _ => {
+                let row = prng.below(rows + 2);
+                let args = format!("{{\"row\": {row}}}");
+                ("delete_row", args, table.delete_row(row).map(Some))
+            }
+        };
+        let outcome = match planned {
+            Err(TableError::RowOutOfBounds { .. }) => "\"error\": \"row_out_of_bounds\"".to_owned(),
+            Err(TableError::ColOutOfBounds { .. }) => "\"error\": \"col_out_of_bounds\"".to_owned(),
+            Ok(None) => format!("\"output\": {}, \"noop\": true", json(&input)),
+            Ok(Some(change)) => {
+                table.apply(&change).unwrap();
+                format!("\"output\": {}", json(table.source()))
+            }
+        };
+        lines.push(format!(
+            "    {{\"name\": \"gen-edit-{n}\", \"delimiter\": {}, \"input\": {}, \"op\": \"{op}\", \"args\": {args}, {outcome}}}",
+            json(&delimiter),
+            json(&input),
+        ));
+    }
+    let edits = lines.join(",\n");
+    format!(
+        "{{\n  \"version\": 1,\n  \"parse\": [\n{parse}\n  ],\n  \"edits\": [\n{edits}\n  ]\n}}\n"
+    )
+}
+
+fn generated_path() -> std::path::PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../tests/fixtures/table/generated.json")
+}
+
+/// Run `cargo test -p scrybe-core --test table_fixtures -- --ignored` to
+/// rewrite `generated.json` after the codec changes on purpose.
+#[test]
+#[ignore = "rewrites tests/fixtures/table/generated.json"]
+fn regenerate_generated_fixtures() {
+    fs::write(generated_path(), generate()).unwrap();
+}
+
+#[test]
+fn generated_fixtures_match_the_codec() {
+    let checked_in = fs::read_to_string(generated_path()).unwrap();
+    assert!(
+        checked_in == generate(),
+        "generated.json is stale: regenerate it with the ignored test"
+    );
+}

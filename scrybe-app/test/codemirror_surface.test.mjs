@@ -126,3 +126,40 @@ test("knownLanguage canonicalizes a picked name", () => {
   assert.equal(knownLanguage("klingon"), null);
   assert.ok(languageNames().includes("Rust"));
 });
+
+test("CodeMirror normalises CRLF in its document, so the first edit rewrites every line ending", () =>
+  withSurface("", (s, type, changes) => {
+    s.setContent("a,b\r\n1,2\r\n");
+    assert.equal(s.getContent(), "a,b\n1,2\n", "the document no longer holds the CR bytes");
+    type("x", 0);
+    assert.equal(changes.at(-1), "xa,b\n1,2\n");
+  }));
+
+test("reformatPending is true for untouched CR text until the first edit, never for LF text", () =>
+  withSurface("", (s, type) => {
+    assert.equal(s.reformatPending(), false);
+    s.setContent("a\r\nb\r\n");
+    assert.equal(s.reformatPending(), true);
+    type("x", 0);
+    assert.equal(s.reformatPending(), false, "after the first edit the rewrite is in the buffer");
+    s.setContent("a\rb");
+    assert.equal(s.reformatPending(), true, "a lone CR counts too");
+    s.setContent("a\nb\n");
+    assert.equal(s.reformatPending(), false);
+    s.replaceContent("c\r\nd");
+    assert.equal(s.reformatPending(), true);
+  }));
+
+test("a restored session brings its own reformatPending with it", () =>
+  withSurface("", (s, type) => {
+    s.setContent("a\r\nb");
+    const untouched = s.saveState();
+    s.setContent("lf only");
+    s.restoreState(untouched);
+    assert.equal(s.reformatPending(), true);
+    type("x", 0);
+    const touched = s.saveState();
+    s.setContent("a\r\nb");
+    s.restoreState(touched);
+    assert.equal(s.reformatPending(), false);
+  }));
