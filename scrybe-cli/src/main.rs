@@ -50,7 +50,7 @@ SUBCOMMANDS
 
   Standalone (no GUI required):
     render     Render Markdown to HTML.
-    view       View a Markdown file in the terminal (TUI viewer; q quits).
+    view       View a Markdown or CSV/TSV file in the terminal (TUI viewer; q quits).
     lint       Lint a Markdown file and report statistics.
     mermaid    Embed/extract/verify Mermaid source in PNG iTXt metadata.
     table      Read and edit CSV/TSV rows and cells (get, set-cell, insert-row,
@@ -153,8 +153,10 @@ enum Command {
         watch: bool,
     },
 
-    /// View a Markdown file in the terminal (TUI viewer).
+    /// View a Markdown or CSV/TSV file in the terminal (TUI viewer).
     ///
+    /// A `.csv` or `.tsv` file opens as a scrollable grid (h/l or Left/Right
+    /// scroll columns); anything else renders as Markdown.
     /// A single-pane, read-only viewer rendered with scrybe-ratatui — the
     /// same look as the scrybe-tui split viewer, without a second install.
     /// Keys: j/k or arrows scroll, Ctrl-d/Ctrl-u half-page, Space/PageDown/
@@ -163,7 +165,7 @@ enum Command {
     /// run in a pipe. For split-screen viewing and live reload, use the
     /// `scrybe-tui` binary.
     View {
-        /// Markdown file to view.
+        /// Markdown, CSV or TSV file to view.
         #[arg(value_name = "FILE")]
         file: std::path::PathBuf,
     },
