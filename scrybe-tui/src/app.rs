@@ -533,14 +533,16 @@ impl Pane {
 }
 
 /// The pane's border title, flagged when it holds unsaved or conflicting work.
+/// The flag comes first: a path wider than the pane is truncated at its end, and
+/// a trailing flag would be cut off with it, hiding that edits are unsaved.
 fn pane_title(pane: &Pane) -> String {
     let conflict = pane.grid.as_ref().is_some_and(|g| g.conflict.is_some());
     let flag = match (conflict, pane.dirty()) {
-        (true, _) => " [conflict]",
-        (false, true) => " [+]",
+        (true, _) => "[conflict] ",
+        (false, true) => "[+] ",
         _ => "",
     };
-    format!(" {}{flag} ", pane.title)
+    format!(" {flag}{} ", pane.title)
 }
 
 fn file_mtime(path: &Path) -> Option<SystemTime> {
@@ -1277,6 +1279,24 @@ mod tests {
         assert_eq!(source_of(&app), "\u{feff}name,note\r\n\"Z\",x\r\nb\r\n");
         assert!(app.panes[0].dirty());
         assert!(screen(&mut app, 60, 8).contains("[+]"));
+        let _ = fs::remove_file(&path);
+    }
+
+    /// The dirty marker must stay visible when the path is wider than the pane
+    /// (a long Windows temp path hid a trailing marker, so unsaved edits looked saved).
+    #[test]
+    fn dirty_marker_survives_a_path_wider_than_the_pane() {
+        let name = format!("{}.csv", "long-name-".repeat(8));
+        let (mut app, path) = grid_app(&name, "a,b\n1,2\n");
+        key(&mut app, KeyCode::Char('j'));
+        key(&mut app, KeyCode::Char('i'));
+        type_str(&mut app, "9");
+        key(&mut app, KeyCode::Enter);
+        assert!(app.panes[0].dirty());
+        assert!(
+            screen(&mut app, 30, 8).contains("[+]"),
+            "dirty marker hidden by a long path"
+        );
         let _ = fs::remove_file(&path);
     }
 

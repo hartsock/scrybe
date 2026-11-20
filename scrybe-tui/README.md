@@ -44,7 +44,7 @@ Edit mode: type to insert, `Backspace` / `Delete` / `←` / `→` / `Home` / `En
 inserts a newline, `Enter` or `Esc` commits, `Ctrl-c` cancels. Every other key is text or ignored.
 
 Each edit changes only that cell's or row's bytes; quoting, line endings, a BOM and ragged rows
-elsewhere are kept. A pane with unsaved edits shows ` [+]` in its title. Quitting with unsaved
+elsewhere are kept. A pane with unsaved edits shows `[+]` at the start of its title. Quitting with unsaved
 edits asks: `s` save all and quit, `d` discard and quit, `c` cancel. If the file changes on disk
 under unsaved edits the pane is never replaced: `r` reloads (discarding your edits), `k` keeps
 yours (a later `Ctrl-s` then overwrites the disk version).
