@@ -1,8 +1,8 @@
-# Scrybe socket RPC contract — 0.7 compatibility artifact
+# Scrybe socket RPC contract — 0.8 compatibility artifact
 
-> **This file is the 0.7 compatibility artifact.** It freezes the wire
+> **This file is the 0.8 compatibility artifact.** It freezes the wire
 > contract between the `scrybe` CLI / MCP server (clients) and the running
-> Scrybe app (server) for the 0.7 line. Anything documented here — method
+> Scrybe app (server) for the 0.8 line. Anything documented here — method
 > names, param/result shapes, error codes, envelope rules, limits — may only
 > change with a contract version bump and a new fixture. The design narrative
 > lives in `docs/design/cli-rpc.md`; this file is the normative reference.
@@ -111,6 +111,13 @@ Notes:
   hand with `set_language`. Setting a language can change `doc_kind`; a tab
   that stops being Markdown pins to `edit`.
 
+## Changes from 0.7
+
+- `doc_kind` may be `table` (a `.csv` / `.tsv` tab) in `state`, `set_language`
+  and `list_tabs`. A table tab's grid is its `wysiwyg` view mode. No wire
+  change: the table tools in the MCP surface and the `scrybe table` CLI use
+  the existing `read` and `edit` methods.
+
 ## Changes from 0.6
 
 - `view_mode` accepts and returns `wysiwyg`; `cycle` advances
@@ -207,4 +214,4 @@ At the MCP boundary (since A4) *all three* rows surface as a tool result with
 `tool_error` is a `ToolOutcome` (the tool ran), an `EngineFault` is not. On
 the CLI, engine faults exit non-zero. The MCP mapping table is normative in
 `scrybe-mcp-server/src/server.rs`; the frozen surface is
-`docs/mcp-contract-0.7.json`.
+`docs/mcp-contract-0.8.json`.

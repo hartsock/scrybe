@@ -24,7 +24,7 @@ the MCP boundary a business `tool_error` (incl. `no_live_app`) is now an
 malformed `tools/call` params are JSON-RPC `-32602` protocol errors, not tool
 results. The domain taxonomy (`ToolOutcome`/`tool_error` vs `EngineFault`) is
 unchanged; only the `server.rs` adapter mapping changed. The full surface is
-frozen as `docs/mcp-contract-0.7.json`, pinned by the golden fixtures in
+frozen as `docs/mcp-contract-0.8.json`, pinned by the golden fixtures in
 `scrybe-mcp-server/tests/mcp_contract.rs`. The mapping table lives in the
 `server.rs` module docs.
 **Supersedes:** the hand-rolled `scrybe-mcp-server/src/server.rs` + `src/tools.rs`.

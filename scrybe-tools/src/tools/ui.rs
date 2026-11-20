@@ -69,7 +69,7 @@ fn state_spec() -> ToolSpec {
                         "active_title": { "type": ["string", "null"] },
                         "is_dirty": { "type": "boolean" },
                         "view_mode": { "type": "string", "enum": ["both", "edit", "preview", "wysiwyg"] },
-                        "doc_kind": { "type": "string", "enum": ["markdown", "code", "text"], "description": "How the active tab's document is treated: Markdown (preview + WYSIWYG available), a recognized source-code language, or plain text (both edit-only)." },
+                        "doc_kind": { "type": "string", "enum": ["markdown", "code", "text", "table"], "description": "How the active tab's document is treated: Markdown (preview + WYSIWYG available), a recognized source-code language, plain text (both edit-only), or a CSV/TSV table (`table`; its grid is the `wysiwyg` mode)." },
                         "language": { "type": ["string", "null"], "description": "The active tab's language: `Markdown`, a source language such as `Rust` or `C++`, or null for plain text." },
                         "theme": { "type": "string" },
                         "vim": { "type": "boolean" },
@@ -267,7 +267,7 @@ fn set_language_spec() -> ToolSpec {
                     DATA_VERSION,
                     json!({
                         "language": { "type": ["string", "null"], "description": "Canonical language name now in effect; null for plain text." },
-                        "doc_kind": { "type": "string", "enum": ["markdown", "code", "text"] },
+                        "doc_kind": { "type": "string", "enum": ["markdown", "code", "text", "table"] },
                         "auto": { "type": "boolean", "description": "True when the language is detected rather than set by hand." }
                     }),
                     &["language", "doc_kind", "auto"],
