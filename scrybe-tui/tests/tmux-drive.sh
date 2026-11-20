@@ -47,10 +47,17 @@ cleanup() {
 }
 trap cleanup EXIT
 
+# Keep the server alive for the whole run. Without this, a section that quits its
+# TUI empties the server, and the next `new-session` races the server's shutdown
+# ("server exited unexpectedly") or finds the old session still there.
+tm new-session -d -s keepalive 'sleep 3600' || { echo "tmux server failed to start"; exit 2; }
+SESSIONS=0
+
 fails=0
 PANE=""
 launch() { # launch "<args...>" -> sets PANE to the new pane id on the isolated server
-  PANE=$(tm new-session -d -s drive -P -F '#{pane_id}' -c "$TMP" "$BIN $1")
+  SESSIONS=$(( SESSIONS + 1 ))   # a fresh session name each time: the previous one may still be quitting
+  PANE=$(tm new-session -d -s "drive$SESSIONS" -P -F '#{pane_id}' -c "$TMP" "$BIN $1")
 }
 wait_for() { # wait_for "<pane>" "<regex>" [secs] -> 0 when the regex appears
   local p="$1" re="$2" secs="${3:-6}" i=0 tries
@@ -119,6 +126,78 @@ launch "live.csv"
 check "csv reload: initial content" "$PANE" '2 +beforecsv +1'
 printf 'a,b\nbeforecsv,1\nAFTERCSV,2\n' >"$TMP/live.csv"
 check "csv reload: after external edit" "$PANE" '3 +AFTERCSV +2'
+tm send-keys -t "$PANE" q
+
+# ── 5. edit a cell and save (#274): bytes on disk are exact ──────────────────
+printf 'n,v\r\nabc,1\r\n' >"$TMP/e.csv"
+launch "e.csv"
+check "edit: grid shown" "$PANE" '2 +abc +1'
+tm send-keys -t "$PANE" j i X Enter
+check "edit: dirty flag in title" "$PANE" '\[\+\]'
+tm send-keys -t "$PANE" C-s
+check "edit: saved status" "$PANE" 'saved [0-9]+ bytes'
+printf 'n,v\r\nabcX,1\r\n' >"$TMP/e.expected"
+if cmp -s "$TMP/e.csv" "$TMP/e.expected"; then
+  echo "  PASS: edit: file bytes exact (only the edited cell changed)"
+else
+  echo "  FAIL: edit: file bytes differ"; od -c "$TMP/e.csv" | head -3 | sed 's/^/       /'
+  fails=$((fails + 1))
+fi
+tm send-keys -t "$PANE" q
+
+# ── 6. quit with unsaved edits prompts (#274) ────────────────────────────────
+printf 'n,v\nabc,1\n' >"$TMP/q.csv"
+launch "q.csv"
+check "quit: grid shown" "$PANE" '2 +abc +1'
+tm send-keys -t "$PANE" j i Z Enter q
+check "quit: prompt shown" "$PANE" 'Unsaved changes: s save all'
+tm send-keys -t "$PANE" c
+check "quit: c cancels, grid still there" "$PANE" 'abcZ'
+tm send-keys -t "$PANE" q d
+sleep 0.5
+if tm has-session -t drive 2>/dev/null; then
+  echo "  FAIL: quit: d did not exit the app"; fails=$((fails + 1))
+else
+  echo "  PASS: quit: d exits"
+fi
+if cmp -s "$TMP/q.csv" <(printf 'n,v\nabc,1\n'); then
+  echo "  PASS: quit: d discards, file untouched"
+else
+  echo "  FAIL: quit: file changed"; fails=$((fails + 1))
+fi
+
+# ── 7. external change under unsaved edits prompts (#274) ────────────────────
+printf 'n,v\nabc,1\n' >"$TMP/x.csv"
+launch "x.csv"
+check "external: grid shown" "$PANE" '2 +abc +1'
+tm send-keys -t "$PANE" j i Y Enter
+check "external: dirty" "$PANE" '\[\+\]'
+printf 'n,v\nELSEWHERE,9\n' >"$TMP/x.csv"
+check "external: conflict prompt" "$PANE" 'File changed on disk: r reload'
+tm send-keys -t "$PANE" k
+check "external: k keeps my edit" "$PANE" 'abcY'
+if tm capture-pane -t "$PANE" -p | grep -q 'File changed on disk'; then
+  echo "  FAIL: external: k left the prompt up"; fails=$((fails + 1))
+else
+  echo "  PASS: external: k dismisses the prompt"
+fi
+tm send-keys -t "$PANE" q d
+sleep 0.5
+# r path: reload takes the disk version and drops the edit
+printf 'n,v\nabc,1\n' >"$TMP/y.csv"
+launch "y.csv"
+check "external r: grid shown" "$PANE" '2 +abc +1'
+tm send-keys -t "$PANE" j i Y Enter
+check "external r: dirty" "$PANE" '\[\+\]'
+printf 'n,v\nELSEWHERE,9\n' >"$TMP/y.csv"
+check "external r: conflict prompt" "$PANE" 'File changed on disk: r reload'
+tm send-keys -t "$PANE" r
+check "external r: reloads disk version" "$PANE" 'ELSEWHERE'
+if tm capture-pane -t "$PANE" -p | grep -qE 'File changed on disk|\[\+\]'; then
+  echo "  FAIL: external r: prompt or dirty marker remains"; fails=$((fails + 1))
+else
+  echo "  PASS: external r: clean after reload"
+fi
 tm send-keys -t "$PANE" q
 
 if [ "$fails" -eq 0 ]; then

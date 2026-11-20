@@ -34,6 +34,13 @@ lock-step version (`[workspace.package] version`).
   large table shows its first rows and says so; the text view has the rest.
   Editing a CRLF file in the text view converts its line endings to LF, so
   the path bar now says so before your first edit.
+- **Edit CSV/TSV cells in the terminal** (#271, #274): in `scrybe-tui` a grid
+  pane has a cursor (`hjkl`, arrows), `Enter`/`i` edits a cell, `o`/`O` insert a
+  row, `dd` deletes one, `u`/`Ctrl-r` undo and redo, and `Ctrl-s` saves. Each
+  edit changes only that cell's or row's bytes. A pane with unsaved edits asks
+  before quit and is never replaced by a reload: if the file changes on disk you
+  choose to reload or keep yours. Split orientation is now also on `Ctrl-o`,
+  because `o` inserts a row in a grid. `scrybe view` stays read-only.
 
 - **Table tools** (#271, #276): `table_get`, `table_set_cell`,
   `table_insert_row` and `table_delete_row` read and edit `.csv` / `.tsv` files
