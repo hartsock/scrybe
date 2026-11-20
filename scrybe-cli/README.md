@@ -28,11 +28,13 @@ also the launcher for the Tauri GUI app: `scrybe file.md` locates the
 | Command | Description |
 |---------|-------------|
 | `scrybe render [FILE]` | Render Markdown to HTML (stdin → stdout by default); `--theme`, `--profile app\|site` (default `app`), `--body-only`, `--full-html`, `--output` |
-| `scrybe view FILE` | View a Markdown file in the terminal (single-pane TUI): j/k scroll, g/G top/bottom, q quits; requires a TTY (exits 2 in a pipe) |
+| `scrybe view FILE` | View a Markdown file, or a `.csv` / `.tsv` file as a grid (`h`/`l` scroll columns), in the terminal (single-pane TUI): j/k scroll, g/G top/bottom, q quits; requires a TTY (exits 2 in a pipe) |
 | `scrybe lint FILE` | Word count, headings, code blocks, broken links; `--json` for machine output; exits 1 if broken links found |
 | `scrybe mermaid embed PNG SOURCE` | Embed Mermaid source into PNG iTXt chunk |
 | `scrybe mermaid extract PNG` | Print embedded Mermaid source, verifying its SHA-256 by default; exit 2 if tampered, `--unverified` to skip the check (forensics) |
 | `scrybe mermaid verify PNG` | Verify SHA-256 integrity of embedded source; exits 1 if tampered or digest missing |
+| `scrybe table get FILE [--rows START:END] [--json]` | Print CSV/TSV rows (1-based; one line per row, cells TAB-separated and escaped) |
+| `scrybe table set-cell FILE ROW COL VALUE` | Set one cell; `table insert-row FILE ROW [CELL...]` and `table delete-row FILE ROW` edit rows. Edits the live buffer if the file is open in the app, else the file |
 | `scrybe gdoc login [--json]` | One-time Google sign-in: opens a browser for the consent screen and caches the token (`drive.file` scope only). Needs a bring-your-own OAuth client — see `docs/google-docs.md` |
 | `scrybe gdoc logout [--json]` | Revoke and forget the cached token |
 | `scrybe gdoc status [--json]` | Sign-in state without contacting Google, always naming the config directory; exits 0 when signed in, 1 otherwise |

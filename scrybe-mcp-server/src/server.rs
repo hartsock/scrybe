@@ -33,7 +33,7 @@
 //! boundary a failed invocation now reads as failed.
 //!
 //! The complete `tools/list` surface (schemas included) is frozen as the
-//! release artifact `docs/mcp-contract-0.7.json`, pinned by
+//! release artifact `docs/mcp-contract-0.8.json`, pinned by
 //! `tests/mcp_contract.rs`.
 
 use std::io::{BufRead, Write};
@@ -334,7 +334,7 @@ mod tests {
         assert!(resp["result"].is_object());
     }
 
-    /// The complete public MCP tool list for contract 0.7 (plus the `gdoc_*`
+    /// The complete public MCP tool list for contract 0.8 (plus the `gdoc_*`
     /// Google Docs tools), sorted. `tools/list` must serve EXACTLY this set —
     /// a change here is a deliberate surface change.
     const TOOL_NAMES_0_6_0: &[&str] = &[
@@ -365,6 +365,10 @@ mod tests {
         "set_theme",
         "set_vim",
         "state",
+        "table_delete_row",
+        "table_get",
+        "table_insert_row",
+        "table_set_cell",
         "view_mode",
     ];
 
@@ -393,7 +397,7 @@ mod tests {
     #[test]
     fn test_list_tools_snapshot_is_the_0_6_0_surface() {
         // Snapshot of the complete public tool list (sorted). If this fails you
-        // changed the 0.7 MCP surface — update the snapshot deliberately.
+        // changed the 0.8 MCP surface — update the snapshot deliberately.
         let mut s = server();
         let mut names = listed_names(&mut s);
         names.sort();

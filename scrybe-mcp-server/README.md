@@ -39,7 +39,9 @@ The authoritative list is `scrybe-mcp-server tools` (or MCP `tools/list`):
 `open`, `read`, `section`, `edit`, `save`, `find`, `render`, `embed`,
 `extract`, `lint`, `list_tabs`, `mermaid_to_png`, `export_figures`, `export`,
 `logs`, `reload`, `close_tab`, `quit`, `state`, `set_theme`, `view_mode`,
-`set_vim`, `set_language`, `set_explorer`, `gdoc_auth`, `gdoc_list`,
+`set_vim`, `set_language`, `set_explorer`, `table_get`, `table_set_cell`,
+`table_insert_row`, `table_delete_row` (CSV/TSV; work headless on the file and on
+the live buffer when the file is open), `gdoc_auth`, `gdoc_list`,
 `gdoc_export`, `gdoc_import`. See `AGENTS.md` (repo root) for the full
 per-tool reference. Business failures from the `gdoc_*` tools are `isError: true` results whose
 `structuredContent.code` is one of `not_configured`, `not_logged_in`,

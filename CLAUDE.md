@@ -22,7 +22,7 @@ not make the toolchain more impressive.
 | `scrybe-core/` | Rust | AST, Document, ContentAddressable (BLAKE3+CBOR), Plugin trait, Workspace |
 | `scrybe-render/` | Rust | HTML pipeline, syntect highlighting, KaTeX/Mermaid |
 | `scrybe-tools/` | Rust | The ONE shared ToolSpec registry (handlers, schemas, dispatch) consumed by both the CLI and the MCP server |
-| `scrybe-mcp-server/` | Rust | Inbound MCP server — a thin stdio shim over `scrybe-tools`. Tools: open/read/section/edit/save/find/render/embed/extract/lint/list_tabs/mermaid_to_png/export_figures/logs/reload/quit/close_tab + UI-parity tools state/set_theme/view_mode/set_vim/set_language/set_explorer/export + Google Docs tools gdoc_auth/gdoc_list/gdoc_export/gdoc_import |
+| `scrybe-mcp-server/` | Rust | Inbound MCP server — a thin stdio shim over `scrybe-tools`. Tools: open/read/section/edit/save/find/render/embed/extract/lint/list_tabs/mermaid_to_png/export_figures/logs/reload/quit/close_tab + table_get/table_set_cell/table_insert_row/table_delete_row (CSV/TSV) + UI-parity tools state/set_theme/view_mode/set_vim/set_language/set_explorer/export + Google Docs tools gdoc_auth/gdoc_list/gdoc_export/gdoc_import |
 | `scrybe-mcp-client/` | Rust | Outbound MCP — registers external agent servers |
 | `scrybe-mermaid/` | Rust | PNG iTXt codec (Mermaid source embedded in PNG metadata) |
 | `scrybe-mermaid-render/` | Rust | Thin wrapper over the adopted `mermaid-rs-renderer`: SVG `<metadata>` provenance (source + sha256) + PNG via resvg |
@@ -170,6 +170,7 @@ Available tools: `open`, `read`, `section`, `edit`, `save`, `find`,
 `render`, `embed`, `extract`, `lint`, `list_tabs`, `mermaid_to_png`,
 `export_figures`, `logs`, `reload`, `quit`, `close_tab`, `state`,
 `set_theme`, `view_mode`, `set_vim`, `set_language`, `set_explorer`, `export`,
+`table_get`, `table_set_cell`, `table_insert_row`, `table_delete_row`,
 `gdoc_auth`, `gdoc_list`, `gdoc_export`, `gdoc_import`
 
 All tools are served by the one shared `scrybe-tools` registry (the same

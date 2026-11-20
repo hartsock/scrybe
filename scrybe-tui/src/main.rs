@@ -17,13 +17,13 @@ use scrybe_tui::app::App;
 use std::io::stdout;
 use std::path::PathBuf;
 
-/// Scrybe TUI — a Markdown viewer for the terminal. Two or more files open in a
+/// Scrybe TUI — a Markdown and CSV/TSV viewer for the terminal. Two or more files open in a
 /// split screen (Tab switches panes, `o` toggles the split orientation). Panes
 /// reload live when their file changes on disk.
 #[derive(Parser)]
 #[command(name = "scrybe-tui", version, about)]
 struct Cli {
-    /// Markdown file(s) to view. Two or more open as a split screen.
+    /// Markdown or CSV/TSV file(s) to view (.csv/.tsv open as a grid). Two or more open as a split screen.
     #[arg(required = true)]
     files: Vec<PathBuf>,
 

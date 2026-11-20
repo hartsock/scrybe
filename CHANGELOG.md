@@ -19,6 +19,11 @@ lock-step version (`[workspace.package] version`).
   other byte untouched, so the quoting, line endings and BOM of the rest of
   the file are kept. Nothing user-facing yet; the grid views and tools of #271
   build on it.
+- **CSV/TSV grid view in the terminal** (#271, #273): `scrybe view` and
+  `scrybe-tui` open `.csv` and `.tsv` files as a read-only scrollable grid, with
+  a pinned header row, a row-number gutter and `h`/`l` column scrolling,
+  instead of parsing them as Markdown. `scrybe-tui` reloads the grid live when
+  the file changes. The widget is `scrybe_ratatui::GridView`.
 - **CSV and TSV open as an editable grid** (#271, #275): `.csv` and `.tsv`
   files show as a table with a sticky header row and row numbers. Click or
   use the arrow keys to pick a cell, type or press Enter to edit it, and use
@@ -29,6 +34,18 @@ lock-step version (`[workspace.package] version`).
   large table shows its first rows and says so; the text view has the rest.
   Editing a CRLF file in the text view converts its line endings to LF, so
   the path bar now says so before your first edit.
+
+- **Table tools** (#271, #276): `table_get`, `table_set_cell`,
+  `table_insert_row` and `table_delete_row` read and edit `.csv` / `.tsv` files
+  by 1-based row and column, with CLI twins `scrybe table get | set-cell |
+  insert-row | delete-row`. When the file is open in the app the edit lands in
+  its buffer (dirty until `save`); otherwise the file is written with a
+  minimal diff. A new test checks every tool has a CLI twin or is on a
+  shrinking known-missing list (#125).
+- **Contract 0.8**: the four table tools join the MCP surface (28 tools; 32
+  with the `gdoc_*` tools below); `doc_kind` may be `table` in `state`,
+  `set_language` and `list_tabs`. No socket change. The artifacts are now
+  `docs/mcp-contract-0.8.json` and `docs/rpc-contract-0.8.md`.
 
 ### Added — Google Docs (`scrybe-gdocs`)
 - **New crate `scrybe-gdocs`**: export a Markdown document to a native Google
