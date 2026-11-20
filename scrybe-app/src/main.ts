@@ -10,9 +10,7 @@ import "./styles/grid.css";
 import "./styles/print.css";
 import { invoke, convertFileSrc } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { basename, dirname, homeDir, join } from "@tauri-apps/api/path";
-import { open as openExternal } from "@tauri-apps/plugin-shell";
-import { ask, message, save as saveDialog } from "@tauri-apps/plugin-dialog";
+import { homeDir } from "@tauri-apps/api/path";
 import { showToast } from "./toast";
 import { AppState, isViewMode, viewModeFor } from "./state";
 import type { TabEntry } from "./state";
@@ -22,9 +20,8 @@ import { createCodeMirrorSurface, knownLanguage, languageNames } from "./codemir
 import { LazySurface, WYSIWYG_CAPABILITIES, pickSurface } from "./surfaces";
 import { createGridSurface } from "./grid-surface";
 import type { Surface, SurfaceChange } from "./surface";
-import { PreviewPane, SAVE_MERMAID_PNG_EVENT } from "./preview";
-import type { MermaidPngExportDetail, MermaidPreviewDocument } from "./mermaid_png";
-import { documentStem, mermaidPngFilename, rasterizeMermaidSvg } from "./mermaid_png";
+import { PreviewPane } from "./preview";
+import type { MermaidPreviewDocument } from "./mermaid_png";
 import { buildToolbar, setToolbarViewMode, setToolbarTheme, setToolbarVim, setToolbarWrap, setToolbarSurfaceControls, setToolbarExplorer } from "./toolbar";
 import type { Theme } from "./toolbar";
 import { renderPathBar } from "./pathbar";
@@ -32,59 +29,21 @@ import { Sidebar } from "./sidebar";
 import { PluginManager } from "./plugins";
 import { McpPanel } from "./mcp_panel";
 import { VcsPanel } from "./vcs_panel";
-import { findHeadings } from "./sections";
+import { patchConsole } from "./console-log";
+import { WELCOME } from "./welcome";
+import { showModal } from "./modal";
+import { createExporters } from "./export-doc";
+import { registerMermaidExport } from "./mermaid-export";
+import { registerLinkNavigation } from "./link-nav";
+import { createConflictBar } from "./conflict";
+import { registerMenu } from "./menu";
+import { registerRpcTabs } from "./rpc-tabs";
+import { registerRpcContent } from "./rpc-content";
+import { registerRpcUi } from "./rpc-ui";
 
-// Keep recent console output in an in-memory ring so the socket `logs`
-// method can surface errors to agents without DevTools open. Replaces the
-// world-readable `/tmp/scrybe-debug.log` (A2: no predictable /tmp channels).
-const LOG_RING_MAX = 500;
-const logRing: string[] = [];
-function patchConsole() {
-  const orig = { error: console.error.bind(console), warn: console.warn.bind(console), log: console.log.bind(console) };
-  function fwd(level: string, args: unknown[]) {
-    const msg = args.map(a => (a instanceof Error ? a.stack ?? a.message : typeof a === "object" ? JSON.stringify(a) : String(a))).join(" ");
-    logRing.push(`${new Date().toISOString()} [${level}] ${msg}`);
-    if (logRing.length > LOG_RING_MAX) logRing.splice(0, logRing.length - LOG_RING_MAX);
-  }
-  console.error = (...a) => { orig.error(...a); fwd("ERROR", a); };
-  console.warn  = (...a) => { orig.warn(...a);  fwd("WARN",  a); };
-  console.log   = (...a) => { orig.log(...a);   fwd("LOG",   a); };
-}
 patchConsole();
 invoke<string>("get_version").then(v => console.log("Scrybe version:", v)).catch(console.error);
 
-const WELCOME = `<p align="center"><img src="scrybe-logo.png" alt="Scrybe" width="120" /></p>
-
-# Welcome to Scrybe
-
-**MCP-native Markdown editor.** The document is the conversation —
-connect AI agents, preview in real time, and keep full control of your files.
-
-\`\`\`mermaid
-graph LR
-    You([You]) <-->|reads & edits| Doc([Your document])
-    Doc <-->|MCP tools| Scrybe[Scrybe]
-    Scrybe <-->|open · read · edit| Agent1([Claude])
-    Scrybe <-->|open · read · edit| Agent2([Codex])
-    Scrybe <-->|open · read · edit| Agent3([Ollama])
-\`\`\`
-
-## Get started
-
-- **Open a file** — click in the sidebar, or run \`scrybe path/to/file.md\`
-- **Links navigate** — relative links open in a new tab; directories load in the sidebar
-- **Autosave** — edits save automatically; the original is preserved as \`.bak\`
-- **View modes** — click \`◧◨\` on any tab to cycle both / editor / preview / WYSIWYG
-
-## Connect an AI agent
-
-\`\`\`bash
-pip install scrybe-mcp-server
-claude mcp add scrybe -- scrybe-mcp-server stdio
-\`\`\`
-
-Tools: \`open\` · \`read\` · \`edit\` · \`find\` · \`render\` · \`lint\` · \`close_tab\`
-`;
 const pluginManager = new PluginManager();
 pluginManager.load();
 
@@ -103,47 +62,8 @@ const editorColEl = document.getElementById("editor-col")!;
 const preview = new PreviewPane(previewEl);
 let previewRequestGeneration = 0;
 
-// Right-clicking a rendered Mermaid diagram snapshots the live Mermaid.js SVG,
-// opens the native PNG save dialog, then asks Rust only to embed the original
-// source and write the already-rendered pixels. The selected path may be in any
-// directory; the native dialog handles confirmation when it already exists.
-previewEl.addEventListener(SAVE_MERMAID_PNG_EVENT, async (event: Event) => {
-  const detail = (event as CustomEvent<MermaidPngExportDetail>).detail;
-  if (!detail.source) {
-    showToast("Could not recover this diagram's Mermaid source");
-    return;
-  }
+registerMermaidExport(previewEl);
 
-  try {
-    // Capture before opening the dialog so the PNG is the view that was
-    // actually under the pointer when the user right-clicked.
-    const pngBase64 = await rasterizeMermaidSvg(detail.svg, previewEl);
-    const documentPath = detail.document.path;
-    const filename = documentPath ? await basename(documentPath) : "document.md";
-    const directory = documentPath ? await dirname(documentPath) : await homeDir();
-    const suggestedName = mermaidPngFilename(
-      documentStem(filename),
-      detail.figureNumber,
-      detail.figureTotal,
-      detail.title,
-    );
-    const dest = await saveDialog({
-      defaultPath: await join(directory, suggestedName),
-      filters: [{ name: "PNG image", extensions: ["png"] }],
-    });
-    if (!dest) return;
-
-    await invoke("save_mermaid_png", {
-      output: dest,
-      source: detail.source,
-      pngBase64,
-    });
-    showToast(`Exported ${dest.split(/[\\/]/).pop()}`, "info");
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    showToast(`Image export failed: ${message}`);
-  }
-});
 
 // Current editor/preview theme and Vim state. These are app-wide (not
 // per-tab) and are mirrored to the MCP `state` tool via `publishState`.
@@ -179,44 +99,7 @@ function flashSidebar(dir: string): void {
     () => sidebarEl.classList.remove("sidebar-folder-flash"), { once: true });
 }
 
-// Link navigation: directories load in the sidebar, files open in a new tab,
-// http(s) goes to the system browser, missing paths show a toast.
-previewEl.addEventListener("scrybe:open-link", async (e: Event) => {
-  const href = (e as CustomEvent<{ href: string }>).detail.href;
-  if (/^https?:\/\//.test(href)) {
-    openExternal(href).catch(console.error);
-    return;
-  }
-  let resolved: string;
-  if (href.startsWith("/")) {
-    resolved = href;
-  } else {
-    const tab = state.activeTab();
-    const dir = tab?.path
-      ? tab.path.substring(0, tab.path.lastIndexOf("/"))
-      : "";
-    resolved = dir ? new URL(href, `file://${dir}/`).pathname : href;
-  }
-  const kind = await invoke<string>("path_type", { path: resolved }).catch(() => "missing");
-  if (kind === "file") {
-    openFileByPath(resolved);
-  } else if (kind === "dir") {
-    flashSidebar(resolved);
-  } else {
-    // File missing — fall back to the parent directory if it exists.
-    const parent = resolved.replace(/\/[^/]*\/?$/, "");
-    const parentKind = parent
-      ? await invoke<string>("path_type", { path: parent }).catch(() => "missing")
-      : "missing";
-    const label = href.split("/").pop() ?? href;
-    if (parentKind === "dir") {
-      flashSidebar(parent);
-      showToast(`${label} doesn't exist`, "info");
-    } else {
-      showToast(`${label} doesn't exist`);
-    }
-  }
-});
+registerLinkNavigation({ previewEl, state, openFileByPath, flashSidebar });
 
 // ─── P4.8 — VCS panel (constructed before Sidebar so loadDirectory can open it)
 
@@ -528,50 +411,7 @@ function setActiveLanguage(choice: string): DocInfo | null {
   return info;
 }
 
-/// Export the active tab's current buffer to a Word (.docx) file. Prompts
-/// for a destination, then shells to `scrybe-docx` via the backend. The
-/// MCP `export` tool is the agent-side equivalent.
-async function exportActiveTabToWord(): Promise<void> {
-  const tab = state.activeTab();
-  if (!tab) { showToast("No tab to export", "info"); return; }
-  const base = tab.path
-    ? tab.path.replace(/\.[^/.]+$/, "").split("/").pop() ?? "document"
-    : "document";
-  const home = await homeDir();
-  const dest = await saveDialog({
-    defaultPath: `${home}/${base}.docx`,
-    filters: [{ name: "Word document", extensions: ["docx"] }],
-  });
-  if (!dest) return;
-  try {
-    await invoke("export_docx", { content: tab.content, output: dest, noDiagrams: false });
-    showToast(`Exported ${dest.split("/").pop()}`, "info");
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    showToast(`Export failed: ${msg}`);
-  }
-}
-
-/// Export every Mermaid diagram in the active tab to sibling PNG figures
-/// (`<stem>_fig_NN.png`) next to the document. Requires a saved tab — the
-/// figures are placed beside the file on disk, so an unsaved scratch buffer
-/// has nowhere to write them. Uses the live buffer so unsaved edits are
-/// included. The MCP/CLI `export_figures` tool is the agent-side equivalent.
-async function exportActiveTabFigures(): Promise<void> {
-  const tab = state.activeTab();
-  if (!tab) { showToast("No tab to export", "info"); return; }
-  if (!tab.path) { showToast("Save the document first", "info"); return; }
-  try {
-    const paths = await invoke<string[]>("export_figures", {
-      content: tab.content,
-      path: tab.path,
-    });
-    showToast(`Exported ${paths.length} diagram(s)`, "info");
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    showToast(`Export failed: ${msg}`);
-  }
-}
+const { exportActiveTabToWord, exportActiveTabFigures } = createExporters({ state });
 
 // Keyboard shortcuts for save + reload (mirrors the toolbar buttons).
 window.addEventListener("keydown", (e) => {
@@ -799,53 +639,6 @@ function newTab(content = WELCOME): void {
   showActiveTab();
 }
 
-/// 3-button modal: returns "primary" | "secondary" | "cancel".
-///
-/// The dialog is opaque to its callers — they pick the labels and act
-/// on the return value. Used for save-on-close ("Save" / "Discard")
-/// and restore-on-open ("Restore" / "Discard"). Enter selects primary,
-/// Escape returns cancel.
-type ModalChoice = "primary" | "secondary" | "cancel";
-
-function showModal(
-  title: string,
-  message: string,
-  primaryLabel: string,
-  secondaryLabel: string,
-): Promise<ModalChoice> {
-  return new Promise<ModalChoice>(resolve => {
-    const overlay = document.getElementById("modal-overlay")!;
-    const titleEl = document.getElementById("modal-title")!;
-    const msgEl = document.getElementById("modal-message")!;
-    const primary = document.getElementById("modal-primary") as HTMLButtonElement;
-    const secondary = document.getElementById("modal-secondary") as HTMLButtonElement;
-    const cancel = document.getElementById("modal-cancel") as HTMLButtonElement;
-
-    titleEl.textContent = title;
-    msgEl.textContent = message;
-    primary.textContent = primaryLabel;
-    secondary.textContent = secondaryLabel;
-    overlay.style.display = "flex";
-    primary.focus();
-
-    const cleanup = () => {
-      overlay.style.display = "none";
-      primary.onclick = null;
-      secondary.onclick = null;
-      cancel.onclick = null;
-      document.removeEventListener("keydown", onKey);
-    };
-    const finish = (choice: ModalChoice) => { cleanup(); resolve(choice); };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") { e.preventDefault(); finish("cancel"); }
-      else if (e.key === "Enter") { e.preventDefault(); finish("primary"); }
-    };
-    primary.onclick = () => finish("primary");
-    secondary.onclick = () => finish("secondary");
-    cancel.onclick = () => finish("cancel");
-    document.addEventListener("keydown", onKey);
-  });
-}
 
 /// Tear down a tab without prompting. Split out from `closeTab` so the
 /// save-on-close prompt can await the user's choice before invoking it.
@@ -1006,93 +799,14 @@ invoke<string | null>("get_initial_file").then(file => {
   if (file) openFileByPath(file);
 }).catch(err => console.error("get_initial_file failed:", err));
 
-interface ShellCommandReport {
-  outcome: string;
-  command_path: string;
-  warnings: string[];
-  message: string;
-}
+registerMenu({
+  state, newTab, saveActiveTabNow, reloadActiveTabNow, exportActiveTabToWord,
+  exportActiveTabFigures, printActiveTab, closeTab, cyclePreviewMode, setViewMode,
+  applyTheme, toggleVim, toggleWrap, setExplorerVisible,
+  isExplorerVisible: () => explorerVisible,
+});
 
-async function installOrRepairShellCommand(): Promise<void> {
-  try {
-    const report = await invoke<ShellCommandReport>("install_shell_command");
-    const detail = [report.message, ...report.warnings].join("\n\n");
-    await message(detail, {
-      title: "Scrybe command",
-      kind: report.warnings.length ? "warning" : "info",
-    });
-  } catch (error) {
-    await message(String(error), {
-      title: "Could not install the Scrybe command",
-      kind: "error",
-    });
-  }
-}
 
-async function removeShellCommand(): Promise<void> {
-  const approved = await ask(
-    "Remove the user-level 'scrybe' command link? The Scrybe app and your documents will not be removed.",
-    { title: "Remove Scrybe command", kind: "warning" },
-  );
-  if (!approved) return;
-  try {
-    const report = await invoke<ShellCommandReport>("uninstall_shell_command");
-    const detail = [report.message, ...report.warnings].join("\n\n");
-    await message(detail, {
-      title: "Scrybe command",
-      kind: report.warnings.length ? "warning" : "info",
-    });
-  } catch (error) {
-    await message(String(error), {
-      title: "Could not remove the Scrybe command",
-      kind: "error",
-    });
-  }
-}
-
-// Native menu bar (#184). Editor item ids route to the same single-entry-point
-// function its toolbar/keyboard twin uses, so the human ↔ MCP parity rule
-// holds with no new tools. PATH installation is intentionally host-local and
-// never exposed to MCP. Predefined items are handled by the OS.
-listen<string>("scrybe://menu", event => {
-  switch (event.payload) {
-    case "new_tab":     newTab(); break;
-    case "open_file":   document.getElementById("open-file")?.click(); break;
-    case "open_folder": document.getElementById("open-folder")?.click(); break;
-    case "save":        void saveActiveTabNow(); break;
-    case "reload":      void reloadActiveTabNow(); break;
-    case "export_docx": void exportActiveTabToWord(); break;
-    case "export_figures": void exportActiveTabFigures(); break;
-    case "print":       void printActiveTab(); break;
-    case "close_tab":
-      // macOS convention: ⌘W closes the tab, and falls through to closing
-      // the window when there is no tab left to close.
-      if (state.activeTabId) {
-        closeTab(state.activeTabId);
-      } else {
-        void import("@tauri-apps/api/window").then(w => w.getCurrentWindow().close());
-      }
-      break;
-    case "cycle_view":  cyclePreviewMode(); break;
-    case "view_wysiwyg": setViewMode("wysiwyg"); break;
-    case "theme_default":   applyTheme("default"); break;
-    case "theme_dark":      applyTheme("dark"); break;
-    case "theme_solarized": applyTheme("solarized"); break;
-    case "toggle_vim":  toggleVim(); break;
-    case "toggle_wrap": toggleWrap(); break;
-    case "toggle_explorer": setExplorerVisible(!explorerVisible); break;
-    case "install_shell_command":
-      void installOrRepairShellCommand();
-      break;
-    case "uninstall_shell_command":
-      void removeShellCommand();
-      break;
-    case "close_window":
-      void import("@tauri-apps/api/window").then(w => w.getCurrentWindow().close());
-      break;
-    default: console.warn("unknown menu action:", event.payload);
-  }
-}).catch(console.error);
 
 // When a second `scrybe open <path>` is run, the single-instance plugin
 // forwards the path here instead of spawning a new window.
@@ -1133,450 +847,23 @@ async function reloadTabFromDisk(path: string): Promise<void> {
   }
 }
 
-// Conflict bar — shown when an external edit arrives on a dirty buffer
-let conflictPath: string | null = null;
-let conflictDiskContent: string = "";
 
-function showConflict(path: string, diskContent: string): void {
-  conflictPath = path;
-  conflictDiskContent = diskContent;
-  const bar = document.getElementById("conflict-bar")!;
-  const name = path.split("/").pop() ?? path;
-  bar.innerHTML = `
-    <span class="conflict-msg">⚠ <strong>${name}</strong> changed on disk — your buffer has unsaved edits.</span>
-    <button id="conflict-keep">Keep mine</button>
-    <button id="conflict-take">Take theirs</button>
-  `;
-  bar.style.display = "flex";
-  document.getElementById("conflict-keep")!.onclick = () => dismissConflict();
-  document.getElementById("conflict-take")!.onclick = () => applyConflictDisk();
-}
-
-function dismissConflict(): void {
-  conflictPath = null;
-  conflictDiskContent = "";
-  document.getElementById("conflict-bar")!.style.display = "none";
-}
-
-function applyConflictDisk(): void {
-  const path = conflictPath;
-  const content = conflictDiskContent;
-  dismissConflict();
-  if (!path) return;
-  const tab = state.tabs.find(t => t.path === path);
-  if (!tab) return;
-  state.updateContent(tab.id, content);
-  state.markClean(tab.id);
-  if (state.activeTabId === tab.id) {
-    surface.setContent(content);
-    renderPreview(content);
-  }
-  redrawTabs();
-}
+const { showConflict } = createConflictBar({
+  state, getSurface: () => surface, renderPreview, redrawTabs,
+});
 
 // OS file watcher events
 listen<string>("scrybe://file-changed", async event => {
   await reloadTabFromDisk(event.payload);
 }).catch(console.error);
 
-// ─── CLI ↔ GUI RPC events (Phase 1) ──────────────────────────────────────────
-//
-// Emitted by the Rust socket server in `src-tauri/src/cli_rpc.rs`. Each event
-// payload carries a canonicalized path the Rust side already resolved.
-
-// `scrybe foo.md` (or `scrybe open foo.md`) — open or refresh.
-// "One tab, one file": if the path is already open, refresh from disk
-// instead of duplicating. Request-with-reply so the caller (CLI/MCP) blocks
-// until the tab is actually open and gets the real tab_id — this removes the
-// open→edit race where a fire-and-forget open let a follow-up hit "not open"
-// (#141). The `reply` id is only present on the reply-based (Phase 2) path.
-listen<{ id: number; data: string }>("scrybe://cli-open", async event => {
-  const { id, data: path } = event.payload;
-  try {
-    const existing = state.tabs.find(t => t.path === path);
-    let reloaded = false;
-    if (existing) {
-      // Bring the tab to the front (editor included), then refresh it.
-      selectTab(existing.id);
-      await reloadTabFromDisk(path);
-      reloaded = true;
-    } else {
-      await openFileByPath(path);
-    }
-    await reply(id, { result: { tab_id: path, reloaded } });
-  } catch (err) {
-    await reply(id, {
-      error: { code: -32603, message: `open failed: ${err instanceof Error ? err.message : err}` },
-    });
-  }
-}).catch(console.error);
-
-// `scrybe save foo.md` / MCP `save` — write an open tab's buffer to its file.
-// Request-with-reply: reports `{ path, bytes, was_dirty }` or ERR_TAB_NOT_OPEN,
-// so callers learn whether the save actually happened. Presentation is per
-// surface: the CLI keeps its documented silent no-op for a not-open path; the
-// MCP tool surfaces it as a business tool_error.
-listen<{ id: number; data: string }>("scrybe://cli-save", async event => {
-  const { id, data: path } = event.payload;
-  const tab = state.tabs.find(t => t.path === path);
-  if (!tab || !tab.path) {
-    await reply(id, { error: { code: ERR_TAB_NOT_OPEN, message: `not open: ${path}` } });
-    return;
-  }
-  const wasDirty = tab.isDirty;
-  // Snapshot the buffer before the await: keystrokes and concurrent socket
-  // edits mutate tab.content in place while the write is in flight. The
-  // snapshot is what save_file writes, so bytes must come from it, and the
-  // tab may only be marked clean if the buffer still matches what was saved.
-  const content = tab.content;
-  try {
-    await invoke("save_file", { path: tab.path, content });
-    invoke("note_autosave", { path: tab.path }).catch(() => {});
-    if (tab.content === content) state.markClean(tab.id);
-    redrawTabs();
-    const bytes = new TextEncoder().encode(content).length;
-    await reply(id, { result: { path: tab.path, bytes, was_dirty: wasDirty } });
-  } catch (err) {
-    await reply(id, {
-      error: { code: -32603, message: `save failed: ${err instanceof Error ? err.message : err}` },
-    });
-  }
-}).catch(console.error);
-
-// `scrybe close foo.md` — close if open, else silent no-op.
-listen<string>("scrybe://cli-close", event => {
-  const tab = state.tabs.find(t => t.path === event.payload);
-  if (tab) closeTab(tab.id);
-}).catch(console.error);
-
-// `scrybe quit [--force]` — quit the app; `force=true` skips dirty prompts.
-listen<boolean>("scrybe://cli-quit", async event => {
-  const force = event.payload === true;
-  if (!force) {
-    const dirty = state.tabs.filter(t => t.isDirty);
-    if (dirty.length > 0) {
-      const names = dirty.map(t => t.path?.split("/").pop() ?? "(untitled)").join(", ");
-      const proceed = window.confirm(
-        `Unsaved changes in: ${names}. Quit anyway? (use \`scrybe quit --force\` to skip this prompt)`,
-      );
-      if (!proceed) return;
-    }
-  }
-  // #232: window-close left the PROCESS (and the socket) alive in practice —
-  // a half-dead app agents could still drive. Exit deterministically via the
-  // quit_app command (AppHandle::exit — no process plugin) after the dirty
-  // checks above have run.
-  await invoke("quit_app");
-}).catch(console.error);
-
-// ─── Phase 2: read-side commands with reply correlation ────────────────────
-//
-// These events carry an `id` field that the server is blocking on. The
-// frontend handler calls `cli_rpc_reply(id, {result|error})` to unblock
-// the dispatcher, which packages the payload into a JSON-RPC response.
-
-interface ReplyOk { result: unknown }
-interface ReplyErr { error: { code: number; message: string } }
-
-async function reply(id: number, body: ReplyOk | ReplyErr): Promise<void> {
-  await invoke("cli_rpc_reply", { id, reply: body });
-}
-
-const ERR_TAB_NOT_OPEN = -32001;
-const ERR_SECTION_NOT_FOUND = -32004;
-const ERR_DIRTY_RELOAD_REFUSED = -32005;
-
-// `scrybe read <path>` — return the in-memory buffer (which may differ
-// from disk if there are unsaved edits).
-listen<{ id: number; data: { path: string } }>("scrybe://cli-read", async event => {
-  const { id, data } = event.payload;
-  const tab = state.tabs.find(t => t.path === data.path);
-  if (!tab) {
-    await reply(id, { error: { code: ERR_TAB_NOT_OPEN, message: `not open: ${data.path}` } });
-    return;
-  }
-  await reply(id, {
-    result: { path: tab.path, content: tab.content, is_dirty: tab.isDirty },
-  });
-}).catch(console.error);
-
-// `scrybe tabs` / MCP `list_tabs` — the live set of open tabs (#46). No params;
-// enumerate our tab state into `TabInfo`s and reply.
-listen<{ id: number; data: unknown }>("scrybe://cli-list-tabs", async event => {
-  const { id } = event.payload;
-  const tabs = state.tabs.map(t => ({
-    path: t.path ?? "",
-    title: t.title,
-    is_dirty: t.isDirty,
-    view_mode: t.viewMode,
-    doc_kind: t.kind,
-    language: t.language,
-    active: t.id === state.activeTabId,
-  }));
-  await reply(id, { result: { tabs } });
-}).catch(console.error);
-
-// `scrybe reload <path>` / MCP `reload` — re-read an open tab from disk into its
-// live buffer (first-class socket op, retiring the /tmp/scrybe-reload-tab.txt poll).
-listen<{ id: number; data: { path: string; force: boolean } }>("scrybe://cli-reload", async event => {
-  const { id, data } = event.payload;
-  const tab = state.tabs.find(t => t.path === data.path);
-  if (!tab) {
-    await reply(id, { error: { code: ERR_TAB_NOT_OPEN, message: `not open: ${data.path}` } });
-    return;
-  }
-  const wasDirty = tab.isDirty;
-  if (wasDirty && !data.force) {
-    await reply(id, { error: { code: ERR_DIRTY_RELOAD_REFUSED, message: `unsaved edits in ${data.path} — pass force to discard` } });
-    return;
-  }
-  try {
-    const content = await invoke<string>("read_file", { path: data.path });
-    state.updateContent(tab.id, content);
-    state.markClean(tab.id);
-    if (state.activeTabId === tab.id) {
-      surface.setContent(content);
-      renderPreview(content);
-    }
-    redrawTabs();
-    const bytes = new TextEncoder().encode(content).length;
-    await reply(id, { result: { path: data.path, bytes, was_dirty: wasDirty } });
-  } catch (err) {
-    await reply(id, { error: { code: -32603, message: `reload failed: ${err instanceof Error ? err.message : err}` } });
-  }
-}).catch(console.error);
-
-// `scrybe find <pattern> [paths...]` — regex/literal grep across open tabs
-// (or named paths, falling back to disk for non-open ones).
-interface FindRequest {
-  pattern: string;
-  paths: string[];
-  literal: boolean;
-  case_sensitive: boolean;
-}
-
-listen<{ id: number; data: FindRequest }>("scrybe://cli-find", async event => {
-  const { id, data } = event.payload;
-  let regex: RegExp;
-  try {
-    const pattern = data.literal ? data.pattern.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") : data.pattern;
-    const flags = data.case_sensitive ? "g" : "gi";
-    regex = new RegExp(pattern, flags);
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
-    await reply(id, { error: { code: -32602, message: `invalid pattern: ${msg}` } });
-    return;
-  }
-
-  // If paths is empty, search every open tab. Otherwise, for each named
-  // path: use the open buffer if any, else read from disk.
-  type Hit = { path: string; line: number; column: number; text: string };
-  const hits: Hit[] = [];
-  const sources: { path: string; content: string }[] = [];
-
-  if (data.paths.length === 0) {
-    for (const t of state.tabs) {
-      if (t.path) sources.push({ path: t.path, content: t.content });
-    }
-  } else {
-    for (const p of data.paths) {
-      const tab = state.tabs.find(t => t.path === p);
-      if (tab) {
-        sources.push({ path: p, content: tab.content });
-      } else {
-        try {
-          const disk = await invoke<string>("read_file", { path: p });
-          sources.push({ path: p, content: disk });
-        } catch {
-          // skip silently — non-existent paths just contribute zero hits
-        }
-      }
-    }
-  }
-
-  for (const src of sources) {
-    const lines = src.content.split("\n");
-    for (let i = 0; i < lines.length; i++) {
-      regex.lastIndex = 0;
-      let m: RegExpExecArray | null;
-      while ((m = regex.exec(lines[i])) !== null) {
-        hits.push({ path: src.path, line: i + 1, column: m.index + 1, text: lines[i] });
-        // Avoid zero-width-match infinite loops.
-        if (m.index === regex.lastIndex) regex.lastIndex++;
-      }
-    }
-  }
-
-  await reply(id, { result: { hits } });
-}).catch(console.error);
-
-// `scrybe section <path> --heading <h>` — extract a section by heading.
-// Heading match is case-insensitive substring; section runs from the
-// matched heading to the next heading of the same or shallower level.
-listen<{ id: number; data: { path: string; heading: string } }>(
-  "scrybe://cli-section",
-  async event => {
-    const { id, data } = event.payload;
-    const tab = state.tabs.find(t => t.path === data.path);
-    if (!tab) {
-      await reply(id, {
-        error: { code: ERR_TAB_NOT_OPEN, message: `not open: ${data.path}` },
-      });
-      return;
-    }
-
-    const lines = tab.content.split("\n");
-    const headings = findHeadings(tab.content);
-    const needle = data.heading.toLowerCase();
-    const match = headings.find(heading => heading.text.toLowerCase().includes(needle));
-    if (!match) {
-      await reply(id, {
-        error: {
-          code: ERR_SECTION_NOT_FOUND,
-          message: `no heading matching '${data.heading}' in ${data.path}`,
-        },
-      });
-      return;
-    }
-    const startIdx = match.line - 1;
-    const level = match.level;
-    const actualHeading = match.text;
-    const next = headings.find(heading => heading.line > match.line && heading.level <= level);
-    const endIdx = next ? next.line - 1 : lines.length;
-    const sectionContent = lines.slice(startIdx, endIdx).join("\n");
-    await reply(id, {
-      result: { heading: actualHeading, level, content: sectionContent },
-    });
-  },
-).catch(console.error);
-
-// `scrybe edit <path> --start-line N --end-line M --content '...'` — replace lines.
-listen<{ id: number; data: { path: string; start_line: number; end_line: number; content: string } }>(
-  "scrybe://cli-edit",
-  async event => {
-    const { id, data } = event.payload;
-    const tab = state.tabs.find(t => t.path === data.path);
-    if (!tab) {
-      await reply(id, {
-        error: { code: ERR_TAB_NOT_OPEN, message: `not open: ${data.path}` },
-      });
-      return;
-    }
-    const lines = tab.content.split("\n");
-    if (data.start_line < 1 || data.end_line > lines.length || data.end_line < data.start_line) {
-      await reply(id, {
-        error: {
-          code: -32602,
-          message: `invalid line range ${data.start_line}..${data.end_line} for buffer with ${lines.length} lines`,
-        },
-      });
-      return;
-    }
-    // Replace lines [start_line-1 .. end_line-1] (inclusive) with the new content.
-    // Content may contain its own newlines; we preserve them as-is.
-    const newLines = data.content.split("\n");
-    const before = lines.slice(0, data.start_line - 1);
-    const after = lines.slice(data.end_line);
-    const merged = [...before, ...newLines, ...after].join("\n");
-
-    state.updateContent(tab.id, merged);
-    if (state.activeTabId === tab.id) {
-      surface.replaceContent(merged);
-      renderPreview(merged);
-    }
-    redrawTabs();
-    await reply(id, { result: { applied: true, size_after: merged.length, is_dirty: true } });
-  },
-).catch(console.error);
-
-// ─── UI-parity socket methods (A2) ───────────────────────────────────────────
-//
-// Typed replacements for the retired /tmp signal files: each drives the SAME
-// code path as the human toolbar control and replies with what actually
-// happened — no polling, no files, no ambient channels.
-
-// `state` — what the human is looking at right now, served live.
-listen<{ id: number; data: unknown }>("scrybe://cli-state", async event => {
-  await reply(event.payload.id, { result: uiStateSnapshot() });
-}).catch(console.error);
-
-// `set_theme` — same entry point as the toolbar dropdown.
-listen<{ id: number; data: { theme: string } }>("scrybe://cli-set-theme", async event => {
-  const { id, data } = event.payload;
-  const t = data.theme;
-  if (t !== "default" && t !== "dark" && t !== "solarized") {
-    await reply(id, { error: { code: -32602, message: `unknown theme: ${t}` } });
-    return;
-  }
-  applyTheme(t);
-  await reply(id, { result: { theme: t } });
-}).catch(console.error);
-
-// `view_mode` — concrete mode or `cycle`; replies with the CONCRETE mode
-// now active (a code/text tab pins to `edit`, mirroring the human guard).
-listen<{ id: number; data: { mode: string } }>("scrybe://cli-view-mode", async event => {
-  const { id, data } = event.payload;
-  const tab = state.activeTab();
-  if (!tab) {
-    await reply(id, { error: { code: ERR_TAB_NOT_OPEN, message: "no active tab" } });
-    return;
-  }
-  const m = data.mode;
-  if (m === "cycle") {
-    cyclePreviewMode();
-  } else if (isViewMode(m)) {
-    setViewMode(m);
-  } else {
-    await reply(id, { error: { code: -32602, message: `unknown mode: ${m}` } });
-    return;
-  }
-  await reply(id, { result: { mode: state.activeTab()?.viewMode ?? "both" } });
-}).catch(console.error);
-
-// `set_vim` — same entry point as the toolbar toggle. Replies with the value
-// actually APPLIED: the WYSIWYG surface has no Vim mode, so on a WYSIWYG tab
-// the request changes nothing and the reply is `enabled: false`.
-listen<{ id: number; data: { enabled: boolean } }>("scrybe://cli-set-vim", async event => {
-  const { id, data } = event.payload;
-  if (surface.capabilities.vim) setVimEnabled(data.enabled === true);
-  await reply(id, { result: { enabled: vimApplied() } });
-}).catch(console.error);
-
-// `set_language` — same entry point as the path-bar language chip. Sets the
-// ACTIVE tab's language by name (`auto` returns to detection) and replies
-// with what is now in effect.
-listen<{ id: number; data: { language: string } }>("scrybe://cli-set-language", async event => {
-  const { id, data } = event.payload;
-  if (!state.activeTab()) {
-    await reply(id, { error: { code: ERR_TAB_NOT_OPEN, message: "no active tab" } });
-    return;
-  }
-  const info = setActiveLanguage(String(data.language ?? ""));
-  if (!info) {
-    await reply(id, { error: { code: -32602, message: `unknown language: ${data.language}` } });
-    return;
-  }
-  await reply(id, {
-    result: {
-      language: info.language,
-      doc_kind: info.kind,
-      auto: state.activeTab()?.languageOverride === null,
-    },
-  });
-}).catch(console.error);
-
-// `set_explorer` — same entry point as the toolbar ☰ button. Replies with
-// whether the Explorer is now showing.
-listen<{ id: number; data: { visible: boolean } }>("scrybe://cli-set-explorer", async event => {
-  const { id, data } = event.payload;
-  setExplorerVisible(data.visible === true);
-  await reply(id, { result: { visible: explorerVisible } });
-}).catch(console.error);
-
-// `logs` — newest-last tail of the in-memory console ring.
-listen<{ id: number; data: { tail?: number | null } }>("scrybe://cli-logs", async event => {
-  const { id, data } = event.payload;
-  const requested = typeof data.tail === "number" && data.tail > 0 ? data.tail : 50;
-  const n = Math.min(requested, logRing.length);
-  await reply(id, { result: { lines: logRing.slice(logRing.length - n) } });
-}).catch(console.error);
+registerRpcTabs({
+  state, selectTab, reloadTabFromDisk, openFileByPath, closeTab, redrawTabs,
+  getSurface: () => surface, renderPreview,
+});
+registerRpcContent({ state, redrawTabs, getSurface: () => surface, renderPreview });
+registerRpcUi({
+  state, applyTheme, cyclePreviewMode, setViewMode, setVimEnabled, vimApplied,
+  setActiveLanguage, setExplorerVisible, isExplorerVisible: () => explorerVisible,
+  uiStateSnapshot, getSurface: () => surface,
+});
