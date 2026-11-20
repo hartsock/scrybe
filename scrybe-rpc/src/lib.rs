@@ -174,7 +174,7 @@ pub struct TabInfo {
     pub is_dirty: bool,
     /// Current view mode (`both` | `edit` | `preview` | `wysiwyg`).
     pub view_mode: String,
-    /// How the document is treated (`markdown` | `code` | `text`). Added in
+    /// How the document is treated (`markdown` | `code` | `text` | `table`; `table` added in contract 0.8). Added in
     /// contract 0.7; an older app omits it, which reads as `markdown`.
     #[serde(default = "default_doc_kind")]
     pub doc_kind: String,
@@ -232,7 +232,7 @@ pub struct StateResult {
     pub is_dirty: bool,
     /// `both` | `edit` | `preview` | `wysiwyg`.
     pub view_mode: String,
-    /// The active tab's document kind (`markdown` | `code` | `text`). Added in
+    /// The active tab's document kind (`markdown` | `code` | `text` | `table`; `table` added in contract 0.8). Added in
     /// contract 0.7; an older app omits it, which reads as `markdown`.
     #[serde(default = "default_doc_kind")]
     pub doc_kind: String,
@@ -306,7 +306,7 @@ pub struct SetLanguageParams {
 pub struct SetLanguageResult {
     /// Canonical language name, or null for plain text.
     pub language: Option<String>,
-    /// `markdown` | `code` | `text`.
+    /// `markdown` | `code` | `text` | `table` (`table` added in contract 0.8).
     pub doc_kind: String,
     /// True when the language is detected rather than set by hand.
     pub auto: bool,
@@ -460,19 +460,19 @@ impl Reply {
 // ── JSON-RPC error codes ────────────────────────────────────────────────────
 //
 // Standard codes (-32700 to -32603) follow the spec. Application codes live in
-// APP_ERR_RANGE below. The full registry is frozen in docs/rpc-contract-0.7.md.
+// APP_ERR_RANGE below. The full registry is frozen in docs/rpc-contract-0.8.md.
 
 /// The reserved range for Scrybe application error codes, per the JSON-RPC 2.0
 /// "server error" convention: every `ERR_*` application code MUST fall inside
 /// `-32099..=-32000`, MUST be unique, and — once shipped in a release — MUST
-/// keep its meaning forever (the 0.7 contract fixture,
-/// `docs/rpc-contract-0.7.md`, is the compatibility artifact). Enforced by the
+/// keep its meaning forever (the 0.8 contract fixture,
+/// `docs/rpc-contract-0.8.md`, is the compatibility artifact). Enforced by the
 /// `app_error_codes_unique_and_in_reserved_range` test.
 pub const APP_ERR_RANGE: std::ops::RangeInclusive<i32> = -32099..=-32000;
 
 /// Every application-defined error code, in one place. New codes MUST be added
 /// here (the registry test checks uniqueness + range membership against this
-/// slice) and documented in `docs/rpc-contract-0.7.md`.
+/// slice) and documented in `docs/rpc-contract-0.8.md`.
 pub const APP_ERROR_CODES: &[i32] = &[
     ERR_TAB_NOT_OPEN,
     ERR_DIRTY_QUIT_REFUSED,

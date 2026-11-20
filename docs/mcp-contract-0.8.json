@@ -576,7 +576,7 @@
       "annotations": {
         "readOnlyHint": true
       },
-      "description": "List the tabs currently open in the running Scrybe editor — each with its path, title, dirty flag, view mode, document kind (`markdown`, `code` or `text`), language (e.g. `Rust`; null for plain text), and whether it is the active tab. Requires a live app; with none running it reports `no_live_app`. Read the `data.tabs` array.",
+      "description": "List the tabs currently open in the running Scrybe editor — each with its path, title, dirty flag, view mode, document kind (`markdown`, `code`, `text` or `table`), language (e.g. `Rust`; null for plain text), and whether it is the active tab. Requires a live app; with none running it reports `no_live_app`. Read the `data.tabs` array.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {},
@@ -602,7 +602,8 @@
                   "enum": [
                     "markdown",
                     "code",
-                    "text"
+                    "text",
+                    "table"
                   ],
                   "type": "string"
                 },
@@ -1203,11 +1204,12 @@
             ]
           },
           "doc_kind": {
-            "description": "How the active tab's document is treated: Markdown (preview + WYSIWYG available), a recognized source-code language, or plain text (both edit-only).",
+            "description": "How the active tab's document is treated: Markdown (preview + WYSIWYG available), a recognized source-code language, plain text (both edit-only), or a CSV/TSV table (`table`; its grid is the `wysiwyg` mode).",
             "enum": [
               "markdown",
               "code",
-              "text"
+              "text",
+              "table"
             ],
             "type": "string"
           },
@@ -1515,7 +1517,8 @@
             "enum": [
               "markdown",
               "code",
-              "text"
+              "text",
+              "table"
             ],
             "type": "string"
           },
@@ -1786,6 +1789,410 @@
           "v",
           "kind",
           "applied"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "annotations": {
+        "readOnlyHint": true
+      },
+      "description": "Read rows of a CSV/TSV table as arrays of unescaped cell strings (ragged rows stay ragged). Returns one page of at most 1000 rows from `start_row` (default 1) to `end_row`; when `data.end_row` < `data.row_count`, page on with `start_row`. Rows and columns are 1-based. Reads the live buffer when the file is open in the running app (`target` is `buffer`), otherwise the file on disk. Returns `{ path, target, row_count, col_count, start_row, end_row, rows }`.",
+      "inputSchema": {
+        "properties": {
+          "end_row": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "path": {
+            "description": "A .csv or .tsv file.",
+            "type": "string"
+          },
+          "start_row": {
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "type": "object"
+      },
+      "name": "table_get",
+      "outputSchema": {
+        "properties": {
+          "col_count": {
+            "description": "Width of the widest row.",
+            "type": "integer"
+          },
+          "end_row": {
+            "description": "Last row returned; start_row - 1 when none.",
+            "type": "integer"
+          },
+          "is_dirty": {
+            "description": "True when the buffer has unsaved changes; always false for a file.",
+            "type": "boolean"
+          },
+          "kind": {
+            "const": "table_get",
+            "description": "Payload discriminator — the tool name."
+          },
+          "path": {
+            "description": "Canonical path of the table.",
+            "type": "string"
+          },
+          "row_count": {
+            "type": "integer"
+          },
+          "rows": {
+            "items": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "type": "array"
+          },
+          "start_row": {
+            "type": "integer"
+          },
+          "target": {
+            "description": "`buffer`: the live editor buffer (stays dirty until `save`). `file`: the file on disk, written immediately.",
+            "enum": [
+              "buffer",
+              "file"
+            ],
+            "type": "string"
+          },
+          "tool_error": {
+            "description": "Business failure — the tool ran and said \"no\". Absent on success. (At the MCP boundary a business failure surfaces as an isError:true result instead of riding inside a success payload.)",
+            "properties": {
+              "code": {
+                "description": "Stable machine code, e.g. no_live_app.",
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "code",
+              "message"
+            ],
+            "type": "object"
+          },
+          "v": {
+            "const": 1,
+            "description": "Payload schema version."
+          }
+        },
+        "required": [
+          "v",
+          "kind",
+          "path",
+          "target",
+          "row_count",
+          "col_count",
+          "start_row",
+          "end_row",
+          "rows",
+          "is_dirty"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "annotations": {
+        "readOnlyHint": false
+      },
+      "description": "Set one cell of a CSV/TSV table to `value`, rewriting only that cell's text. A cell missing from a short row is created by padding the row. `row` must exist and `col` must be inside the table's width, else `out_of_range`. `changed` is false (and nothing is written) when the cell already holds `value`. Rows and columns are 1-based. Edits the live buffer when the file is open in the running app (`target` is `buffer`; the edit stays unsaved until `save`), otherwise the file on disk, written immediately. Values are written literally: no trimming, no formula-injection sanitizing.",
+      "inputSchema": {
+        "properties": {
+          "col": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "path": {
+            "description": "A .csv or .tsv file.",
+            "type": "string"
+          },
+          "row": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "value": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "path",
+          "row",
+          "col",
+          "value"
+        ],
+        "type": "object"
+      },
+      "name": "table_set_cell",
+      "outputSchema": {
+        "properties": {
+          "changed": {
+            "type": "boolean"
+          },
+          "col": {
+            "type": "integer"
+          },
+          "is_dirty": {
+            "description": "True when the buffer has unsaved changes; always false for a file.",
+            "type": "boolean"
+          },
+          "kind": {
+            "const": "table_set_cell",
+            "description": "Payload discriminator — the tool name."
+          },
+          "old_value": {
+            "description": "Null when the cell did not exist (short row).",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "path": {
+            "description": "Canonical path of the table.",
+            "type": "string"
+          },
+          "row": {
+            "type": "integer"
+          },
+          "target": {
+            "description": "`buffer`: the live editor buffer (stays dirty until `save`). `file`: the file on disk, written immediately.",
+            "enum": [
+              "buffer",
+              "file"
+            ],
+            "type": "string"
+          },
+          "tool_error": {
+            "description": "Business failure — the tool ran and said \"no\". Absent on success. (At the MCP boundary a business failure surfaces as an isError:true result instead of riding inside a success payload.)",
+            "properties": {
+              "code": {
+                "description": "Stable machine code, e.g. no_live_app.",
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "code",
+              "message"
+            ],
+            "type": "object"
+          },
+          "v": {
+            "const": 1,
+            "description": "Payload schema version."
+          },
+          "value": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "v",
+          "kind",
+          "path",
+          "target",
+          "row",
+          "col",
+          "old_value",
+          "value",
+          "changed",
+          "is_dirty"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "annotations": {
+        "readOnlyHint": false
+      },
+      "description": "Insert a row into a CSV/TSV table so that it becomes row `row` (1..=row_count + 1; row_count + 1 appends). `cells` (default none) fill it from column 1; the row is at least as wide as the table, missing cells are empty. Else `out_of_range`. Rows and columns are 1-based. Edits the live buffer when the file is open in the running app (`target` is `buffer`; the edit stays unsaved until `save`), otherwise the file on disk, written immediately. Values are written literally: no trimming, no formula-injection sanitizing.",
+      "inputSchema": {
+        "properties": {
+          "cells": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "path": {
+            "description": "A .csv or .tsv file.",
+            "type": "string"
+          },
+          "row": {
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "path",
+          "row"
+        ],
+        "type": "object"
+      },
+      "name": "table_insert_row",
+      "outputSchema": {
+        "properties": {
+          "is_dirty": {
+            "description": "True when the buffer has unsaved changes; always false for a file.",
+            "type": "boolean"
+          },
+          "kind": {
+            "const": "table_insert_row",
+            "description": "Payload discriminator — the tool name."
+          },
+          "path": {
+            "description": "Canonical path of the table.",
+            "type": "string"
+          },
+          "row": {
+            "type": "integer"
+          },
+          "row_count": {
+            "description": "Rows after the insert.",
+            "type": "integer"
+          },
+          "target": {
+            "description": "`buffer`: the live editor buffer (stays dirty until `save`). `file`: the file on disk, written immediately.",
+            "enum": [
+              "buffer",
+              "file"
+            ],
+            "type": "string"
+          },
+          "tool_error": {
+            "description": "Business failure — the tool ran and said \"no\". Absent on success. (At the MCP boundary a business failure surfaces as an isError:true result instead of riding inside a success payload.)",
+            "properties": {
+              "code": {
+                "description": "Stable machine code, e.g. no_live_app.",
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "code",
+              "message"
+            ],
+            "type": "object"
+          },
+          "v": {
+            "const": 1,
+            "description": "Payload schema version."
+          }
+        },
+        "required": [
+          "v",
+          "kind",
+          "path",
+          "target",
+          "row",
+          "row_count",
+          "is_dirty"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "annotations": {
+        "readOnlyHint": false
+      },
+      "description": "Delete row `row` of a CSV/TSV table (the header is row 1 if the file has one). Returns the deleted row's `cells`. A row that does not exist is `out_of_range`. Rows and columns are 1-based. Edits the live buffer when the file is open in the running app (`target` is `buffer`; the edit stays unsaved until `save`), otherwise the file on disk, written immediately. Values are written literally: no trimming, no formula-injection sanitizing.",
+      "inputSchema": {
+        "properties": {
+          "path": {
+            "description": "A .csv or .tsv file.",
+            "type": "string"
+          },
+          "row": {
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "path",
+          "row"
+        ],
+        "type": "object"
+      },
+      "name": "table_delete_row",
+      "outputSchema": {
+        "properties": {
+          "cells": {
+            "description": "The deleted row's values.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "is_dirty": {
+            "description": "True when the buffer has unsaved changes; always false for a file.",
+            "type": "boolean"
+          },
+          "kind": {
+            "const": "table_delete_row",
+            "description": "Payload discriminator — the tool name."
+          },
+          "path": {
+            "description": "Canonical path of the table.",
+            "type": "string"
+          },
+          "row": {
+            "type": "integer"
+          },
+          "row_count": {
+            "description": "Rows after the delete.",
+            "type": "integer"
+          },
+          "target": {
+            "description": "`buffer`: the live editor buffer (stays dirty until `save`). `file`: the file on disk, written immediately.",
+            "enum": [
+              "buffer",
+              "file"
+            ],
+            "type": "string"
+          },
+          "tool_error": {
+            "description": "Business failure — the tool ran and said \"no\". Absent on success. (At the MCP boundary a business failure surfaces as an isError:true result instead of riding inside a success payload.)",
+            "properties": {
+              "code": {
+                "description": "Stable machine code, e.g. no_live_app.",
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "code",
+              "message"
+            ],
+            "type": "object"
+          },
+          "v": {
+            "const": 1,
+            "description": "Payload schema version."
+          }
+        },
+        "required": [
+          "v",
+          "kind",
+          "path",
+          "target",
+          "row",
+          "cells",
+          "row_count",
+          "is_dirty"
         ],
         "type": "object"
       }

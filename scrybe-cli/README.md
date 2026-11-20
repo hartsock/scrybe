@@ -32,6 +32,8 @@ also the launcher for the Tauri GUI app: `scrybe file.md` locates the
 | `scrybe mermaid embed PNG SOURCE` | Embed Mermaid source into PNG iTXt chunk |
 | `scrybe mermaid extract PNG` | Print embedded Mermaid source, verifying its SHA-256 by default; exit 2 if tampered, `--unverified` to skip the check (forensics) |
 | `scrybe mermaid verify PNG` | Verify SHA-256 integrity of embedded source; exits 1 if tampered or digest missing |
+| `scrybe table get FILE [--rows START:END] [--json]` | Print CSV/TSV rows (1-based; one line per row, cells TAB-separated and escaped) |
+| `scrybe table set-cell FILE ROW COL VALUE` | Set one cell; `table insert-row FILE ROW [CELL...]` and `table delete-row FILE ROW` edit rows. Edits the live buffer if the file is open in the app, else the file |
 | `scrybe open [PATH]` | Launch the Scrybe GUI, optionally at a file or directory |
 | `scrybe version` | Print version and active feature flags |
 | `scrybe [PATH]` | Bare invocation with a path injects `open` automatically |
