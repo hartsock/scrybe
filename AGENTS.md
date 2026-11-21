@@ -49,6 +49,10 @@ addressed by canonical `path`.
 | `table_delete_row` | Delete row `row`; returns the deleted cells | `path`, `row` |
 | `export` | Export Markdown to Word (.docx) with Mermaid PNGs | `path`, `output?`, `no_diagrams?` |
 | `export_figures` | Export every Mermaid diagram in a document to sibling `<stem>_fig_NN.png` files (each embeds its source) | `path` |
+| `gdoc_auth` | Sign in/out of Google or report state (`login` opens the host browser for consent); data `{status, expires_at, config_dir}` | `action` (`login` / `logout` / `status`) |
+| `gdoc_list` | List the Google Docs Scrybe created (`drive.file` scope), newest first; data `{count, docs[{id, name, url, modified_time}]}` | — |
+| `gdoc_export` | Export a Markdown file to a Google Doc (Mermaid → PNG with source in iTXt + alt text); the first export creates the doc in the "Scrybe" Drive folder and writes `<stem>.gdoc.json` beside the file, later exports update it in place; local images embed only from under the file's directory, the rest are listed in `images_skipped`; data `{path, doc_id, url, folder_id, action: created\|updated, figures, images_skipped}` | `path`, `title?` |
+| `gdoc_import` | Import a Google Doc (id or URL) to a Markdown file; PNGs carrying Mermaid source become fences again; data `{path, doc_id, diagrams, images, figures[{index, verification: verified\|unverified\|alt-text\|manifest}], image_paths}` | `doc`, `output` |
 
 > **Parity rule:** every human control in scrybe-app has an MCP equivalent
 > and vice versa. The `state`/`set_theme`/`view_mode`/`set_vim`/`set_language`/
@@ -58,7 +62,11 @@ addressed by canonical `path`.
 > respectively. `mermaid_to_png` mirrors right-clicking a rendered Mermaid
 > diagram to open the PNG save dialog; the GUI snapshots Mermaid.js
 > pixels while the headless tool renders independently, and both embed the
-> same source/UUID/SHA-256 provenance.
+> same source/UUID/SHA-256 provenance. `gdoc_export` is the ☁️ **Google Docs**
+> toolbar button (and File ▸ Export to Google Docs…), `gdoc_import` is
+> File ▸ Import from Google Docs… (`gdoc_list` backs its picker), and
+> `gdoc_auth` is File ▸ Google Docs ▸ "Sign in to Google…" / "Sign out of
+> Google".
 >
 > Host installation lifecycle controls are the deliberate exception: installing
 > or removing a shell command mutates the local machine rather than a document,
@@ -69,6 +77,15 @@ addressed by canonical `path`.
 > The `table_*` tools work headless on the file on disk (written immediately)
 > and on the live buffer when the file is open in the app (left dirty until
 > `save`); they never launch the app.
+> The `gdoc_*` tools are in-process too (no running app), but they need the
+> user's Google sign-in: a bring-your-own OAuth client plus a cached token
+> (`docs/google-docs.md`). `gdoc_auth` with `action: "login"` opens a browser
+> on the host for Google's consent screen and waits up to five minutes, so
+> only call it when a human is at that machine. Their business errors are
+> `not_configured` (no OAuth client — the human does the one-time setup),
+> `not_logged_in` (no usable token — `gdoc_auth` `login`, or ask the human
+> to run `scrybe gdoc login`), and `doc_not_found` (wrong id, deleted, or a
+> doc Scrybe did not create and so cannot see under `drive.file`).
 > The stateful editor/UI tools report `no_live_app` when no app is running.
 
 ### Reading MCP results (0.6.0 — BREAKING for older agents)
@@ -148,6 +165,26 @@ elsewhere are preserved. If the file is open in the app the change lands in
 the buffer (`is_dirty: true`, `target: "buffer"`) and needs `save`; otherwise
 it is written to disk at once (`target: "file"`). `table_get` pages 1000 rows
 at a time: re-call with `start_row` while `end_row < row_count`.
+
+## Google Docs via MCP
+
+```
+1. gdoc_auth(action: "status")       → status must be "logged_in"; otherwise stop and
+                                        ask the human (setup + sign-in: docs/google-docs.md)
+2. save(path)                        → gdoc_export reads the file, so persist edits first
+3. gdoc_export(path, title?)         → {url, doc_id, action: created|updated, figures}
+4. gdoc_list()                       → the docs Scrybe created, to pick one to pull back
+5. gdoc_import(doc, output)          → Markdown at `output` (+ sibling images + sidecar);
+                                        check figures[].verification per diagram
+```
+
+Exporting the same `path` again updates the linked doc in place (the link
+is the `<stem>.gdoc.json` sidecar beside the file; delete it to force a new
+doc). `verification` says which carrier the Mermaid source came back from:
+`verified` (PNG iTXt, digest matched), `unverified` (iTXt without a matching
+digest), `alt-text` (Google re-encoded the PNG; recovered from the image alt
+text), `manifest` (recovered from the sidecar beside `output`, which only
+applies when that sidecar names the same doc).
 
 ## Swarm Participation (scrybe-swarm)
 

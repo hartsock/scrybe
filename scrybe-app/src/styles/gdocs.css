@@ -1,0 +1,71 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+/* Google Docs import panel — an inline bar in the conflict-bar slot (below
+   the toolbar, above the editor). Tauri's WebKit has no window.prompt, so the
+   document picker lives in the DOM. */
+
+#gdoc-panel {
+  display: none;
+  flex-direction: column;
+  gap: 6px;
+  background: #1e2a36;
+  color: #dde;
+  font-size: 13px;
+  padding: 8px 12px;
+  flex-shrink: 0;
+  border-bottom: 1px solid #2a6496;
+}
+#gdoc-panel.open { display: flex; }
+
+.gdoc-head { display: flex; align-items: center; gap: 10px; }
+.gdoc-title { font-weight: 600; }
+.gdoc-hint { margin-left: auto; color: #99a; font-size: 12px; }
+
+.gdoc-list {
+  max-height: 160px;
+  overflow-y: auto;
+  border: 1px solid #334;
+  border-radius: 3px;
+  background: #161e27;
+}
+.gdoc-list-msg { padding: 6px 8px; color: #99a; }
+.gdoc-list-msg button { margin-left: 6px; }
+
+.gdoc-row {
+  display: flex;
+  gap: 10px;
+  padding: 4px 8px;
+  cursor: pointer;
+  border-bottom: 1px solid #222c36;
+}
+.gdoc-row:last-child { border-bottom: none; }
+.gdoc-row:hover, .gdoc-row:focus { background: #24313f; outline: none; }
+.gdoc-row.selected { background: #0a5fa5; color: #fff; }
+.gdoc-row-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.gdoc-row-time { color: #99a; font-size: 12px; white-space: nowrap; }
+.gdoc-row.selected .gdoc-row-time { color: #cde; }
+
+.gdoc-actions { display: flex; align-items: center; gap: 8px; }
+.gdoc-actions input {
+  flex: 1;
+  background: #161e27;
+  color: #eee;
+  border: 1px solid #445;
+  border-radius: 3px;
+  padding: 4px 8px;
+  font-size: 13px;
+}
+.gdoc-actions input:focus { outline: none; border-color: #1577c4; }
+
+#gdoc-panel button {
+  padding: 3px 10px;
+  font-size: 12px;
+  cursor: pointer;
+  border-radius: 3px;
+  border: 1px solid #556;
+  background: #2b3845;
+  color: #eee;
+}
+#gdoc-panel button:hover { background: #3a4a5a; }
+#gdoc-panel button.primary { background: #0a5fa5; border-color: #1577c4; color: #fff; }
+#gdoc-panel button.primary:hover { background: #1577c4; }
+#gdoc-panel button:disabled { opacity: 0.6; cursor: default; }

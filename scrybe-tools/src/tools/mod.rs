@@ -10,6 +10,7 @@ use crate::Registry;
 
 pub mod editor;
 pub mod export;
+pub mod gdoc;
 pub mod lint;
 pub mod mermaid;
 pub mod render;
@@ -34,6 +35,9 @@ pub(crate) fn register_defaults(reg: &mut Registry) {
         reg.register(spec);
     }
     for spec in table::specs() {
+        reg.register(spec);
+    }
+    for spec in gdoc::specs() {
         reg.register(spec);
     }
 }
