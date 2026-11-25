@@ -1095,10 +1095,15 @@ listen<string>("scrybe://menu", event => {
 }).catch(console.error);
 
 // When a second `scrybe open <path>` is run, the single-instance plugin
-// forwards the path here instead of spawning a new window.
+// forwards the path here instead of spawning a new window. macOS Finder
+// ("Open With", double-click, a drop on the Dock icon) arrives here too; files
+// it handed over before this listener existed are queued in Rust and collected
+// once the listener is in place, so none fall in the gap.
 listen<string>("scrybe://open", event => {
   openFileByPath(event.payload);
-}).catch(console.error);
+}).then(() => invoke<string[]>("take_opened_files"))
+  .then(paths => { for (const p of paths) openFileByPath(p); })
+  .catch(console.error);
 
 // A2: the /tmp signal-file pollers (close-tab, theme, view-mode, vim, wrap)
 // are gone — agents drive every UI control through typed socket methods
