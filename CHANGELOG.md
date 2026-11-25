@@ -53,6 +53,13 @@ lock-step version (`[workspace.package] version`).
   `doc_kind` may be `table` in `state`, `set_language` and `list_tabs`. No
   socket change. The artifacts are now `docs/mcp-contract-0.8.json` and
   `docs/rpc-contract-0.8.md`.
+- **macOS "Open With"**: Scrybe now shows up in Finder's "Open With" for Markdown, Mermaid,
+  plain text, JSON, XML, YAML, CSV, scripts and source files (Rust, Go, TOML
+  and other types macOS has no built-in type for). Markdown and Mermaid are
+  claimed as an editor; everything else is claimed as an alternate, so
+  existing defaults are left alone. Files opened from Finder, by
+  double-click, or by dropping them on the Dock icon open in tabs, including
+  on a cold launch (`src-tauri/tauri.macos.conf.json`, `RunEvent::Opened`).
 
 ## [0.7.0] — 2026-11-10
 

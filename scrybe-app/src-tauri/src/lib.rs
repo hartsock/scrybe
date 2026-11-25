@@ -32,6 +32,7 @@
 
 mod cli_rpc;
 mod menu;
+mod opened;
 
 use std::collections::{HashMap, HashSet};
 use std::process::{Child, Command, Stdio};
@@ -1002,6 +1003,7 @@ pub fn run() {
             toggle_devtools,
             get_initial_directory,
             get_initial_file,
+            opened::take_opened_files,
             cli_rpc::cli_rpc_reply,
             menu::menu_sync,
             print_document,
@@ -1089,8 +1091,30 @@ pub fn run() {
 
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .expect("error while running Scrybe");
+        .build(tauri::generate_context!())
+        .expect("error while building Scrybe")
+        .run(on_run_event);
+}
+
+/// App-level events outside any window. macOS hands over files opened from
+/// Finder ("Open With", double-click, a drop on the Dock icon) as
+/// `RunEvent::Opened`; Windows and Linux pass them as arguments instead,
+/// which `get_initial_file` and the single-instance plugin already cover.
+fn on_run_event(app: &tauri::AppHandle, event: tauri::RunEvent) {
+    #[cfg(target_os = "macos")]
+    if let tauri::RunEvent::Opened { urls } = event {
+        for path in opened::file_paths(&urls) {
+            let live = opened::OPENED.lock().ok().and_then(|mut q| q.push(path));
+            if let Some(path) = live {
+                let _ = app.emit("scrybe://open", path);
+            }
+        }
+        if let Some(win) = app.get_webview_window("main") {
+            let _ = win.set_focus();
+        }
+    }
+    #[cfg(not(target_os = "macos"))]
+    let _ = (app, event);
 }
 
 #[cfg(test)]

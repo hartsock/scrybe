@@ -1,0 +1,51 @@
+{
+  "bundle": {
+    "fileAssociations": [
+      {
+        "name": "Markdown document",
+        "description": "Markdown document",
+        "ext": ["md", "markdown", "mdown", "mkd", "mkdn", "mdx"],
+        "contentTypes": ["net.daringfireball.markdown"],
+        "role": "Editor",
+        "rank": "Default"
+      },
+      {
+        "name": "Mermaid diagram",
+        "description": "Mermaid diagram source",
+        "ext": ["mmd", "mermaid"],
+        "role": "Editor",
+        "rank": "Default"
+      },
+      {
+        "name": "Text or source file",
+        "description": "Plain text, JSON, XML, YAML, CSV, scripts and source code",
+        "ext": ["txt", "json", "xml", "yaml", "yml", "csv", "tsv"],
+        "contentTypes": [
+          "public.plain-text",
+          "public.json",
+          "public.xml",
+          "public.yaml",
+          "public.comma-separated-values-text",
+          "public.tab-separated-values-text",
+          "public.source-code",
+          "public.script",
+          "public.shell-script"
+        ],
+        "role": "Editor",
+        "rank": "Alternate"
+      },
+      {
+        "name": "Source file",
+        "description": "Source and config files macOS has no type for",
+        "ext": [
+          "rs", "go", "toml", "tsx", "jsx", "mjs", "cjs", "lua", "zig",
+          "kt", "kts", "scala", "dart", "ini", "cfg", "conf", "lock",
+          "gradle", "proto", "sql", "graphql", "vue", "svelte", "nix",
+          "tf", "hcl", "ex", "exs", "erl", "hs", "ml", "clj", "cmake", "mk"
+        ],
+        "role": "Editor",
+        "rank": "Alternate"
+      }
+    ]
+  }
+}
