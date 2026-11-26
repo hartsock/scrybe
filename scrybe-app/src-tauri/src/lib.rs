@@ -10,32 +10,35 @@
 //! - [`get_version`]       — returns the crate version string
 //! - [`list_directory`]    — enumerate directory contents
 //! - [`read_file`]         — read file text content
-//! - [`get_builtin_agents`] — enumerate built-in AI agents
-//! - [`set_agent_enabled`] — toggle an agent on/off (in-memory)
-//! - [`list_plugins`]      — enumerate Python plugins from ~/.config/scrybe/plugins/
-//! - [`run_plugin`]        — invoke a Python plugin with document source on stdin
-//! - [`terminal_start`]    — spawn a shell process (P4.11)
-//! - [`terminal_write`]    — write data to shell stdin (P4.11 scaffold)
-//! - [`terminal_run`]      — run a one-shot command and return its output (P4.11)
-//! - [`mcp_server_start`]  — launch scrybe-mcp-server as a stdio sidecar (P4.7)
-//! - [`mcp_server_status`] — report whether the MCP sidecar is running (P4.7)
-//! - [`mcp_connection_info`] — return connection instructions for MCP clients (P4.7)
-//! - [`vcs_open`]          — open a git repository and cache it (P4.8)
-//! - [`vcs_status`]        — return working-tree status entries (P4.8)
-//! - [`vcs_stage_all`]     — stage all changes (`git add -A`) (P4.8)
-//! - [`vcs_commit`]        — create a commit from the staged index (P4.8)
-//! - [`vcs_fetch`]         — fetch from a named remote (P4.8)
-//! - [`vcs_log`]           — return recent commit summaries (P4.8)
-//! - [`vcs_remotes`]       — list configured remotes with roles (P4.8)
+//! - [`plugins::get_builtin_agents`] — enumerate built-in AI agents
+//! - [`plugins::set_agent_enabled`] — toggle an agent on/off (in-memory)
+//! - [`plugins::list_plugins`]      — enumerate Python plugins from ~/.config/scrybe/plugins/
+//! - [`plugins::run_plugin`]        — invoke a Python plugin with document source on stdin
+//! - [`terminal::terminal_start`]    — spawn a shell process (P4.11)
+//! - [`terminal::terminal_write`]    — write data to shell stdin (P4.11 scaffold)
+//! - [`terminal::terminal_run`]      — run a one-shot command and return its output (P4.11)
+//! - [`mcp::mcp_server_start`]  — launch scrybe-mcp-server as a stdio sidecar (P4.7)
+//! - [`mcp::mcp_server_status`] — report whether the MCP sidecar is running (P4.7)
+//! - [`mcp::mcp_connection_info`] — return connection instructions for MCP clients (P4.7)
+//! - [`vcs::vcs_open`]          — open a git repository and cache it (P4.8)
+//! - [`vcs::vcs_status`]        — return working-tree status entries (P4.8)
+//! - [`vcs::vcs_stage_all`]     — stage all changes (`git add -A`) (P4.8)
+//! - [`vcs::vcs_commit`]        — create a commit from the staged index (P4.8)
+//! - [`vcs::vcs_fetch`]         — fetch from a named remote (P4.8)
+//! - [`vcs::vcs_log`]           — return recent commit summaries (P4.8)
+//! - [`vcs::vcs_remotes`]       — list configured remotes with roles (P4.8)
 //!
 //! Full editor integration (P4.2–P4.11) builds on this IPC bridge.
 
 mod cli_rpc;
+mod mcp;
 mod menu;
+mod plugins;
+mod terminal;
+mod vcs;
 
 use std::collections::{HashMap, HashSet};
-use std::process::{Child, Command, Stdio};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::process::{Command, Stdio};
 use std::sync::Mutex;
 use std::time::Instant;
 use tauri::{Emitter as _, Manager as _};
@@ -62,30 +65,6 @@ impl WatchState {
 }
 
 static WATCH: Mutex<Option<WatchState>> = Mutex::new(None);
-
-/// Simple shell state — one shell process per app window for P4.11.
-/// A full async PTY with multiplexed I/O is deferred to a follow-up node.
-struct ShellState {
-    child: Option<Child>,
-}
-
-static SHELL: Mutex<ShellState> = Mutex::new(ShellState { child: None });
-
-// ─── P4.7 — In-app MCP server ────────────────────────────────────────────────
-
-/// Tracks whether the in-app MCP sidecar is running.
-static MCP_RUNNING: AtomicBool = AtomicBool::new(false);
-
-// ─── P4.8 — VCS state ────────────────────────────────────────────────────────
-
-use scrybe_vcs::{GitAuthor, ScrybeRepo};
-use std::sync::Mutex as VcsMutex;
-
-struct VcsState {
-    repo: Option<ScrybeRepo>,
-}
-
-static VCS: VcsMutex<VcsState> = VcsMutex::new(VcsState { repo: None });
 
 /// Render a Markdown `source` string to HTML.
 ///
@@ -348,100 +327,6 @@ fn remove_backup(path: String) -> Result<(), String> {
     Ok(())
 }
 
-/// Return the built-in agent registry (static list; persistence is P4.5+).
-#[tauri::command]
-fn get_builtin_agents() -> Vec<serde_json::Value> {
-    vec![
-        serde_json::json!({"id":"claude-code","displayName":"Claude Code","description":"Anthropic Claude Code CLI","enabled":false}),
-        serde_json::json!({"id":"codex","displayName":"OpenAI Codex CLI","description":"OpenAI Codex via codex CLI","enabled":false}),
-        serde_json::json!({"id":"anthropic-api","displayName":"Anthropic API","description":"Direct Anthropic Messages API","enabled":false}),
-        serde_json::json!({"id":"openai-api","displayName":"OpenAI API","description":"Direct OpenAI Chat API","enabled":false}),
-        serde_json::json!({"id":"ollama","displayName":"Ollama (local)","description":"Local Ollama inference","enabled":false}),
-    ]
-}
-
-/// Toggle an agent's enabled state (in-memory only for P4.4; persistence is P4.5+).
-#[tauri::command]
-fn set_agent_enabled(id: String, enabled: bool) -> bool {
-    tracing::info!("agent {} enabled={}", id, enabled);
-    true
-}
-
-// ─── P4.7 — MCP server commands ─────────────────────────────────────────────
-
-/// Start the in-app MCP server as a sidecar process.
-///
-/// Spawns `scrybe-mcp-server stdio` and keeps it alive.  The server
-/// communicates with external agents (Claude Code, Codex, etc.) over
-/// stdio via the MCP JSON-RPC protocol.  Calling this when the server is
-/// already running is a no-op (returns `"already running"`).
-#[tauri::command]
-fn mcp_server_start() -> Result<String, String> {
-    if MCP_RUNNING.load(Ordering::Relaxed) {
-        return Ok("already running".to_string());
-    }
-    let binary = which_scrybe_mcp_server()?;
-    Command::new(&binary)
-        .arg("stdio")
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|e| format!("failed to start scrybe-mcp-server: {e}"))?;
-    MCP_RUNNING.store(true, Ordering::Relaxed);
-    Ok(format!("started: {binary}"))
-}
-
-/// Returns whether the MCP server is running and its active transport.
-#[tauri::command]
-fn mcp_server_status() -> serde_json::Value {
-    serde_json::json!({
-        "running": MCP_RUNNING.load(Ordering::Relaxed),
-        "transport": "stdio",
-        "info": "Use `claude mcp add scrybe -- scrybe-mcp-server stdio` to connect."
-    })
-}
-
-/// Returns the MCP connection instructions for the active session.
-#[tauri::command]
-fn mcp_connection_info() -> serde_json::Value {
-    serde_json::json!({
-        "stdio": {
-            "command": "scrybe-mcp-server",
-            "args": ["stdio"],
-            "description": "Connect any MCP client via stdio transport"
-        },
-        "claude_code": "claude mcp add scrybe -- scrybe-mcp-server stdio",
-        "codex": "codex mcp add scrybe -- scrybe-mcp-server stdio",
-        "tools": [
-            "open", "read", "section", "edit", "find",
-            "render", "embed", "extract", "lint"
-        ]
-    })
-}
-
-/// Locate the `scrybe-mcp-server` binary on PATH or next to the current executable.
-fn which_scrybe_mcp_server() -> Result<String, String> {
-    if let Ok(path) = which::which("scrybe-mcp-server") {
-        return Ok(path.to_string_lossy().into_owned());
-    }
-    if let Ok(exe) = std::env::current_exe() {
-        let name = if cfg!(windows) {
-            "scrybe-mcp-server.exe"
-        } else {
-            "scrybe-mcp-server"
-        };
-        let sibling = exe.with_file_name(name);
-        if sibling.exists() {
-            return Ok(sibling.to_string_lossy().into_owned());
-        }
-    }
-    Err(
-        "scrybe-mcp-server not found on PATH. Install with: pip install scrybe-mcp-server"
-            .to_string(),
-    )
-}
-
 // ─── Debug tools ─────────────────────────────────────────────────────────────
 
 /// Return the directory to open on startup.
@@ -496,263 +381,6 @@ fn toggle_devtools(window: tauri::WebviewWindow) {
     }
     #[cfg(not(debug_assertions))]
     let _ = window;
-}
-
-// ─── P4.6 — Python plugin loader ────────────────────────────────────────────
-
-/// Enumerate Python plugin files found in `~/.config/scrybe/plugins/`.
-///
-/// Returns a JSON array of objects with `name`, `path`, and `enabled` fields.
-/// Returns an empty array if the directory does not exist or cannot be read.
-#[tauri::command]
-fn list_plugins() -> Vec<serde_json::Value> {
-    let plugin_dir = dirs::config_dir()
-        .map(|d| d.join("scrybe").join("plugins"))
-        .filter(|p| p.exists());
-
-    match plugin_dir {
-        None => vec![],
-        Some(dir) => {
-            let Ok(entries) = std::fs::read_dir(&dir) else {
-                return vec![];
-            };
-            entries
-                .flatten()
-                .filter(|e| e.path().extension().and_then(|x| x.to_str()) == Some("py"))
-                .map(|e| {
-                    let name = e.file_name().to_string_lossy().into_owned();
-                    let path = e.path().to_string_lossy().into_owned();
-                    serde_json::json!({ "name": name, "path": path, "enabled": true })
-                })
-                .collect()
-        }
-    }
-}
-
-/// Invoke a Python plugin script with `source` on stdin.
-///
-/// The plugin must read from stdin and write modified content to stdout.
-/// A non-zero exit code is surfaced as an `Err`.
-#[tauri::command]
-fn run_plugin(path: String, source: String) -> Result<String, String> {
-    use std::io::Write as PluginWrite;
-
-    let python = which_python()?;
-    let mut child = Command::new(&python)
-        .arg(&path)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|e| format!("failed to spawn plugin {path}: {e}"))?;
-
-    if let Some(mut stdin) = child.stdin.take() {
-        let _ = writeln!(stdin, "{source}");
-    }
-
-    let output = child
-        .wait_with_output()
-        .map_err(|e| format!("plugin {path} failed: {e}"))?;
-
-    if output.status.success() {
-        Ok(String::from_utf8_lossy(&output.stdout).into_owned())
-    } else {
-        Err(String::from_utf8_lossy(&output.stderr).into_owned())
-    }
-}
-
-/// Locate a Python interpreter on the system PATH.
-fn which_python() -> Result<String, String> {
-    for candidate in &["python3", "python"] {
-        if let Ok(output) = Command::new("which").arg(candidate).output() {
-            if output.status.success() {
-                return Ok(String::from_utf8_lossy(&output.stdout).trim().to_string());
-            }
-        }
-    }
-    Err("python3 not found on PATH".to_string())
-}
-
-// ─── P4.11 — Terminal panel IPC ─────────────────────────────────────────────
-
-/// Spawn the user's default shell and store it in the global [`SHELL`] state.
-///
-/// Subsequent calls replace the previous child (the old process is abandoned;
-/// a graceful kill is a follow-up concern).  The shell's stdin/stdout/stderr
-/// are piped so the process doesn't inherit the Tauri host's file descriptors.
-/// Full bidirectional I/O multiplexing (PTY) is deferred to a follow-up node.
-#[tauri::command]
-fn terminal_start() -> Result<(), String> {
-    let shell = if cfg!(windows) {
-        "cmd".to_string()
-    } else {
-        std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string())
-    };
-    let child = Command::new(&shell)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|e| format!("failed to start shell {shell}: {e}"))?;
-    SHELL.lock().unwrap().child = Some(child);
-    Ok(())
-}
-
-/// Write `data` to the running shell's stdin.
-///
-/// This is a P4.11 scaffold — the write path works but reading back async
-/// output is not yet wired (requires a spawned reader thread or async runtime
-/// integration).  Real interactive PTY output will be addressed in the
-/// follow-up node that adds `tauri::async_runtime` + event emission.
-#[tauri::command]
-fn terminal_write(data: String) -> Result<(), String> {
-    use std::io::Write as _;
-    let mut guard = SHELL.lock().unwrap();
-    if let Some(child) = guard.child.as_mut() {
-        if let Some(stdin) = child.stdin.as_mut() {
-            stdin
-                .write_all(data.as_bytes())
-                .map_err(|e| format!("write to shell stdin failed: {e}"))?;
-        }
-    }
-    Ok(())
-}
-
-/// Run a one-shot command in a fresh subshell and return its combined output.
-///
-/// This is what the xterm.js frontend calls for each Enter-terminated command
-/// entered by the user.  The shell from [`terminal_start`] is not used here —
-/// each call spawns a fresh `$SHELL -c <cmd>` so the result is synchronous and
-/// easy to return as a plain string.  Persistent session state (cd, env changes)
-/// is a follow-up concern.
-#[tauri::command]
-fn terminal_run(cmd: String) -> Result<String, String> {
-    let shell = if cfg!(windows) {
-        "cmd".to_string()
-    } else {
-        std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string())
-    };
-    let flag = if cfg!(windows) { "/C" } else { "-c" };
-    let output = Command::new(&shell)
-        .arg(flag)
-        .arg(&cmd)
-        .current_dir(std::env::current_dir().unwrap_or_default())
-        .output()
-        .map_err(|e| e.to_string())?;
-    let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
-    let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
-    Ok(if stderr.is_empty() {
-        stdout
-    } else {
-        format!("{stdout}{stderr}")
-    })
-}
-
-// ─── P4.8 — VCS IPC commands ─────────────────────────────────────────────────
-
-/// Open a git repository at `path` and store it for subsequent VCS commands.
-///
-/// Returns a JSON object with `path`, `head` (SHA or null), and `branch` (name
-/// or null when HEAD is detached).  Subsequent calls replace the cached repo.
-#[tauri::command]
-fn vcs_open(path: String) -> Result<serde_json::Value, String> {
-    let repo = ScrybeRepo::open(std::path::Path::new(&path)).map_err(|e| e.to_string())?;
-    let head = repo.head_sha().unwrap_or(None);
-    let branch = repo.current_branch().unwrap_or(None);
-    VCS.lock().unwrap().repo = Some(repo);
-    Ok(serde_json::json!({ "path": path, "head": head, "branch": branch }))
-}
-
-/// Returns the git status of the open repository as a JSON array.
-///
-/// Each element has `path` (relative) and `status` (debug string of
-/// [`scrybe_vcs::FileStatus`]).
-#[tauri::command]
-fn vcs_status() -> Result<Vec<serde_json::Value>, String> {
-    let guard = VCS.lock().unwrap();
-    let repo = guard.repo.as_ref().ok_or("no repository open")?;
-    let entries = repo.status().map_err(|e| e.to_string())?;
-    Ok(entries
-        .iter()
-        .map(|e| {
-            serde_json::json!({
-                "path": e.path.to_string_lossy(),
-                "status": format!("{:?}", e.status),
-            })
-        })
-        .collect())
-}
-
-/// Stage all working-tree changes (equivalent to `git add -A`).
-#[tauri::command]
-fn vcs_stage_all() -> Result<(), String> {
-    let guard = VCS.lock().unwrap();
-    let repo = guard.repo.as_ref().ok_or("no repository open")?;
-    repo.stage_all().map_err(|e| e.to_string())
-}
-
-/// Create a commit from the current index. Returns the new commit SHA.
-#[tauri::command]
-fn vcs_commit(
-    message: String,
-    author_name: String,
-    author_email: String,
-) -> Result<String, String> {
-    let guard = VCS.lock().unwrap();
-    let repo = guard.repo.as_ref().ok_or("no repository open")?;
-    let author = GitAuthor {
-        name: author_name,
-        email: author_email,
-    };
-    repo.commit(&message, &author).map_err(|e| e.to_string())
-}
-
-/// Fetch from the named remote (no checkout or merge).
-#[tauri::command]
-fn vcs_fetch(remote: String) -> Result<(), String> {
-    let guard = VCS.lock().unwrap();
-    let repo = guard.repo.as_ref().ok_or("no repository open")?;
-    repo.fetch(&remote).map_err(|e| e.to_string())
-}
-
-/// Return the most recent `max` commits starting from HEAD.
-///
-/// Each element has `sha` (8 chars), `message` (first line), and `author`.
-#[tauri::command]
-fn vcs_log(max: usize) -> Result<Vec<serde_json::Value>, String> {
-    let guard = VCS.lock().unwrap();
-    let repo = guard.repo.as_ref().ok_or("no repository open")?;
-    let commits = repo.log(max).map_err(|e| e.to_string())?;
-    Ok(commits
-        .iter()
-        .map(|c| {
-            serde_json::json!({
-                "sha": &c.sha[..8.min(c.sha.len())],
-                "message": c.message.lines().next().unwrap_or(""),
-                "author": &c.author_name,
-            })
-        })
-        .collect())
-}
-
-/// Return the configured remotes with their names, URLs, and roles assigned
-/// by the default [`scrybe_vcs::RemoteRolePolicy`] (conventional remote
-/// names: `origin` / `mirror` / `backup`; anything else is `Other`).
-#[tauri::command]
-fn vcs_remotes() -> Result<Vec<serde_json::Value>, String> {
-    let guard = VCS.lock().unwrap();
-    let repo = guard.repo.as_ref().ok_or("no repository open")?;
-    let remotes = repo.remotes().map_err(|e| e.to_string())?;
-    Ok(remotes
-        .iter()
-        .map(|r| {
-            serde_json::json!({
-                "name": r.name,
-                "url": r.url,
-                "role": format!("{:?}", r.role),
-            })
-        })
-        .collect())
 }
 
 /// Register a file path with the OS file watcher.
@@ -982,23 +610,23 @@ pub fn run() {
             clear_buffer,
             read_buffer_if_exists,
             remove_backup,
-            get_builtin_agents,
-            set_agent_enabled,
-            list_plugins,
-            run_plugin,
-            terminal_start,
-            terminal_write,
-            terminal_run,
-            mcp_server_start,
-            mcp_server_status,
-            mcp_connection_info,
-            vcs_open,
-            vcs_status,
-            vcs_stage_all,
-            vcs_commit,
-            vcs_fetch,
-            vcs_log,
-            vcs_remotes,
+            plugins::get_builtin_agents,
+            plugins::set_agent_enabled,
+            plugins::list_plugins,
+            plugins::run_plugin,
+            terminal::terminal_start,
+            terminal::terminal_write,
+            terminal::terminal_run,
+            mcp::mcp_server_start,
+            mcp::mcp_server_status,
+            mcp::mcp_connection_info,
+            vcs::vcs_open,
+            vcs::vcs_status,
+            vcs::vcs_stage_all,
+            vcs::vcs_commit,
+            vcs::vcs_fetch,
+            vcs::vcs_log,
+            vcs::vcs_remotes,
             toggle_devtools,
             get_initial_directory,
             get_initial_file,
@@ -1094,219 +722,4 @@ pub fn run() {
 }
 
 #[cfg(test)]
-mod tests {
-    //! Unit tests for the sidecar autosave buffer commands.
-    //!
-    //! These exercise the file-level contract — the Tauri IPC layer is a
-    //! thin wrapper around the underlying functions, so direct calls are
-    //! sufficient. All tests use `tempfile::tempdir` to avoid touching
-    //! real user files.
-    use super::*;
-
-    #[test]
-    fn navigation_guard_allows_only_scrybe_frontend_origins() {
-        for trusted in [
-            "tauri://localhost/",
-            "tauri://localhost/#section",
-            "http://tauri.localhost/",
-        ] {
-            let url = tauri::Url::parse(trusted).unwrap();
-            assert!(is_trusted_app_navigation(&url), "should allow {trusted}");
-        }
-
-        for remote in [
-            "https://login.microsoftonline.com/",
-            "https://tauri.localhost.example.com/",
-            "https://tauri.localhost/",
-            "http://tauri.localhost:8080/",
-            "tauri://remote-host/",
-            "file:///tmp/replacement.html",
-            "data:text/html,replacement",
-            "javascript:document.body.textContent='replacement'",
-            "about:blank",
-        ] {
-            let url = tauri::Url::parse(remote).unwrap();
-            assert!(!is_trusted_app_navigation(&url), "should reject {remote}");
-        }
-    }
-
-    #[test]
-    fn navigation_guard_limits_the_debug_vite_origin() {
-        for remote in [
-            "http://localhost:5174/",
-            "https://localhost:5173/",
-            "http://127.0.0.1:5173/",
-            "http://127.0.0.1:5174/",
-        ] {
-            let url = tauri::Url::parse(remote).unwrap();
-            assert!(!is_trusted_app_navigation(&url), "should reject {remote}");
-        }
-
-        let vite = tauri::Url::parse("http://localhost:5173/").unwrap();
-        assert_eq!(is_trusted_app_navigation(&vite), cfg!(debug_assertions));
-    }
-
-    #[test]
-    fn navigation_guard_debug_vite_origin_matches_tauri_configuration() {
-        let config: serde_json::Value =
-            serde_json::from_str(include_str!("../tauri.conf.json")).unwrap();
-        let configured = config["build"]["devUrl"].as_str().unwrap();
-        assert_eq!(configured, DEBUG_FRONTEND_ORIGIN);
-
-        let url = tauri::Url::parse(configured).unwrap();
-        assert_eq!(
-            is_trusted_app_navigation(&url),
-            cfg!(debug_assertions),
-            "the configured Vite origin must be the debug exception"
-        );
-    }
-
-    fn temp_file(name: &str, content: &str) -> (tempfile::TempDir, String) {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let path = dir.path().join(name);
-        std::fs::write(&path, content).expect("seed write");
-        let s = path.to_string_lossy().into_owned();
-        (dir, s)
-    }
-
-    #[test]
-    fn save_buffer_writes_sidecar_not_real_file() {
-        let (_dir, path) = temp_file("doc.md", "original on disk");
-        save_buffer(path.clone(), "in-progress edits".into()).unwrap();
-
-        // Real file must be untouched
-        assert_eq!(std::fs::read_to_string(&path).unwrap(), "original on disk");
-        // Sidecar must hold the buffer
-        let bp = buffer_path_for(&path);
-        assert_eq!(std::fs::read_to_string(&bp).unwrap(), "in-progress edits");
-    }
-
-    #[test]
-    fn save_file_clears_sidecar() {
-        let (_dir, path) = temp_file("doc.md", "v1");
-        save_buffer(path.clone(), "v2-buffered".into()).unwrap();
-        assert!(buffer_path_for(&path).exists());
-
-        save_file(path.clone(), "v2-committed".into()).unwrap();
-
-        // Real file got the committed bytes; sidecar is gone.
-        assert_eq!(std::fs::read_to_string(&path).unwrap(), "v2-committed");
-        assert!(!buffer_path_for(&path).exists());
-    }
-
-    #[test]
-    fn clear_buffer_removes_sidecar_when_present() {
-        let (_dir, path) = temp_file("doc.md", "v1");
-        save_buffer(path.clone(), "drafted".into()).unwrap();
-        assert!(buffer_path_for(&path).exists());
-
-        clear_buffer(path.clone()).unwrap();
-        assert!(!buffer_path_for(&path).exists());
-    }
-
-    #[test]
-    fn clear_buffer_is_silent_noop_when_missing() {
-        let (_dir, path) = temp_file("doc.md", "v1");
-        // No sidecar yet — must not error.
-        clear_buffer(path).unwrap();
-    }
-
-    #[test]
-    fn read_buffer_returns_none_when_no_sidecar() {
-        let (_dir, path) = temp_file("doc.md", "v1");
-        assert_eq!(read_buffer_if_exists(path).unwrap(), None);
-    }
-
-    #[test]
-    fn read_buffer_returns_none_when_sidecar_matches_disk() {
-        let (_dir, path) = temp_file("doc.md", "same content");
-        save_buffer(path.clone(), "same content".into()).unwrap();
-        // Sidecar exists but matches disk — no recovery needed.
-        assert_eq!(read_buffer_if_exists(path).unwrap(), None);
-    }
-
-    #[test]
-    fn read_buffer_returns_content_when_sidecar_differs() {
-        let (_dir, path) = temp_file("doc.md", "v1");
-        save_buffer(path.clone(), "unsaved v2".into()).unwrap();
-        assert_eq!(
-            read_buffer_if_exists(path).unwrap(),
-            Some("unsaved v2".into())
-        );
-    }
-
-    #[test]
-    fn read_buffer_returns_none_for_empty_sidecar() {
-        let (_dir, path) = temp_file("doc.md", "v1");
-        save_buffer(path.clone(), "".into()).unwrap();
-        // Empty sidecar — discard rather than offer to restore-to-nothing.
-        assert_eq!(read_buffer_if_exists(path).unwrap(), None);
-    }
-
-    #[test]
-    fn remove_backup_clears_both_backup_and_sidecar() {
-        let (_dir, path) = temp_file("doc.md", "v1");
-        save_buffer(path.clone(), "drafted".into()).unwrap();
-        // Trigger the ~ backup via save_file
-        save_file(path.clone(), "v2".into()).unwrap();
-        // save_file clears the sidecar, so re-create one to test cleanup
-        save_buffer(path.clone(), "drafted again".into()).unwrap();
-
-        let bak = std::path::PathBuf::from(format!("{path}~"));
-        let bp = buffer_path_for(&path);
-        assert!(bak.exists());
-        assert!(bp.exists());
-
-        remove_backup(path).unwrap();
-
-        assert!(!bak.exists());
-        assert!(!bp.exists());
-    }
-
-    #[test]
-    fn docx_binary_name_is_platform_specific() {
-        let name = executable_name("scrybe-docx");
-        if cfg!(windows) {
-            assert_eq!(name, "scrybe-docx.exe");
-        } else {
-            assert_eq!(name, "scrybe-docx");
-        }
-    }
-
-    #[test]
-    fn existing_file_returns_candidate_path() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let path = dir.path().join(executable_name("scrybe-docx"));
-        std::fs::write(&path, "#!/bin/sh\n").expect("seed exporter");
-
-        assert_eq!(
-            existing_file(path.clone()),
-            Some(path.to_string_lossy().into_owned())
-        );
-    }
-
-    #[test]
-    fn shell_command_report_decodes_from_bundled_cli_json() {
-        let stdout = br#"{
-          "outcome":"repaired",
-          "command_path":"/Users/test/.local/bin/scrybe",
-          "target_path":"/Applications/Scrybe.app/Contents/MacOS/scrybe",
-          "path_winner":null,
-          "other_installations":[],
-          "app_bundles":["/Applications/Scrybe.app"],
-          "warnings":[],
-          "message":"Repaired the scrybe command"
-        }"#;
-        let report = decode_shell_command_report(true, stdout, b"").unwrap();
-        assert_eq!(report.outcome, "repaired");
-        assert_eq!(report.warnings, Vec::<String>::new());
-    }
-
-    #[test]
-    fn shell_command_failure_preserves_cli_explanation() {
-        let error =
-            decode_shell_command_report(false, b"", b"refusing to overwrite existing non-symlink")
-                .unwrap_err();
-        assert_eq!(error, "refusing to overwrite existing non-symlink");
-    }
-}
+mod tests;
